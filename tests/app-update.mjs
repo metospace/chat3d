@@ -1,3 +1,4 @@
+import {installBrowserGlobals} from './jsdom-env.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {mkdtemp, mkdir, rm, writeFile} from 'node:fs/promises';

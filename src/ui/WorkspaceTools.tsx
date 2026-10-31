@@ -6,7 +6,7 @@ import {exportWorkspaceBackup,importWorkspaceBackup} from '../workspace';
 export function WorkspaceTools({onClose}:{onClose:()=>void}){
  const [notice,setNotice]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false);const input=useRef<HTMLInputElement>(null);const busyRef=useRef(false);
  async function run(action:()=>Promise<void>){if(busyRef.current)return;busyRef.current=true;setBusy(true);setNotice('');setError('');try{await action();}catch(e){setError(e instanceof Error?e.message:String(e));}finally{busyRef.current=false;setBusy(false);}}
- return <Modal open onCancel={()=>{if(!busyRef.current)onClose();}} footer={null} closable={false} width={640} title="备份与恢复" className="backup-dialog" maskClosable={!busy} keyboard={!busy}>
+ return <Modal open onCancel={()=>{if(!busyRef.current)onClose();}} footer={null} closable={false} width={640} title={<h2 className="backup-title">备份与恢复</h2>} className="backup-dialog" mask={{closable:!busy}} keyboard={!busy}>
   <Button type="text" className="backup-close" aria-label="关闭备份与恢复" disabled={busy} icon={<Cross1Icon/>} onClick={onClose}/>
   <p className="backup-lede">保存一份副本，或将已有备份恢复为新项目。</p>
   <div className="backup-actions"><section><span className="settings-icon"><DownloadIcon/></span><h3>导出项目</h3><p>保存所有未删除项目、动画、对话和草稿。</p><Button disabled={busy} onClick={()=>void run(async()=>{setNotice(await downloadJson(exportWorkspaceBackup(),'workspace'));})}>下载工作台备份</Button></section><section><span className="settings-icon"><UploadIcon/></span><h3>从备份恢复</h3><p>新增项目，不覆盖当前已有内容。</p><Button disabled={busy} onClick={()=>input.current?.click()}>导入备份为新会话</Button></section></div>
