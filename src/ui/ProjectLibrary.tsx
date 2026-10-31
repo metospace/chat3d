@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {Button,Input,Tag} from 'antd';
-import {Dialog} from '@radix-ui/themes';
+import {PortalDialog} from './kit/PortalDialog';
 import {CubeIcon,LayersIcon,PlusIcon,MagnifyingGlassIcon,GridIcon,RowsIcon,Cross1Icon,UploadIcon,ChevronDownIcon} from '@radix-ui/react-icons';
 import {createSession,switchSession,useWorkspaceStore,editLibrarySessionMetadata,moveLibrarySessionsToCategory,syncAssetCatalogMetadata,type WorkspaceSession} from '../workspace';
 import {assetDocument,type ModelAssetSummary} from '../domain/modelAssets';
@@ -134,7 +134,7 @@ export function ProjectLibrary({kind,onOpen,onManage}:{kind:'asset'|'scene';onOp
   {manageCategories&&<CategoryManager kind={kind} encountered={categories.map(category=>category.value)} values={categoryValues} onClose={()=>setManageCategories(false)}/>}
   {editingAsset&&<LibraryMetadataDialog kind="asset" initial={{name:editingAsset.name,category:editingAsset.category,description:editingAsset.description}} title="编辑资产信息" submitLabel="保存信息" onClose={()=>setEditingAsset(undefined)} onSubmit={async metadata=>{assertLibraryReady();const updated=await updateModelAssetMetadata(editingAsset.id,metadata,editingAsset);await syncAssetCatalogMetadata(updated);if(alive.current)setItems(rows=>rows.map(row=>row.id===updated.id?updated:row));}}/>}
   {editingProject&&<LibraryMetadataDialog kind={kind} initial={{name:editingProject.title,category:projectCategory(editingProject),description:editingProject.libraryDescription}} title={kind==='asset'?'编辑草稿信息':'编辑场景信息'} submitLabel="保存信息" onClose={()=>setEditingProject(undefined)} onSubmit={metadata=>{assertLibraryReady();return editLibrarySessionMetadata(editingProject.id,metadata,editingProject.libraryMetadataRevision??0);}}/>}
-  {teamLogin&&<Dialog.Root open onOpenChange={open=>{if(!open)setTeamLogin(false);}}><Dialog.Content maxWidth="480px"><Dialog.Title>检查团队关联更新</Dialog.Title><Dialog.Description>登录关联对应的团队服务后手动检查；不会上传或覆盖本地内容。</Dialog.Description><TeamSessionLogin onConnected={()=>{setTeamLogin(false);void checkTeamUpdates();}}/><Button onClick={()=>setTeamLogin(false)}>取消</Button></Dialog.Content></Dialog.Root>}
+  {teamLogin&&<PortalDialog label="检查团队关联更新" onClose={()=>setTeamLogin(false)}><h2 className="app-modal-title">检查团队关联更新</h2><p className="app-modal-description">登录关联对应的团队服务后手动检查；不会上传或覆盖本地内容。</p><TeamSessionLogin onConnected={()=>{setTeamLogin(false);void checkTeamUpdates();}}/><div className="app-modal-actions"><Button onClick={()=>setTeamLogin(false)}>取消</Button></div></PortalDialog>}
   {acquireTarget&&<TeamTransferDialog kind={kind} mode="acquire" items={[acquireTarget.item]} serviceOrigin={acquireTarget.serviceOrigin} onClose={()=>setAcquireTarget(undefined)} onCompleted={()=>void completedTransfer()}/>}
   {publishSources&&<TeamTransferDialog kind={kind} mode="publish" sources={publishSources} onClose={()=>setPublishSources(undefined)} onCompleted={()=>void completedTransfer()}/>}
  </StudioPage>;
