@@ -11,4 +11,9 @@ export function installBrowserGlobals(dom){
   const mediaQuery=()=>({matches:false,media:'',onchange:null,addListener(){},removeListener(){},addEventListener(){},removeEventListener(){},dispatchEvent(){return false}});
   const matchMedia=dom.window.matchMedia??mediaQuery;
   globalThis.matchMedia=matchMedia;dom.window.matchMedia=matchMedia;
+  // rc-trigger / rc-resize-observer require these observers; jsdom ships neither. They are used
+  // both with and without `new`, so the shim accepts either call style.
+  const observer=function(){const self=this instanceof observer?this:Object.create(observer.prototype);self.observe=()=>{};self.unobserve=()=>{};self.disconnect=()=>{};self.takeRecords=()=>[];return self;};
+  if(!globalThis.ResizeObserver){globalThis.ResizeObserver=observer;dom.window.ResizeObserver=observer;}
+  if(!globalThis.IntersectionObserver){globalThis.IntersectionObserver=observer;dom.window.IntersectionObserver=observer;}
 }
