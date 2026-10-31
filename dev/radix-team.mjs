@@ -1,0 +1,12 @@
+import {chromium} from 'playwright-core';
+import {browserPath} from '../e2e/config.mjs';
+const base=process.argv[2]??'http://localhost:1420';
+const browser=await chromium.launch({executablePath:browserPath(),headless:true});
+const page=await browser.newPage({viewport:{width:1440,height:900}});
+await page.goto(base,{waitUntil:'networkidle'});
+await page.waitForTimeout(500);
+await page.getByRole('button',{name:'团队库',exact:true}).click();
+await page.waitForTimeout(1500);
+const nodes=await page.evaluate(()=>[...document.querySelectorAll('[class*="rt-BaseButton"],[class*="rt-TextField"],[class*="rt-Badge"]')].map(e=>({cls:(e.className||'').split(' ').filter(c=>c.startsWith('rt-')).join(' '),text:(e.textContent||'').trim().slice(0,26)})));
+console.log(JSON.stringify(nodes,null,1));
+await browser.close();
