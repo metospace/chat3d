@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import {createServer} from 'vite';
+import {installBrowserGlobals} from './jsdom-env.mjs';
 import {JSDOM} from 'jsdom';
 import {Scene,PerspectiveCamera,Mesh,BoxGeometry,MeshBasicMaterial,Vector3} from 'three';
-const dom=new JSDOM('<!doctype html><canvas></canvas>',{url:'https://test.invalid'});globalThis.window=dom.window;globalThis.document=dom.window.document;globalThis.localStorage=dom.window.localStorage;
+const dom=new JSDOM('<!doctype html><canvas></canvas>',{url:'https://test.invalid'});installBrowserGlobals(dom);globalThis.window=dom.window;globalThis.document=dom.window.document;globalThis.localStorage=dom.window.localStorage;
 const server=await createServer({server:{middlewareMode:true},appType:'custom'});let total=0;const test=(name,run)=>{run();console.log('PASS '+name);total++};
 try{
  const m=await server.ssrLoadModule('/src/domain/manualComposition.ts'),{createModelAsset}=await server.ssrLoadModule('/src/domain/modelAssets.ts'),{applyBatch}=await server.ssrLoadModule('/src/domain/commands.ts'),{createInitialDoc,createEditorStore}=await server.ssrLoadModule('/src/store.ts'),{assemblyBounds}=await server.ssrLoadModule('/src/domain/assemblyEditing.ts');

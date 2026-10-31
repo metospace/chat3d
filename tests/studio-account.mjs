@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import {JSDOM} from 'jsdom';
 import {createServer} from 'vite';
+import {installBrowserGlobals} from './jsdom-env.mjs';
 
-const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'https://example.test'});
+const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'https://example.test'});installBrowserGlobals(dom);
 for(const name of ['window','document','HTMLElement','HTMLInputElement','HTMLButtonElement','Element','CustomEvent','Node','NodeFilter','MutationObserver','Event','MouseEvent','localStorage','DocumentFragment','SVGElement'])Object.defineProperty(globalThis,name,{value:dom.window[name],configurable:true});
 Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;

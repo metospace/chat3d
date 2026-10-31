@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {JSDOM} from 'jsdom';
+import {installBrowserGlobals} from './jsdom-env.mjs';
 const css=readFileSync('src/thumbnail-layout.css','utf8');
-const dom=new JSDOM(`<style>${css}</style><div class="canvas-studio frosted-studio manager-mode"><div class="home-project-link"><img></div><div class="resource-tile"><img></div><div class="resource-layout-grid"><div class="resource-tile"><img><div class="resource-no-thumb"></div></div></div><div class="resource-project-grid"><div class="resource-row"><img></div></div><div class="home-featured-open"><img></div><div class="home-featured-choices"><button><img></button></div><div class="resource-detail"><img></div><div class="resource-layout-list"><div class="resource-tile"><img></div></div><div class="canvas-asset-item"><img></div></div>`);
+const dom=new JSDOM(`<style>${css}</style><div class="canvas-studio frosted-studio manager-mode"><div class="home-project-link"><img></div><div class="resource-tile"><img></div><div class="resource-layout-grid"><div class="resource-tile"><img><div class="resource-no-thumb"></div></div></div><div class="resource-project-grid"><div class="resource-row"><img></div></div><div class="home-featured-open"><img></div><div class="home-featured-choices"><button><img></button></div><div class="resource-detail"><img></div><div class="resource-layout-list"><div class="resource-tile"><img></div></div><div class="canvas-asset-item"><img></div></div>`);installBrowserGlobals(dom);
 try {
  const style=e=>dom.window.getComputedStyle(e);
  for(const selector of ['.home-project-link img','.resource-tile img','.resource-project-grid img','.home-featured-open img','.home-featured-choices img','.resource-detail img']){

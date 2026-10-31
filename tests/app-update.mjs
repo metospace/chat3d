@@ -160,7 +160,7 @@ console.log('PASS version endpoint, manifest validation and updater config');
 import React from 'react';
 import {JSDOM} from 'jsdom';
 import {createServer as createVite} from 'vite';
-const dom = new JSDOM('<!doctype html><html><body></body></html>', {url: 'https://example.test/'});
+const dom = new JSDOM('<!doctype html><html><body></body></html>', {url: 'https://example.test/'});installBrowserGlobals(dom);
 for (const name of ['window', 'document', 'HTMLElement', 'Node', 'MutationObserver', 'Event', 'MouseEvent', 'localStorage', 'sessionStorage', 'Element', 'CustomEvent', 'DocumentFragment', 'NodeFilter', 'HTMLInputElement']) Object.defineProperty(globalThis, name, {value: dom.window[name], configurable: true});
 Object.defineProperty(globalThis, 'navigator', {value: dom.window.navigator, configurable: true});
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;

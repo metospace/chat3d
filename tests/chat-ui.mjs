@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import React from 'react';
 import { createServer } from 'vite';
-const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'https://example.test'});
+const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'https://example.test'});installBrowserGlobals(dom);
 for(const name of ['window','document','HTMLElement','Node','MutationObserver','Event','MouseEvent','localStorage','location','Element','CustomEvent','HTMLInputElement','NodeFilter','DocumentFragment','FileReader']) Object.defineProperty(globalThis,name,{value:dom.window[name],configurable:true});
 // antd and Ant Design X reach DOM constructors that jsdom only exposes on the window (SVGElement,
 // HTMLTextAreaElement, ...) and need matchMedia for their responsive observers.
