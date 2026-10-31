@@ -214,3 +214,24 @@
 .studio-inset-card{padding:16px;border:1px solid var(--sc-border-subtle,#dce4e4);border-radius:10px;background:var(--sc-surface-elevated,#fdfefe);box-shadow:none}
 .studio-section-count.ant-tag{margin:0 0 0 6px;padding:0 6px;border:1px solid var(--sc-border-subtle,#dce4e4);border-radius:5px;background:var(--sc-surface-muted,#eaf0f0);color:var(--sc-ink-muted,#526869);font-size:10px;line-height:16px}
 
+
+/* ---- session sidebar ---------------------------------------------------- */
+.sidebar-close.ant-btn{width:26px;height:26px;padding:0;border:0;border-radius:7px;color:var(--sc-ink-muted,#526869);background:transparent}
+.sidebar-close.ant-btn:hover{background:var(--sc-surface-muted,#eaf0f0);color:var(--sc-ink,#203334)}
+.session-controls .ant-btn{height:34px;border-radius:9px;font-size:12px}
+.session-controls .ant-input-affix-wrapper{height:32px;border-radius:9px;font-size:12px}
+.session-controls .ant-input-affix-wrapper .ant-input-prefix svg{width:13px;height:13px;color:var(--sc-ink-muted,#526869)}
+.session-filters .ant-btn{height:26px;padding:0 9px;border:0;border-radius:7px;font-size:11px;color:var(--sc-ink-muted,#526869);background:transparent;box-shadow:none}
+.session-filters .ant-btn[aria-pressed="true"]{background:var(--sc-surface-muted,#eaf0f0);color:var(--sc-ink,#203334);font-weight:600}
+.session-row-action.ant-btn{width:24px;height:24px;min-width:24px;padding:0;border:0;border-radius:7px;color:var(--sc-ink-muted,#526869);background:transparent}
+.session-row-action.ant-btn:hover{background:var(--sc-surface-muted,#eaf0f0);color:var(--sc-ink,#203334)}
+.session-row-menu.ant-dropdown-menu{min-width:170px;border-radius:12px;padding:5px}
+.session-row-menu .ant-dropdown-menu-item{font-size:12px;border-radius:8px}
+.session-footer .ant-btn{height:28px;padding:0 8px;border:0;border-radius:8px;font-size:11px;color:var(--sc-ink-muted,#526869);background:transparent;box-shadow:none}
+.session-footer .ant-btn:hover{background:var(--sc-surface-muted,#eaf0f0)}
+.session-dialog .ant-modal-content{padding:20px 22px}
+.session-dialog-title{margin:0 0 6px;font-size:16px;font-weight:600;letter-spacing:-.2px}
+.session-dialog-lede{margin:0 0 14px;font-size:12px;line-height:1.7;color:var(--sc-ink-muted,#526869)}
+.session-dialog .ant-input{height:32px;border-radius:9px;font-size:12px}
+.session-dialog .dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.session-dialog .dialog-actions .ant-btn{height:32px;border-radius:9px;font-size:12px}
