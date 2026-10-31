@@ -1,4 +1,5 @@
 import type {ComponentProps, ReactNode} from 'react';
+import {ConfigProvider} from 'antd';
 
 export function StudioPage({
   children,
@@ -6,8 +7,10 @@ export function StudioPage({
   ...rest
 }: ComponentProps<'main'> & {children: ReactNode}) {
   return (
-    <main className={['studio-page', className].filter(Boolean).join(' ')} {...rest}>
-      {children}
-    </main>
+    <ConfigProvider button={{autoInsertSpace: false}}>
+      <main className={['studio-page', className].filter(Boolean).join(' ')} {...rest}>
+        {children}
+      </main>
+    </ConfigProvider>
   );
 }
