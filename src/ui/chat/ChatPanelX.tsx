@@ -16,7 +16,7 @@ import {MessageText} from '../MessageText';
 import {ResultMessage} from '../ResultMessage';
 import {ModelPicker} from '../ModelPicker';
 import {QualityPicker} from '../QualityPicker';
-import {AdxChatTheme} from './adxTheme';
+import {AppTheme} from '../theme/AppTheme';
 import {RunTrace} from './RunTrace';
 import './adx-chat.css';
 
@@ -65,7 +65,7 @@ const SendIcon=<ArrowUpIcon/>;
 export type ChatPanelProps={autoStartRequest?:{id:string;projectId:string}|null;onAutoStartConsumed?:(id:string)=>void;executionDetails?:boolean;onConfigure?:()=>void;onAssets?:()=>void;canvasMode?:boolean;expanded?:boolean;onExpand?:()=>void};
 
 export function ChatPanelX(props:ChatPanelProps){
-  return <AdxChatTheme><ChatSurface {...props}/></AdxChatTheme>;
+  return <AppTheme><ChatSurface {...props}/></AppTheme>;
 }
 
 function ChatSurface({onConfigure,onAssets,canvasMode=false,expanded=true,onExpand,autoStartRequest,onAutoStartConsumed}:ChatPanelProps){
