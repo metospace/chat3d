@@ -1,5 +1,4 @@
 import type {ReactNode,HTMLAttributes} from 'react';
-import {Card} from '@radix-ui/themes';
 
 type StudioPanelProps = HTMLAttributes<HTMLElement> & {
   children: ReactNode;
@@ -15,5 +14,5 @@ export function StudioPanel({children,as='section',variant='default',className='
 }
 
 export function StudioInsetCard({children,className='',...rest}:HTMLAttributes<HTMLDivElement>&{children:ReactNode}){
-  return <Card className={['studio-inset-card',className].filter(Boolean).join(' ')} {...rest}>{children}</Card>;
+  return <div className={['studio-inset-card',className].filter(Boolean).join(' ')} {...rest}>{children}</div>;
 }

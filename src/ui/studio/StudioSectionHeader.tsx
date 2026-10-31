@@ -1,5 +1,5 @@
 import type {ReactNode} from 'react';
-import {Badge} from '@radix-ui/themes';
+import {Tag} from 'antd';
 
 export function StudioSectionHeader({
   id,
@@ -20,9 +20,9 @@ export function StudioSectionHeader({
       <Heading id={id} className="studio-section-title">
         {title}
         {count !== undefined && (
-          <Badge variant="soft" color="gray" radius="medium" className="studio-section-count">
+          <Tag variant="filled" className="studio-section-count">
             {count}
-          </Badge>
+          </Tag>
         )}
       </Heading>
       {actions}
