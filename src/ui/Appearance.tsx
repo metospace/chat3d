@@ -1,5 +1,6 @@
 import {useEffect,useState,type ReactNode} from 'react';
-import {Theme,Select} from '@radix-ui/themes';
+import {Theme} from '@radix-ui/themes';
+import {Select} from 'antd';
 import {Button,Dropdown} from 'antd';
 import {SunIcon,MoonIcon,DesktopIcon} from '@radix-ui/react-icons';
 import {AppTheme} from './theme/AppTheme';
@@ -17,4 +18,4 @@ export function AppearanceProvider({children}:{children:ReactNode}){
  return <AppearanceContext.Provider value={{mode,resolved,setMode,storageError}}><Theme appearance={resolved} accentColor="gray" grayColor="gray" radius="medium" scaling="100%"><AppTheme>{children}</AppTheme></Theme></AppearanceContext.Provider>;
 }
 export function AppearanceMenu(){const {mode,resolved,setMode}=useAppearance();const Icon=mode==='system'?DesktopIcon:resolved==='dark'?MoonIcon:SunIcon;return <Dropdown trigger={['click']} placement="bottomRight" menu={{items:Object.entries(labels).map(([value,label])=>({key:value,label})),selectable:true,selectedKeys:[mode],onClick:({key})=>setMode(parseAppearance(key))}}><Button type="text" className="appearance-menu" aria-label={`切换外观，当前${labels[mode]}`} title={`外观：${labels[mode]}`} icon={<Icon/>}>{labels[mode]}</Button></Dropdown>;}
-export function AppearanceSettings(){const {mode,setMode,storageError}=useAppearance();return <><Select.Root value={mode} onValueChange={v=>setMode(parseAppearance(v))}><Select.Trigger aria-label="应用外观"/><Select.Content>{Object.entries(labels).map(([value,label])=><Select.Item key={value} value={value}>{label}</Select.Item>)}</Select.Content></Select.Root>{storageError&&<p role="status">已切换外观，但浏览器未允许保存偏好；刷新后可能恢复默认。</p>}</>;}
+export function AppearanceSettings(){const {mode,setMode,storageError}=useAppearance();return <><Select aria-label="应用外观" value={mode} onChange={v=>setMode(parseAppearance(v))} options={Object.entries(labels).map(([value,label])=>({value,label}))}/>{storageError&&<p role="status">已切换外观，但浏览器未允许保存偏好；刷新后可能恢复默认。</p>}</>;}
