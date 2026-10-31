@@ -1,5 +1,5 @@
 import {selectionPropertyCommands} from '../domain/selectionProperties';
-import {Button} from '@radix-ui/themes';
+import {Button} from 'antd';
 import {boundsFor} from '../domain/sceneQuality';
 import {focusSceneObjects} from '../scene/focus';
 import {useMemo,useState} from 'react';
@@ -12,7 +12,7 @@ import { useDisplayDoc, useEditorStore } from '../store';
 const geometryNames:Record<string,string>={box:'长方体',sphere:'球体',cylinder:'圆柱体',cone:'圆锥体',plane:'平面',roundedPlate:'圆角板',capsule:'胶囊体',frame:'框架',tube:'空心管',trapezoid:'梯形体'};
 const parameterNames:Record<string,string>={width:'宽度',height:'高度',depth:'深度',length:'长度',radius:'半径',radiusTop:'顶部半径',radiusBottom:'底部半径',outerRadius:'外半径',innerRadius:'内半径',widthTop:'顶部宽度',widthBottom:'底部宽度',thickness:'厚度',bevelRadius:'倒角半径',cornerRadius:'圆角半径',holeRadius:'孔半径',widthSegments:'横向分段数',heightSegments:'纵向分段数',depthSegments:'深度分段数',radialSegments:'圆周分段数'};
 const parameterLabel=(key:string)=>(parameterNames[key]??key)+(key.endsWith('Segments')?'':'（米）');
-function FocusObject({doc,node}:{doc:SceneDocument;node:SceneNode}){const ready=useEditorStore(s=>s.viewportStatus==='ready');return <Button variant="soft" color="gray" size="2" disabled={!ready} title={ready?undefined:'三维未就绪，请使用软件检查的选中近景'} type="button" className="m-3 rounded bg-blue-500/15 px-3 py-2 text-xs text-blue-200" onClick={()=>focusSceneObjects(node.assemblyId?doc.nodes.filter(n=>n.assemblyId===node.assemblyId).map(n=>n.id):[node.id])}>{node.assemblyId?'聚焦当前设备':'聚焦选中对象'}</Button>;}
+function FocusObject({doc,node}:{doc:SceneDocument;node:SceneNode}){const ready=useEditorStore(s=>s.viewportStatus==='ready');return <Button className="prop-focus-btn" disabled={!ready} title={ready?undefined:'三维未就绪，请使用软件检查的选中近景'} onClick={()=>focusSceneObjects(node.assemblyId?doc.nodes.filter(n=>n.assemblyId===node.assemblyId).map(n=>n.id):[node.id])}>{node.assemblyId?'聚焦当前设备':'聚焦选中对象'}</Button>;}
 
 // 属性面板：精确尺寸、位置。空值/非法输入不能提交（方案第 8 节）
 export function PropertiesPanel() {
@@ -21,15 +21,15 @@ export function PropertiesPanel() {
   const applyCommandBatch = useEditorStore((s) => s.applyCommandBatch);
   const status=useEditorStore(s=>s.aiStatus);
   const locked=['capturing','context','generating','validating','applying','previewing'].includes(status);
-  const lockNotice=locked?<p role="status" className="m-3 rounded border border-amber-400/30 p-2 text-xs text-amber-200">{status==='previewing'?'当前是待确认预览。请先在对话区点击“应用修改”，再修改属性；也可以放弃预览。':'模型正在生成，请先等待完成或停止生成，再修改属性。'}</p>:null;
+  const lockNotice=locked?<p role="status" className="prop-notice is-warn">{status==='previewing'?'当前是待确认预览。请先在对话区点击“应用修改”，再修改属性；也可以放弃预览。':'模型正在生成，请先等待完成或停止生成，再修改属性。'}</p>:null;
 
   const node = selection.length > 0 ? doc.nodes.find((n) => n.id === selection[0]) : undefined;
 
   if (!node) {
     return (
-      <div className="properties-panel flex flex-col h-full">
-        <div className="px-3 py-2 text-xs font-bold text-gray-400 border-b border-black/30 tracking-wider">属性</div>
-        <div className="px-3 py-6 text-xs text-gray-500 text-center">点击场景或对象列表中的零件，即可修改颜色、尺寸与位置</div>
+      <div className="properties-panel">
+        <div className="prop-heading">属性</div>
+        <div className="prop-empty">点击场景或对象列表中的零件，即可修改颜色、尺寸与位置</div>
       </div>
     );
   }
@@ -37,11 +37,11 @@ export function PropertiesPanel() {
   if(selection.length>1){
     const ids=new Set(selection);const members=doc.nodes.filter(n=>ids.has(n.id));const assembly=node.assemblyId;
     const same=!!assembly&&members.every(n=>n.assemblyId===assembly)&&members.length===doc.nodes.filter(n=>n.assemblyId===assembly).length;
-    return <div className="properties-panel p-4 text-sm h-full overflow-auto"><h3>{same?node.assemblyName??'组件':'多选对象'}</h3>{lockNotice}{status==='previewing'&&<Button variant="soft" color="gray" size="2" type="button" className="m-3 rounded bg-blue-600 p-2 text-xs" onClick={()=>useEditorStore.getState().confirmPending()}>应用当前草稿并编辑属性</Button>}<FocusObject doc={doc} node={node}/><p className="text-xs text-gray-400 my-3">已选 {members.length} 个零件。外观修改只影响所选范围，可撤销。</p>
-      <fieldset disabled={locked} className="disabled:opacity-50">{same&&<div className="grid grid-cols-2 gap-2">{([['左移 1m',[-1,0,0]],['右移 1m',[1,0,0]],['前移 1m',[0,0,1]],['后移 1m',[0,0,-1]]] as const).map(([title,value])=><Button variant="soft" color="gray" size="2" key={title} className="rounded bg-white/10 p-2 text-xs" onClick={()=>{const r=applyCommandBatch([{op:'translateAssembly',targetId:node.id,value:[...value]}],title);if(!r.ok)window.alert(r.error);}}>{title}</Button>)}</div>}
+    return <div className="properties-panel is-scrollable"><h3 className="prop-title">{same?node.assemblyName??'组件':'多选对象'}</h3>{lockNotice}{status==='previewing'&&<Button type="primary" className="prop-confirm-btn" onClick={()=>useEditorStore.getState().confirmPending()}>应用当前草稿并编辑属性</Button>}<FocusObject doc={doc} node={node}/><p className="prop-hint">已选 {members.length} 个零件。外观修改只影响所选范围，可撤销。</p>
+      <fieldset disabled={locked} className="prop-fieldset">{same&&<div className="prop-grid prop-grid-2">{([['左移 1m',[-1,0,0]],['右移 1m',[1,0,0]],['前移 1m',[0,0,1]],['后移 1m',[0,0,-1]]] as const).map(([title,value])=><Button key={title} className="prop-btn" onClick={()=>{const r=applyCommandBatch([{op:'translateAssembly',targetId:node.id,value:[...value]}],title);if(!r.ok)window.alert(r.error);}}>{title}</Button>)}</div>}
       {same&&<AssemblyTransformEditor nodes={members} wholeAssembly/>}
       <AppearanceEditor key={members.map(n=>n.id+':'+n.materialId).join('|')} doc={doc} nodes={members}/></fieldset>
-      <p className="mt-4 text-xs text-gray-400">展开对象树后选择单个零件，可编辑它的尺寸与位置。</p></div>;
+      <p className="prop-hint">展开对象树后选择单个零件，可编辑它的尺寸与位置。</p></div>;
   }
   const isPrimitive = node.kind === 'primitive' && node.geometry;
   const g = node.geometry;
@@ -57,14 +57,14 @@ export function PropertiesPanel() {
   };
 
   return (
-    <div className="properties-panel flex flex-col h-full">
-      <div className="px-3 py-2 text-xs font-bold text-gray-400 border-b border-black/30 tracking-wider">属性</div>
-      {lockNotice}{status==='previewing'&&<Button variant="soft" color="gray" size="2" type="button" className="m-3 rounded bg-blue-600 p-2 text-xs" onClick={()=>useEditorStore.getState().confirmPending()}>应用当前草稿并编辑属性</Button>}
+    <div className="properties-panel">
+      <div className="prop-heading">属性</div>
+      {lockNotice}{status==='previewing'&&<Button type="primary" className="prop-confirm-btn" onClick={()=>useEditorStore.getState().confirmPending()}>应用当前草稿并编辑属性</Button>}
       <FocusObject doc={doc} node={node}/>
-      <fieldset disabled={locked} className="flex-1 overflow-auto p-3 space-y-4 text-sm disabled:opacity-50">
+      <fieldset disabled={locked} className="prop-fieldset prop-fieldset-main">
         {/* 名称 */}
-        <div>
-          <label className="block text-xs text-gray-400 mb-1">名称</label>
+        <div className="prop-field">
+          <label className="prop-label">名称</label>
           <input
             type="text" aria-label="对象名称"
             key={`${node.id}:${node.name}`}
@@ -76,14 +76,14 @@ export function PropertiesPanel() {
             onKeyDown={(e) => {
               if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
             }}
-            className="w-full bg-black/30 border border-white/10 rounded px-2 py-1 text-sm focus:outline-none focus:border-blue-400"
+            className="prop-input"
           />
         </div>
 
         {/* 位置（世界，米）*/}
-        <div>
-          <label className="block text-xs text-gray-400 mb-1">位置 X / Y / Z（米）</label>
-          <div className="grid grid-cols-3 gap-1">
+        <div className="prop-field">
+          <label className="prop-label">位置 X / Y / Z（米）</label>
+          <div className="prop-grid prop-grid-3">
             {node.transform.position.map((v, i) => (
               <input
                 key={`${node.id}:${i}:${v}`}
@@ -97,7 +97,7 @@ export function PropertiesPanel() {
                   pos[i] = nv;
                   commit('translate', { space: 'world', mode: 'set', value: pos });
                 }}
-                className="bg-black/30 border border-white/10 rounded px-2 py-1 text-sm w-full focus:outline-none focus:border-blue-400"
+                className="prop-input"
               />
             ))}
           </div>
@@ -105,27 +105,27 @@ export function PropertiesPanel() {
 
         {/* 几何参数 */}
         {isPrimitive && g && (
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">尺寸参数（{geometryNames[g.type]??g.type}）</label>
-            <div className="space-y-1">
+          <div className="prop-field">
+            <label className="prop-label">尺寸参数（{geometryNames[g.type]??g.type}）</label>
+            <div className="prop-param-list">
               {Object.entries(g.params).filter(([,v])=>typeof v==='number').map(([k, v]) => (
-                <div key={k} className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400 w-28">{parameterLabel(k)}</span>
-                  <input aria-label={parameterLabel(k)} type="number" step="any" key={`${node.id}:${k}:${v}`} defaultValue={v} className="min-w-0 w-full bg-black/30 border border-white/10 rounded px-2 py-1" onBlur={e=>{const value=Number(e.target.value);if(!e.target.value.trim()||!Number.isFinite(value)){e.target.value=String(v);return;}if(value===v)return;const geometry={...g,params:{...g.params,[k]:value}} as Geometry;const r=applyCommandBatch([{op:'updateParameters',targetId:node.id,geometry}],`修改 ${node.name} ${k}`);if(!r.ok){window.alert(r.error);e.target.value=String(v);}}} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur();}}/>
+                <div key={k} className="prop-param-row">
+                  <span className="prop-param-name">{parameterLabel(k)}</span>
+                  <input aria-label={parameterLabel(k)} type="number" step="any" key={`${node.id}:${k}:${v}`} defaultValue={v} className="prop-input" onBlur={e=>{const value=Number(e.target.value);if(!e.target.value.trim()||!Number.isFinite(value)){e.target.value=String(v);return;}if(value===v)return;const geometry={...g,params:{...g.params,[k]:value}} as Geometry;const r=applyCommandBatch([{op:'updateParameters',targetId:node.id,geometry}],`修改 ${node.name} ${k}`);if(!r.ok){window.alert(r.error);e.target.value=String(v);}}} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur();}}/>
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {g&&(g.type==='loft'||g.type==='sweepTube')&&<p className="text-xs text-gray-400">连续曲面模型；可通过对话调整截面或路径，位置、缩放和材质仍可编辑。</p>}
-        {g&&(g.type==='profile'||g.type==='lathe')&&<p className="text-xs text-gray-400">轮廓包含 {g.params.points.length} 个控制点；可通过对话修改轮廓，位置、缩放和材质仍可直接编辑。</p>}
-        {g?.type==='mesh'&&<p className="text-xs text-gray-400">导入网格：{g.params.positions.length/3} 顶点，{g.params.indices.length/3} 三角形。支持部件移动、旋转、缩放和材质修改；不支持通过尺寸字段重建拓扑。</p>}
+        {g&&(g.type==='loft'||g.type==='sweepTube')&&<p className="prop-hint">连续曲面模型；可通过对话调整截面或路径，位置、缩放和材质仍可编辑。</p>}
+        {g&&(g.type==='profile'||g.type==='lathe')&&<p className="prop-hint">轮廓包含 {g.params.points.length} 个控制点；可通过对话修改轮廓，位置、缩放和材质仍可直接编辑。</p>}
+        {g?.type==='mesh'&&<p className="prop-hint">导入网格：{g.params.positions.length/3} 顶点，{g.params.indices.length/3} 三角形。支持部件移动、旋转、缩放和材质修改；不支持通过尺寸字段重建拓扑。</p>}
         {/* 实际包围尺寸 */}
         {bbox && (
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">实际包围尺寸（含缩放，米）</label>
-            <div className="text-sm space-y-1">
+          <div className="prop-field">
+            <label className="prop-label">实际包围尺寸（含缩放，米）</label>
+            <div className="prop-bbox">
               <div>宽 X：{effectiveW.toFixed(3)}</div>
               <div>高 Y：{effectiveH.toFixed(3)}</div>
               <div>深 Z：{effectiveD.toFixed(3)}</div>
@@ -151,7 +151,7 @@ function AssemblyTransformEditor({nodes,wholeAssembly=false}:{nodes:SceneNode[];
   const result=useEditorStore.getState().applyCommandBatch([command],'旋转/等比缩放选中对象');
   if(!result.ok){setError(result.error??'变换失败');return;}setAngles(['0','0','0']);setFactor('1');setError('');
  };
- return <section className="mt-4 space-y-2"><h4 className="text-xs">{wholeAssembly?'整机旋转与等比缩放':'零件旋转与等比缩放'}</h4><p className="text-xs text-gray-400">世界外包尺寸：X {size.x.toFixed(3)} · Y {size.y.toFixed(3)} · Z {size.z.toFixed(3)} m。底部 Y {bounds.min.y.toFixed(3)} m；以底部中心为变换支点</p><div className="grid grid-cols-3 gap-1">{['X','Y','Z'].map((axis,i)=><label key={axis} className="text-xs">{axis} 旋转角<input aria-label={`整体旋转 ${axis}`} type="number" step="15" value={angles[i]} onChange={e=>setAngles(old=>old.map((v,j)=>i===j?e.target.value:v))} className="block w-full min-w-0 rounded bg-black/30 p-1"/></label>)}</div><label className="block text-xs">等比缩放倍数<input aria-label="整体等比缩放倍数" type="number" min="0.001" max="1000" step="0.1" value={factor} onChange={e=>setFactor(e.target.value)} className="block w-full rounded bg-black/30 p-1"/></label><Button variant="soft" color="gray" size="2" onClick={apply} className="rounded bg-white/10 px-2 py-1 text-xs">应用整体变换</Button>{error&&<p role="status" className="text-xs text-amber-200">{error}</p>}</section>;
+ return <section className="prop-section"><h4 className="prop-section-title">{wholeAssembly?'整机旋转与等比缩放':'零件旋转与等比缩放'}</h4><p className="prop-hint">世界外包尺寸：X {size.x.toFixed(3)} · Y {size.y.toFixed(3)} · Z {size.z.toFixed(3)} m。底部 Y {bounds.min.y.toFixed(3)} m；以底部中心为变换支点</p><div className="prop-grid prop-grid-3">{['X','Y','Z'].map((axis,i)=><label key={axis} className="prop-label">{axis} 旋转角<input aria-label={`整体旋转 ${axis}`} type="number" step="15" value={angles[i]} onChange={e=>setAngles(old=>old.map((v,j)=>i===j?e.target.value:v))} className="prop-input"/></label>)}</div><label className="prop-label">等比缩放倍数<input aria-label="整体等比缩放倍数" type="number" min="0.001" max="1000" step="0.1" value={factor} onChange={e=>setFactor(e.target.value)} className="prop-input"/></label><Button className="prop-btn" onClick={apply}>应用整体变换</Button>{error&&<p role="status" className="prop-notice is-warn">{error}</p>}</section>;
 }
 
 function AppearanceEditor({doc,nodes}:{doc:SceneDocument;nodes:SceneNode[]}){
@@ -168,15 +168,15 @@ function AppearanceEditor({doc,nodes}:{doc:SceneDocument;nodes:SceneNode[]}){
     let operations:Command[];try{operations=selectionPropertyCommands(doc,targets.map(n=>n.id),{kind:'appearance',value:patch});}catch(e){setNotice(e instanceof Error?e.message:'外观修改参数无效');return;}
     const result=useEditorStore.getState().applyCommandBatch(operations,label);setNotice(result.ok?'已修改，可撤销':result.error??'修改失败');
   };
-  return <section className="mt-4 space-y-3"><h4 className="text-xs text-gray-300">颜色与材质</h4>
-    {nodes.length>1&&<label className="block text-xs">修改范围<select aria-label="外观修改范围" value={sourceId} onChange={e=>setSourceId(e.target.value)} className="block mt-1 bg-[#20252b] border border-white/10 p-1 w-full"><option value="all">全部选中零件（{nodes.length}）</option>{originals.map(id=><option key={id} value={id}>{nodes.filter(n=>n.materialId===id).slice(0,2).map(n=>n.name).join('、')} · {doc.materials.find(m=>m.id===id)?.baseColor??id}（{nodes.filter(n=>n.materialId===id).length}）</option>)}</select></label>}
-    <p className="text-xs text-gray-400">本次影响 {targets.length} 个零件；修改颜色会保留各零件原有的粗糙度、金属度和透明度。</p>
-    {nodes.length>1&&sourceId==='all'&&<p className="text-xs text-amber-200">将统一所有选中零件的颜色，包括轮子、外壳等。只改部分时请先选择上方范围。</p>}
-    <div className="flex gap-2 items-center"><input aria-label="选择颜色" type="color" value={/^#[0-9a-f]{6}$/i.test(color)?color:'#9099a4'} onChange={e=>setColor(e.target.value)} className="w-9 h-8 shrink-0"/><input aria-label="颜色十六进制" value={color} onChange={e=>setColor(e.target.value)} className="w-24 min-w-0 bg-black/30 rounded px-2 py-1 text-xs"/><Button variant="soft" color="gray" size="2" className="bg-blue-600 rounded px-2 py-1 text-xs" onClick={()=>{if(!/^#[0-9a-f]{6}$/i.test(color)){setNotice('请输入 #RRGGBB 颜色');return;}apply({baseColor:color},'修改选中对象颜色')}}>应用颜色</Button></div>
-    <div className="grid grid-cols-3 gap-2">{([['粗糙度',roughness,setRoughness],['金属度',metalness,setMetalness],['不透明度',opacity,setOpacity]] as const).map(([label,value,set])=><label key={label} className="text-xs">{label}<input aria-label={label} type="number" min="0" max="1" step="0.05" value={value} onChange={e=>set(e.target.value)} className="block w-full min-w-0 rounded bg-black/30 p-1 mt-1"/></label>)}</div>
-    <Button variant="soft" color="gray" size="2" className="bg-white/10 rounded px-2 py-1 text-xs" onClick={()=>{const values=[roughness,metalness,opacity];if(values.some(v=>!v.trim()||!Number.isFinite(Number(v))||Number(v)<0||Number(v)>1)){setNotice('材质参数需为0–1');return;}apply({roughness:Number(roughness),metalness:Number(metalness),opacity:Number(opacity)},'修改选中对象材质参数')}}>应用材质参数</Button>
-    <p className="text-xs text-gray-400">替换为现有材质（将同时替换颜色与表面参数）</p><div className="flex flex-wrap gap-1">{doc.materials.map(m=><Button variant="soft" color="gray" size="2" key={m.id} aria-label={`使用材质 ${m.id}`} title={`${m.id} ${m.baseColor}`} onClick={()=>apply({materialId:m.id},'替换选中对象材质')} className="w-7 h-7 shrink-0 rounded border border-white/30" style={{backgroundColor:m.baseColor}}/>)}</div>
-    {notice&&<p role="status" className="text-xs text-amber-200">{notice}</p>}
+  return <section className="prop-section"><h4 className="prop-section-title">颜色与材质</h4>
+    {nodes.length>1&&<label className="prop-label">修改范围<select aria-label="外观修改范围" value={sourceId} onChange={e=>setSourceId(e.target.value)} className="prop-select"><option value="all">全部选中零件（{nodes.length}）</option>{originals.map(id=><option key={id} value={id}>{nodes.filter(n=>n.materialId===id).slice(0,2).map(n=>n.name).join('、')} · {doc.materials.find(m=>m.id===id)?.baseColor??id}（{nodes.filter(n=>n.materialId===id).length}）</option>)}</select></label>}
+    <p className="prop-hint">本次影响 {targets.length} 个零件；修改颜色会保留各零件原有的粗糙度、金属度和透明度。</p>
+    {nodes.length>1&&sourceId==='all'&&<p className="prop-notice is-warn">将统一所有选中零件的颜色，包括轮子、外壳等。只改部分时请先选择上方范围。</p>}
+    <div className="prop-color-row"><input aria-label="选择颜色" type="color" value={/^#[0-9a-f]{6}$/i.test(color)?color:'#9099a4'} onChange={e=>setColor(e.target.value)} className="prop-color-input"/><input aria-label="颜色十六进制" value={color} onChange={e=>setColor(e.target.value)} className="prop-input prop-input-hex"/><Button type="primary" className="prop-btn" onClick={()=>{if(!/^#[0-9a-f]{6}$/i.test(color)){setNotice('请输入 #RRGGBB 颜色');return;}apply({baseColor:color},'修改选中对象颜色')}}>应用颜色</Button></div>
+    <div className="prop-grid prop-grid-3">{([['粗糙度',roughness,setRoughness],['金属度',metalness,setMetalness],['不透明度',opacity,setOpacity]] as const).map(([label,value,set])=><label key={label} className="prop-label">{label}<input aria-label={label} type="number" min="0" max="1" step="0.05" value={value} onChange={e=>set(e.target.value)} className="prop-input"/></label>)}</div>
+    <Button className="prop-btn" onClick={()=>{const values=[roughness,metalness,opacity];if(values.some(v=>!v.trim()||!Number.isFinite(Number(v))||Number(v)<0||Number(v)>1)){setNotice('材质参数需为0–1');return;}apply({roughness:Number(roughness),metalness:Number(metalness),opacity:Number(opacity)},'修改选中对象材质参数')}}>应用材质参数</Button>
+    <p className="prop-hint">替换为现有材质（将同时替换颜色与表面参数）</p><div className="prop-swatches">{doc.materials.map(m=><Button key={m.id} aria-label={`使用材质 ${m.id}`} title={`${m.id} ${m.baseColor}`} onClick={()=>apply({materialId:m.id},'替换选中对象材质')} className="prop-swatch" style={{backgroundColor:m.baseColor}}/>)}</div>
+    {notice&&<p role="status" className="prop-notice is-warn">{notice}</p>}
   </section>;
 }
 

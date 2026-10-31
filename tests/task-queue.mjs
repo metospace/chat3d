@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {indexedDB} from 'fake-indexeddb';
 import {createServer} from 'vite';
+import {installBrowserGlobals} from './jsdom-env.mjs';
 import React from 'react';
 const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'https://example.test'});
 for(const key of ['window','document','HTMLElement','HTMLInputElement','Node','Element','DocumentFragment','NodeFilter','MutationObserver','Event','MouseEvent','CustomEvent','localStorage','location'])Object.defineProperty(globalThis,key,{value:dom.window[key],configurable:true});
-Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});globalThis.indexedDB=indexedDB;globalThis.IS_REACT_ACT_ENVIRONMENT=true;globalThis.getComputedStyle=dom.window.getComputedStyle;globalThis.ResizeObserver=class{observe(){}unobserve(){}disconnect(){}};globalThis.requestAnimationFrame=fn=>setTimeout(fn,0);globalThis.cancelAnimationFrame=clearTimeout;window.requestAnimationFrame=globalThis.requestAnimationFrame;window.cancelAnimationFrame=clearTimeout;
+Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});globalThis.indexedDB=indexedDB;globalThis.IS_REACT_ACT_ENVIRONMENT=true;installBrowserGlobals(dom);globalThis.getComputedStyle=dom.window.getComputedStyle;globalThis.ResizeObserver=class{observe(){}unobserve(){}disconnect(){}};globalThis.requestAnimationFrame=fn=>setTimeout(fn,0);globalThis.cancelAnimationFrame=clearTimeout;window.requestAnimationFrame=globalThis.requestAnimationFrame;window.cancelAnimationFrame=clearTimeout;
 const {render,fireEvent,waitFor,act,cleanup}=await import('@testing-library/react');
 const {Theme}=await import('@radix-ui/themes');
 
