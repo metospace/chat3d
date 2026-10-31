@@ -235,3 +235,21 @@
 .session-dialog .ant-input{height:32px;border-radius:9px;font-size:12px}
 .session-dialog .dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 .session-dialog .dialog-actions .ant-btn{height:32px;border-radius:9px;font-size:12px}
+
+/* ---- home page ---------------------------------------------------------- */
+.home-recent-card.ant-card{border-radius:14px;border-color:var(--sc-border-subtle,#dce4e4);background:var(--sc-surface-elevated,#fdfefe);box-shadow:none;transition:border-color .15s ease,box-shadow .15s ease}
+.home-recent-card.ant-card:hover{border-color:var(--sc-border,#c8d5d5);box-shadow:0 8px 22px rgb(20 40 40 / 8%)}
+.home-recent-card.ant-card .ant-card-body{padding:0}
+.home-kind.ant-tag{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 7px;border-radius:6px;font-size:10px;font-weight:600;line-height:1;color:var(--sc-ink-muted,#526869);background:var(--sc-surface-muted,#eaf0f0)}
+.home-kind.ant-tag svg{width:11px;height:11px}
+.home-project-toolbar .ant-input-affix-wrapper{height:32px;border-radius:9px;font-size:12px;background:var(--sc-surface-elevated,#fdfefe)}
+.home-project-toolbar .ant-input-affix-wrapper .ant-input-prefix svg{width:13px;height:13px;color:var(--sc-ink-muted,#526869)}
+.home-composer .ant-input-textarea textarea{border:0;background:transparent;box-shadow:none;padding:0;font-size:13px;line-height:1.7;resize:none}
+.home-composer .ant-input-textarea{background:transparent}
+.home-composer-actions .ant-btn{height:32px;border-radius:9px;font-size:12px}
+.home-composer-actions .composer-send.ant-btn{height:34px;padding:0 14px;font-weight:600}
+.home-add-image.ant-btn{color:var(--sc-ink-muted,#526869)}
+.home-setup-heading .ant-btn,.home-model-status .ant-btn{height:28px;padding:0 8px;font-size:11px;color:var(--sc-ink-muted,#526869)}
+.home-library-links .ant-btn{height:26px;padding:0 8px;font-size:11px;color:var(--sc-ink-muted,#526869)}
+.home-new-project.ant-btn{height:36px;border-radius:10px;font-size:12px;font-weight:600;border-color:var(--sc-border,#c8d5d5);background:var(--sc-surface-elevated,#fdfefe);color:var(--sc-ink,#203334)}
+.home-new-project.ant-btn:hover{border-color:var(--sc-accent,#176c6b);color:var(--sc-accent,#176c6b)}
