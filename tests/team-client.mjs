@@ -1,3 +1,4 @@
+import {installBrowserGlobals} from './jsdom-env.mjs';
 import 'fake-indexeddb/auto';
 import assert from 'node:assert/strict';import {createServer as viteServer} from 'vite';import {JSDOM} from 'jsdom';import {mkdtemp,rm} from 'node:fs/promises';import {join} from 'node:path';import {tmpdir} from 'node:os';import {createServer} from 'node:http';
 import {openTeam,teamMiddleware} from '../server/team/service.mjs';import {validateTeamPayload} from '../dist-team/validator.mjs';

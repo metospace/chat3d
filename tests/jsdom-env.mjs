@@ -3,8 +3,10 @@
 // after creating its JSDOM instance and before importing React DOM.
 export function installBrowserGlobals(dom){
   for(const name of Object.getOwnPropertyNames(dom.window)){
-    const value=dom.window[name];
-    if(/^[A-Z]/.test(name)&&typeof value==='function'&&!Object.prototype.hasOwnProperty.call(globalThis,name))Object.defineProperty(globalThis,name,{value,configurable:true,writable:true});
+    if(!/^[A-Z]/.test(name))continue;
+    let value;
+    try{value=dom.window[name];}catch{continue;}
+    if(typeof value==='function'&&!Object.prototype.hasOwnProperty.call(globalThis,name))Object.defineProperty(globalThis,name,{value,configurable:true,writable:true});
   }
   const mediaQuery=()=>({matches:false,media:'',onchange:null,addListener(){},removeListener(){},addEventListener(){},removeEventListener(){},dispatchEvent(){return false}});
   const matchMedia=dom.window.matchMedia??mediaQuery;

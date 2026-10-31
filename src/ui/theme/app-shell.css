@@ -198,3 +198,14 @@
 .backup-dialog .settings-info{margin:12px 0;padding:10px 12px;border-radius:9px;background:var(--sc-surface-muted,#eaf0f0);color:var(--sc-ink-muted,#526869);font-size:11px;line-height:1.7}
 .backup-dialog .settings-module-footer{display:flex;justify-content:flex-end;padding-top:12px;border-top:1px solid var(--sc-border-subtle,#dce4e4)}
 .backup-dialog .settings-module-footer .ant-btn{height:32px;border-radius:9px;font-size:12px}
+
+/* ---- studio pages: task center and settings ---------------------------- */
+.settings-page .settings-row .ant-btn{height:30px;border-radius:9px;font-size:12px}
+.task-center-layout aside .ant-input{height:34px;font-size:12px;border-radius:9px}
+.task-project-btn.ant-btn{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;height:auto;padding:9px 11px;border:1px solid var(--sc-border-subtle,#dce4e4);border-radius:10px;background:transparent;color:var(--sc-ink,#203334);text-align:left;white-space:normal;box-shadow:none}
+.task-project-btn.ant-btn:hover{border-color:var(--sc-border,#c8d5d5);background:var(--sc-surface-muted,#eaf0f0)}
+.task-project-btn.ant-btn[aria-pressed="true"]{border-color:var(--sc-accent,#176c6b);background:var(--sc-accent-soft,#dfefed);color:var(--sc-accent,#176c6b)}
+.task-project-btn.ant-btn strong{font-size:12px;font-weight:550;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task-project-btn.ant-btn small{font-size:10px;color:var(--sc-ink-muted,#526869)}
+
+.backup-title{margin:0;font-size:17px;font-weight:600;letter-spacing:-.2px}

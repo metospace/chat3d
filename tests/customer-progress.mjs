@@ -1,3 +1,4 @@
+import {installBrowserGlobals} from './jsdom-env.mjs';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import React from 'react';
