@@ -19,10 +19,11 @@
     "test:full-scenes": "node tests/full-scene-replay.mjs",
     "build:team": "node scripts/build-team.mjs",
     "build:team-web": "node scripts/build-team-web.mjs",
-    "test:team": "npm run build:team && npm run build:team-web && node tests/team-library.mjs && node tests/team-client.mjs && node tests/team-resource-links.mjs && node tests/team-ui.mjs && node tests/team-web.mjs && node tests/team-oauth-callback.mjs && node tests/team-static.mjs",
+    "test:team": "npm run build:team && npm run build:team-web && node tests/auth-transport.mjs && node tests/team-auth-resources.mjs && node tests/team-library.mjs && node tests/team-client.mjs && node tests/team-resource-links.mjs && node tests/team-ui.mjs && node tests/team-web.mjs && node tests/team-oauth-callback.mjs && node tests/team-static.mjs",
     "test:runtime": "node tests/docker-runtime.mjs"
   },
   "dependencies": {
+    "@ant-design/x": "^2.10.0",
     "@earendil-works/pi-agent-core": "1.0.0",
     "@earendil-works/pi-ai": "1.0.0",
     "@heroui/react": "^3.2.6",
@@ -35,6 +36,7 @@
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-process": "^2.4.0",
     "@tauri-apps/plugin-updater": "2.13.1",
+    "antd": "^6.6.8",
     "ipaddr.js": "^2.2.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

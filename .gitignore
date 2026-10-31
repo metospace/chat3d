@@ -29,6 +29,7 @@ src-tauri/target
 src-tauri/updater.generated.json
 desktop-update-publish/
 e2e/shots
+dev/shots
 *.tmp.ps1
 
 .env
