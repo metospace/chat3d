@@ -209,3 +209,7 @@
 .task-project-btn.ant-btn small{font-size:10px;color:var(--sc-ink-muted,#526869)}
 
 .backup-title{margin:0;font-size:17px;font-weight:600;letter-spacing:-.2px}
+
+/* ---- studio helpers ----------------------------------------------------- */
+.studio-inset-card{padding:16px;border:1px solid var(--sc-border-subtle,#dce4e4);border-radius:10px;background:var(--sc-surface-elevated,#fdfefe);box-shadow:none}
+.studio-section-count.ant-tag{margin:0 0 0 6px;padding:0 6px;border:1px solid var(--sc-border-subtle,#dce4e4);border-radius:5px;background:var(--sc-surface-muted,#eaf0f0);color:var(--sc-ink-muted,#526869);font-size:10px;line-height:16px}
