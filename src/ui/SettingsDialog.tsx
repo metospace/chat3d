@@ -2,7 +2,8 @@ import {modelConfigStorageError} from '../ai/modelConfigStorage';
 import {normalizeTaskBudget,TASK_BUDGET_PRESETS} from '../ai/taskBudget';
 import {SiteAccessRecovery} from './SiteAccessRecovery';
 import {AGENT_LIMITS} from '../ai/agentPolicy';
-import {Dialog} from '@radix-ui/themes';
+import {Button,Checkbox,Input,Modal} from 'antd';
+import {Cross1Icon} from '@radix-ui/react-icons';
 import { useEffect, useRef, useState } from 'react';
 import { ModelConfig, fetchModels, testConnection } from '../ai/provider';
 import { useEditorStore } from '../store';
@@ -27,7 +28,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const sequence = useRef(0);
   const controller = useRef<AbortController | null>(null);
   const lastCredentials = useRef('');
-  const inputClass = 'w-full bg-black/30 border border-white/15 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-400';
+  const inputClass = 'settings-input';
   const ready = !!baseURL.trim() && !!apiKey.trim();
   const valid = (ready && !!model.trim() && (manual || !!models?.includes(model)));
 
@@ -77,46 +78,43 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   };
   const shown = (models ?? []).filter((id) => id.toLowerCase().includes(query.toLowerCase()));
   const originBlocked = error.includes('origin not allowed');
-  return <Dialog.Root open onOpenChange={open=>{if(!open)onClose();}}>
-    <Dialog.Content className="settings-module model-settings-module" aria-describedby={undefined} maxWidth="680px" style={{padding:0,maxHeight:'92vh',overflowY:'auto',background:'var(--sc-surface-elevated, var(--color-panel-solid))'}} onInteractOutside={e=>e.preventDefault()}>
-      <header className="flex items-center justify-between px-5 py-4 border-b border-black/40">
-        <Dialog.Title id="model-settings-title" className="font-bold text-lg" style={{margin:0}}>连接模型服务</Dialog.Title>
-        <button aria-label="关闭模型配置" onClick={onClose} className="px-2 py-1">✕</button>
-      </header>
-      <div className="p-5 space-y-4">
-        <p className="text-sm text-gray-400">1. 填写接口和密钥　2. 获取并选择模型　3. 保存配置（可先测试连接）</p>
-        <label className="block text-sm space-y-1"><span>API 根地址</span><input className={inputClass} type="url" value={baseURL} onChange={(e)=>{invalidate();setBaseURL(e.target.value);setApiKey('')}} onBlur={()=>void load(false)} placeholder="https://你的服务/v1" /><span className="block text-xs text-gray-400">填写到 /v1 或服务提供的 API 根路径，不要包含 /models 或 /chat/completions。更换地址后请重新输入对应密钥，避免将旧密钥发送给新服务</span></label>
-        <label className="block text-sm space-y-1"><span>API Key</span><input className={inputClass} type="password" autoComplete="off" value={apiKey} onChange={(e)=>{invalidate();setApiKey(e.target.value)}} onBlur={()=>void load(false)} placeholder="填写服务提供的密钥" /></label>
-        <label className="flex gap-2 text-sm"><input type="checkbox" checked={rememberApiKey} onChange={e=>setRememberApiKey(e.target.checked)}/><span>在此设备记住密钥<span className="block text-xs text-gray-400">默认仅本次会话使用，刷新或关闭后需重新输入。勾选后会以明文保存在本机浏览器中，请仅在可信设备使用。</span></span></label>
-        <div className="space-y-3">
-          <button onClick={()=>void load()} disabled={!ready || fetching} className="model-settings-primary w-full px-4 py-2 disabled:opacity-40 rounded text-sm">{fetching ? '正在获取模型列表…' : models?.length ? '重新获取模型列表' : '获取可用模型'}</button>
+  return <Modal open onCancel={onClose} footer={null} closable={false} width={680} mask={{closable:false}} className="settings-dialog model-settings-module" title={<div className="settings-dialog-head"><h2 id="model-settings-title" className="settings-dialog-title">连接模型服务</h2><Button type="text" aria-label="关闭模型配置" onClick={onClose} icon={<Cross1Icon/>}/></div>}>
+      <div className="settings-dialog-body">
+        <p className="settings-lede">1. 填写接口和密钥　2. 获取并选择模型　3. 保存配置（可先测试连接）</p>
+        <label className="settings-field"><span>API 根地址</span><Input className={inputClass} type="url" value={baseURL} onChange={(e)=>{invalidate();setBaseURL(e.target.value);setApiKey('')}} onBlur={()=>void load(false)} placeholder="https://你的服务/v1" /><span className="settings-hint">填写到 /v1 或服务提供的 API 根路径，不要包含 /models 或 /chat/completions。更换地址后请重新输入对应密钥，避免将旧密钥发送给新服务</span></label>
+        <label className="settings-field"><span>API Key</span><Input.Password className={inputClass} autoComplete="off" value={apiKey} onChange={(e)=>{invalidate();setApiKey(e.target.value)}} onBlur={()=>void load(false)} placeholder="填写服务提供的密钥" /></label>
+        <Checkbox checked={rememberApiKey} onChange={e=>setRememberApiKey(e.target.checked)}><span>在此设备记住密钥</span></Checkbox>
+        <p className="settings-hint">默认仅本次会话使用，刷新或关闭后需重新输入。勾选后会以明文保存在本机浏览器中，请仅在可信设备使用。</p>
+        <div className="settings-stack">
+          <Button type="primary" block onClick={()=>void load()} disabled={!ready || fetching} className="settings-fetch">{fetching ? '正在获取模型列表…' : models?.length ? '重新获取模型列表' : '获取可用模型'}</Button>
           <SiteAccessRecovery error={error}/>
-          {error && <div role="alert" className="text-sm p-3 bg-red-950/50 text-red-200 rounded break-words">{error}</div>}
+          {error && <div role="alert" className="settings-error">{error}</div>}
           {!!models?.length && !manual && <>
-            <label className="block text-sm space-y-1"><span>筛选模型（共 {models.length} 个）</span><input className={inputClass} value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="输入名称筛选" /></label>
-            <label className="block text-sm space-y-1"><span>选择模型</span><select className={inputClass} value={model} onChange={(e)=>{sequence.current++;controller.current?.abort();setTesting(false);setModel(e.target.value);setResult(null)}}><option value="">请选择一个模型</option>{model && !shown.includes(model) && <option value={model}>{model}（当前选择）</option>}{shown.map((id)=><option key={id} value={id}>{id}</option>)}</select></label>
-            {shown.length === 0 && <p className="text-sm text-gray-400">没有匹配的模型，请修改筛选词</p>}
+            <label className="settings-field"><span>筛选模型（共 {models.length} 个）</span><Input className={inputClass} value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="输入名称筛选" /></label>
+            <label className="settings-field"><span>选择模型</span><select className="settings-select" value={model} onChange={(e)=>{sequence.current++;controller.current?.abort();setTesting(false);setModel(e.target.value);setResult(null)}}><option value="">请选择一个模型</option>{model && !shown.includes(model) && <option value={model}>{model}（当前选择）</option>}{shown.map((id)=><option key={id} value={id}>{id}</option>)}</select></label>
+            {shown.length === 0 && <p className="settings-lede">没有匹配的模型，请修改筛选词</p>}
           </>}
-          {!fetching && models !== null && !models.length && !originBlocked && !manual && <button className="text-sm text-blue-300 underline" onClick={()=>setManual(true)}>服务不提供列表？手动填写模型名</button>}
-          {manual && <label className="block text-sm space-y-1"><span>手动模型名（请以服务文档为准）</span><input className={inputClass} value={model} onChange={(e)=>{sequence.current++;controller.current?.abort();setTesting(false);setResult(null);setModel(e.target.value)}} placeholder="服务实际支持的模型 ID" /></label>}
+          {!fetching && models !== null && !models.length && !originBlocked && !manual && <Button type="link" className="settings-manual" onClick={()=>setManual(true)}>服务不提供列表？手动填写模型名</Button>}
+          {manual && <label className="settings-field"><span>手动模型名（请以服务文档为准）</span><Input className={inputClass} value={model} onChange={(e)=>{sequence.current++;controller.current?.abort();setTesting(false);setResult(null);setModel(e.target.value)}} placeholder="服务实际支持的模型 ID" /></label>}
         </div>
-        <details className="rounded border border-white/10 p-3 text-sm"><summary className="cursor-pointer">高级设置 · 执行方式与流式输出</summary><div className="mt-3 space-y-3">        <label className="block text-sm space-y-1"><span>建模执行方式</span><select aria-label="建模执行方式" className={inputClass} value={agentMode} onChange={e=>{setAgentMode(e.target.value as 'pi'|'single');if(e.target.value==='pi')setStream(true);}}><option value="pi">连续建模（推荐）</option><option value="single">单次生成（兼容模式）</option></select><span className="block text-xs text-gray-400">连续建模需要模型支持图片、工具调用与流式输出；在任务预算内有有效进展就继续，到限后保留未验收草稿。连续 {AGENT_LIMITS.noProgressTurns} 轮无进展或 {AGENT_LIMITS.consecutiveErrorTurns} 轮工具失败且无进展会暂停；连续 {AGENT_LIMITS.idleTimeoutMs/60000} 分钟无活动会停止。每轮最多 {AGENT_LIMITS.outputPerTurn} 输出 Token。会将场景截图发送至你配置的同一接口，实际费用以网关为准。</span></label>
-        <fieldset disabled={agentMode!=='pi'} className="space-y-2 rounded border border-white/10 p-3"><legend>每次建模任务预算</legend>
-          <div className="flex gap-2" role="group" aria-label="预算预设">{([['small','小改动'],['standard','常规建模'],['extended','复杂场景']] as const).map(([key,label])=><button key={key} type="button" className="px-3 py-1 rounded border border-white/10" aria-pressed={taskBudget.maxMinutes===TASK_BUDGET_PRESETS[key].maxMinutes&&taskBudget.maxRounds===TASK_BUDGET_PRESETS[key].maxRounds&&taskBudget.maxReportedTokens===TASK_BUDGET_PRESETS[key].maxReportedTokens} onClick={()=>setTaskBudget({...TASK_BUDGET_PRESETS[key]})}>{label}</button>)}</div>
-          <label className="block">时间上限（分钟）<input aria-label="任务时间上限（分钟）" type="number" min="1" max="120" className={inputClass} value={taskBudget.maxMinutes} onChange={e=>setTaskBudget(b=>({...b,maxMinutes:Number(e.target.value)}))}/></label>
-          <label className="block">模型请求轮数上限<input aria-label="任务轮数上限" type="number" min="1" max="200" className={inputClass} value={taskBudget.maxRounds} onChange={e=>setTaskBudget(b=>({...b,maxRounds:Number(e.target.value)}))}/></label>
-          <label className="block">已报告 Token 上限<input aria-label="任务已报告Token上限" type="number" min="1" max="20000000" className={inputClass} value={taskBudget.maxReportedTokens} onChange={e=>setTaskBudget(b=>({...b,maxReportedTokens:Number(e.target.value)}))}/></label>
-          <p className="text-xs text-gray-400">含实验并行子任务。每次发送或继续生成使用一份新预算，执行中补充要求不重置；修改配置从下一次任务生效。「已报告 Token 上限」是本机本次任务的软上限（模型回报的输入+输出合计），不是单个资产的价格或账单；实际费用以服务方为准。Token 在服务返回用量后检查，可能超过限额一个在途请求（并行时为多个）；未报告用量时依靠时间和轮数限制。到限会暂停并保留草稿，可用「继续调整」开新一轮额度，不代表验收通过。</p>
+        <details className="settings-advanced"><summary>高级设置 · 执行方式与流式输出</summary><div className="settings-stack">        <label className="settings-field"><span>建模执行方式</span><select aria-label="建模执行方式" className="settings-select" value={agentMode} onChange={e=>{setAgentMode(e.target.value as 'pi'|'single');if(e.target.value==='pi')setStream(true);}}><option value="pi">连续建模（推荐）</option><option value="single">单次生成（兼容模式）</option></select><span className="settings-hint">连续建模需要模型支持图片、工具调用与流式输出；在任务预算内有有效进展就继续，到限后保留未验收草稿。连续 {AGENT_LIMITS.noProgressTurns} 轮无进展或 {AGENT_LIMITS.consecutiveErrorTurns} 轮工具失败且无进展会暂停；连续 {AGENT_LIMITS.idleTimeoutMs/60000} 分钟无活动会停止。每轮最多 {AGENT_LIMITS.outputPerTurn} 输出 Token。会将场景截图发送至你配置的同一接口，实际费用以网关为准。</span></label>
+        <fieldset disabled={agentMode!=='pi'} className="settings-budget"><legend>每次建模任务预算</legend>
+          <div className="settings-presets" role="group" aria-label="预算预设">{([['small','小改动'],['standard','常规建模'],['extended','复杂场景']] as const).map(([key,label])=><Button key={key} type="default" aria-pressed={taskBudget.maxMinutes===TASK_BUDGET_PRESETS[key].maxMinutes&&taskBudget.maxRounds===TASK_BUDGET_PRESETS[key].maxRounds&&taskBudget.maxReportedTokens===TASK_BUDGET_PRESETS[key].maxReportedTokens} onClick={()=>setTaskBudget({...TASK_BUDGET_PRESETS[key]})}>{label}</Button>)}</div>
+          <label className="settings-field"><span>时间上限（分钟）</span><Input className={inputClass} aria-label="任务时间上限（分钟）" type="number" min="1" max="120" value={taskBudget.maxMinutes} onChange={e=>setTaskBudget(b=>({...b,maxMinutes:Number(e.target.value)}))}/></label>
+          <label className="settings-field"><span>模型请求轮数上限</span><Input className={inputClass} aria-label="任务轮数上限" type="number" min="1" max="200" value={taskBudget.maxRounds} onChange={e=>setTaskBudget(b=>({...b,maxRounds:Number(e.target.value)}))}/></label>
+          <label className="settings-field"><span>已报告 Token 上限</span><Input className={inputClass} aria-label="任务已报告Token上限" type="number" min="1" max="20000000" value={taskBudget.maxReportedTokens} onChange={e=>setTaskBudget(b=>({...b,maxReportedTokens:Number(e.target.value)}))}/></label>
+          <p className="settings-hint">含实验并行子任务。每次发送或继续生成使用一份新预算，执行中补充要求不重置；修改配置从下一次任务生效。「已报告 Token 上限」是本机本次任务的软上限（模型回报的输入+输出合计），不是单个资产的价格或账单；实际费用以服务方为准。Token 在服务返回用量后检查，可能超过限额一个在途请求（并行时为多个）；未报告用量时依靠时间和轮数限制。到限会暂停并保留草稿，可用「继续调整」开新一轮额度，不代表验收通过。</p>
         </fieldset>
-        <label className="flex gap-2 text-sm"><input type="checkbox" disabled={agentMode!=='pi'} checked={parallelDrafts} onChange={e=>setParallelDrafts(e.target.checked)}/><span>实验：独立组件并行建模<span className="block text-xs text-gray-400">最多两个子代理，仅接收组件任务；主代理合并后统一验收。总 Token 包含子代理，可能增加用量；简单任务仍串行。</span></span></label>
-        <label className="flex gap-2 text-sm"><input type="checkbox" disabled={agentMode==='pi'} checked={stream} onChange={e=>setStream(e.target.checked)}/><span>实时接收模型输出<span className="block text-xs text-gray-400">显示实际接收进度；服务不支持流式时可关闭，仍保留计时和超时保护</span></span></label>
+        <Checkbox disabled={agentMode!=='pi'} checked={parallelDrafts} onChange={e=>setParallelDrafts(e.target.checked)}><span>实验：独立组件并行建模</span></Checkbox>
+        <p className="settings-hint">最多两个子代理，仅接收组件任务；主代理合并后统一验收。总 Token 包含子代理，可能增加用量；简单任务仍串行。</p>
+        <Checkbox disabled={agentMode==='pi'} checked={stream} onChange={e=>setStream(e.target.checked)}><span>实时接收模型输出</span></Checkbox>
+        <p className="settings-hint">显示实际接收进度；服务不支持流式时可关闭，仍保留计时和超时保护</p>
 </div></details>
-        {result && <p role="status" data-testid="test-result" className={`text-sm rounded p-3 ${result.ok?'bg-emerald-950 text-emerald-200':'bg-red-950 text-red-200'}`}>{result.text}</p>}
+        {result && <p role="status" data-testid="test-result" className={`settings-result ${result.ok?'is-ok':'is-error'}`}>{result.text}</p>}
       </div>
-      <footer className="flex items-center justify-between p-4 border-t border-black/40">
-        <button onClick={()=>void test()} disabled={!valid || testing || fetching} className="px-3 py-2 bg-white/10 rounded disabled:opacity-40">{testing?'测试中…':'测试连接'}</button>
-        <div className="flex gap-2"><button onClick={onClose} className="px-3 py-2 bg-white/10 rounded">取消</button><button onClick={save} disabled={!valid || fetching} className="model-settings-primary px-4 py-2 rounded disabled:opacity-40">保存配置</button></div>
+      <footer className="settings-dialog-foot">
+        <Button onClick={()=>void test()} disabled={!valid || testing || fetching}>{testing?'测试中…':'测试连接'}</Button>
+        <div className="settings-foot-actions"><Button onClick={onClose}>取消</Button><Button type="primary" onClick={save} disabled={!valid || fetching}>保存配置</Button></div>
       </footer>
-    </Dialog.Content>
-  </Dialog.Root>;
+  </Modal>;
 }
