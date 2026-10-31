@@ -12,7 +12,6 @@ import {CanvasAssetShelf,CanvasInspector,CanvasSelectionSummary,type CanvasPrope
 import {focusSceneObjects} from './scene/focus';
 import {CursorArrowIcon,MoveIcon,RotateCounterClockwiseIcon,SizeIcon,EnterFullScreenIcon,ArrowLeftIcon} from '@radix-ui/react-icons';
 import {AppearanceProvider} from './ui/Appearance';
-import {AppTheme} from './ui/theme/AppTheme';
 import {ProjectLibrary} from './ui/ProjectLibrary';
 import {TeamStudioPage} from './ui/TeamStudioPage';
 import {LibraryProjectSaveDialog} from './ui/LibraryMetadataDialog';
@@ -189,7 +188,6 @@ export default function App() {
   ];
 
   return <AppearanceProvider>
-    <AppTheme>
     <div style={{'--chat-width':`${assistantWidth}px`,'--chat-space':assistantOpen?`${assistantWidth}px`:'0px'} as CSSProperties} className={`studio redesigned-studio canvas-studio frosted-studio ${modulePage==='workbench'?'editor-mode':'manager-mode'} ${focusScene?'focus-scene':''}`}>
       <StudioShell activePage={modulePage} disabled={librarySaving||!workspace.ready} taskQueueRequest={taskQueueRequest} onNavigate={navigateStudio} onTaskOpen={()=>{setModulePage('workbench');setFocusScene(false);setAssistantOpen(true);setAssistantTab('chat');}} onTaskHistory={()=>{setModulePage('tasks');setFocusScene(false);}}/>
       <StudioMain>
@@ -261,6 +259,5 @@ export default function App() {
       {showSettings&&<SettingsDialog onClose={()=>setShowSettings(false)}/>}
       <AppUpdateDialog/>
     </div>
-    </AppTheme>
   </AppearanceProvider>;
 }

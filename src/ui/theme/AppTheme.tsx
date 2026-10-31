@@ -2,7 +2,7 @@ import {theme as antdTheme,type ThemeConfig} from 'antd';
 import {XProvider} from '@ant-design/x';
 import zhCN from 'antd/locale/zh_CN';
 import {useMemo,type ComponentProps,type ReactNode} from 'react';
-import {useAppearance} from '../Appearance';
+import {useAppearance} from '../appearanceContext';
 
 type XThemeProp = NonNullable<ComponentProps<typeof XProvider>['theme']>;
 
@@ -88,5 +88,5 @@ export function AppTheme({children}:{children:ReactNode}){
     token: {...shared,...(isDark?dark:light)},
     components: components(isDark),
   }),[isDark]);
-  return <XProvider locale={zhCN} theme={config as unknown as XThemeProp}>{children}</XProvider>;
+  return <XProvider locale={zhCN} theme={config as unknown as XThemeProp} button={{autoInsertSpace:false}}>{children}</XProvider>;
 }
