@@ -16,4 +16,10 @@ export function installBrowserGlobals(dom){
   const observer=function(){const self=this instanceof observer?this:Object.create(observer.prototype);self.observe=()=>{};self.unobserve=()=>{};self.disconnect=()=>{};self.takeRecords=()=>[];return self;};
   if(!globalThis.ResizeObserver){globalThis.ResizeObserver=observer;dom.window.ResizeObserver=observer;}
   if(!globalThis.IntersectionObserver){globalThis.IntersectionObserver=observer;dom.window.IntersectionObserver=observer;}
+  // @rc-component/overflow posts state updates through a fresh MessageChannel every effect flush and
+  // never closes it. Node counts MessagePort as a live handle, so those channels keep the test
+  // process alive forever (and pile up); a browser drops them with the response. A timer-backed
+  // channel keeps the asynchronous delivery semantics without holding the event loop open.
+  const Channel=function(){const self=this instanceof Channel?this:Object.create(Channel.prototype);self.port1={onmessage:null,addEventListener(){},removeEventListener(){},start(){},close(){}};self.port2={postMessage(message){setTimeout(()=>self.port1.onmessage?.({data:message}),0);},start(){},close(){},addEventListener(){}};return self;};
+  globalThis.MessageChannel=Channel;dom.window.MessageChannel=Channel;
 }
