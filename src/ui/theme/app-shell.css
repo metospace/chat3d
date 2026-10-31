@@ -1,0 +1,63 @@
+/*
+ * Editor shell skin for antd.
+ *
+ * The canvas frame (header, tool rail, transform tools, conversation panel) is built
+ * from antd widgets, so its geometry lives here instead of the old Radix/HeroUI rules.
+ * Colours come from the antd theme tokens plus the shared --sc-* palette.
+ */
+
+/* ---- project header (floating document bar) ---------------------------- */
+.canvas-studio.frosted-studio .workbench-project-actions{gap:9px;align-items:center}
+.canvas-studio.frosted-studio .workbench-project-actions>.ant-btn{width:auto;flex-shrink:0;height:34px;min-height:34px;padding:0 10px;font-size:12px;border-radius:10px;box-shadow:none;background:transparent}
+.canvas-studio.frosted-studio .workbench-project-actions>.workbench-back{width:34px;padding:0}
+.canvas-studio.frosted-studio .workbench-project-actions>.ant-btn.ant-btn-icon-only{width:34px;padding:0}
+.canvas-studio.frosted-studio .workbench-project-actions>.ant-btn[aria-label="模型配置"]{display:none}
+.canvas-studio.frosted-studio .workbench-project-actions .ant-btn svg{width:16px;height:16px}
+.canvas-studio.frosted-studio .workbench-document-controls{display:flex;align-items:center;gap:9px}
+.canvas-studio.frosted-studio .workbench-document-controls .workbench-save{height:34px;padding:0 14px;border-radius:10px;font-weight:500}
+.canvas-studio.frosted-studio .workbench-document-controls .workbench-assistant-toggle[aria-expanded="true"]{background:var(--sc-accent-soft,#dfefed);color:var(--sc-accent,#176c6b)}
+.canvas-studio.frosted-studio .workbench-project-actions .ant-tag{margin:0;border:0;border-radius:999px;font-size:11px;line-height:20px}
+.canvas-studio.frosted-studio .workbench-project-info{display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-width:220px;max-width:320px}
+.canvas-studio.frosted-studio .workbench-project-info .canvas-project-title{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.canvas-studio.frosted-studio .workbench-project-info .editor-save-state{font-size:12px;opacity:.72}
+
+/* ---- left tool rail ---------------------------------------------------- */
+.canvas-tool-rail .ant-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;width:48px;height:60px;min-width:48px;padding:0;border:0;border-radius:12px;background:transparent;color:var(--sc-ink-muted,#526869);font-size:11px;line-height:1;box-shadow:none}
+.canvas-tool-rail .ant-btn:hover{background:var(--sc-surface-muted,#eaf0f0);color:var(--sc-ink,#203334)}
+.canvas-tool-rail .ant-btn[aria-pressed="true"]{background:var(--sc-accent-soft,#dfefed);color:var(--sc-accent,#176c6b)}
+.canvas-tool-rail .ant-btn svg{width:20px;height:20px}
+.canvas-tool-rail .ant-btn>span:not(.ant-btn-icon){font-size:11px}
+
+/* ---- transform tools --------------------------------------------------- */
+.canvas-transform-tools .ant-btn{width:36px;height:36px;min-width:36px;padding:0;border:0;border-radius:10px;background:transparent;color:var(--sc-ink-muted,#526869);box-shadow:none}
+.canvas-transform-tools .ant-btn:hover{background:var(--sc-surface-muted,#eaf0f0);color:var(--sc-ink,#203334)}
+.canvas-transform-tools .ant-btn[aria-pressed="true"]{background:var(--sc-accent-soft,#dfefed);color:var(--sc-accent,#176c6b)}
+.canvas-transform-tools .ant-btn svg{width:17px;height:17px}
+.canvas-transform-tools .canvas-tool-help{display:flex;align-items:center}
+.canvas-transform-tools .ant-btn:disabled{opacity:.42;background:transparent}
+.canvas-transform-tools .box-selection-scope{height:28px;border-radius:9px;padding:0 9px;border:1px solid var(--sc-border,#c8d5d5);background:var(--sc-surface-elevated,#fdfefe);color:var(--sc-ink-muted,#526869);font-size:11px;white-space:nowrap}
+.canvas-transform-tools .box-selection-scope[aria-pressed="true"]{border-color:var(--sc-accent,#176c6b);color:var(--sc-accent,#176c6b)}
+
+/* ---- panel headings ---------------------------------------------------- */
+.canvas-studio .editor-objects .editor-panel-heading .ant-btn{width:28px;height:28px;min-width:28px;padding:0;border:0;border-radius:9px;background:transparent;color:var(--sc-ink-muted,#526869)}
+.canvas-studio .editor-objects .editor-panel-heading .ant-btn:hover{background:var(--sc-surface-muted,#eaf0f0);color:var(--sc-ink,#203334)}
+
+/* ---- conversation panel ------------------------------------------------ */
+.canvas-studio .conversation-panel-title{display:flex;align-items:center;justify-content:space-between;padding:0 8px 0 14px}
+.canvas-studio .conversation-panel-title .ant-btn{width:28px;height:28px;padding:0;border:0;border-radius:9px;background:transparent;color:var(--sc-ink-muted,#526869)}
+.canvas-studio .conversation-panel-title .ant-btn:hover{background:var(--sc-surface-muted,#eaf0f0);color:var(--sc-ink,#203334)}
+.canvas-studio .assistant-tabs button{border:0;background:transparent;color:var(--sc-ink-muted,#526869);font:inherit;font-size:12px;display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:9px;cursor:pointer}
+.canvas-studio .assistant-tabs button[aria-selected="true"]{background:var(--sc-accent-soft,#dfefed);color:var(--sc-accent,#176c6b)}
+
+/* ---- notices and empty canvas ------------------------------------------ */
+.canvas-studio .workspace-notice .ant-btn{height:28px;border-radius:9px;font-size:12px}
+.canvas-studio .workspace-notice .ant-btn.ant-btn-icon-only{width:28px;padding:0}
+.canvas-empty-guide .ant-btn{height:34px;border-radius:11px;padding:0 14px}
+
+/* ---- dialogs launched from the shell ----------------------------------- */
+.ant-modal .history-management{max-height:52vh;overflow:auto;margin-top:8px}
+.ant-modal .ant-modal-title{font-size:15px}
+.ant-modal .ant-modal-footer .ant-btn{min-width:88px}
+
+/* ---- loading ----------------------------------------------------------- */
+.workspace-loading .ant-spin{color:var(--sc-accent,#176c6b)}
