@@ -4,6 +4,11 @@ import React from 'react';
 import { createServer } from 'vite';
 const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'https://example.test'});
 for(const name of ['window','document','HTMLElement','Node','MutationObserver','Event','MouseEvent','localStorage','location','Element','CustomEvent','HTMLInputElement','NodeFilter','DocumentFragment','FileReader']) Object.defineProperty(globalThis,name,{value:dom.window[name],configurable:true});
+// antd and Ant Design X reach DOM constructors that jsdom only exposes on the window (SVGElement,
+// HTMLTextAreaElement, ...) and need matchMedia for their responsive observers.
+for(const name of Object.getOwnPropertyNames(dom.window)){const value=dom.window[name];if(/^[A-Z]/.test(name)&&typeof value==='function'&&!Object.prototype.hasOwnProperty.call(globalThis,name))Object.defineProperty(globalThis,name,{value,configurable:true,writable:true});}
+const mediaQuery=()=>({matches:false,media:'',onchange:null,addListener(){},removeListener(){},addEventListener(){},removeEventListener(){},dispatchEvent(){return false}});
+const matchMedia=dom.window.matchMedia??mediaQuery;globalThis.matchMedia=matchMedia;dom.window.matchMedia=matchMedia;
 Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;globalThis.getComputedStyle=dom.window.getComputedStyle;globalThis.requestAnimationFrame=fn=>setTimeout(fn,0);globalThis.cancelAnimationFrame=clearTimeout;window.requestAnimationFrame=globalThis.requestAnimationFrame;window.cancelAnimationFrame=clearTimeout;globalThis.ResizeObserver=class{observe(){} unobserve(){} disconnect(){}};
 let handler;let requests=[];
