@@ -313,3 +313,9 @@
 .quality-picker-option:focus-visible{outline:2px solid var(--sc-accent,#176c6b);outline-offset:1px}
 .quality-picker-option strong{display:block;font-size:12px;font-weight:600}
 .quality-picker-option small{display:block;margin-top:2px;font-size:11px;line-height:1.55;color:var(--sc-ink-muted,#526869)}
+
+/* antd popovers that host our own panel skin must not add their own frame. */
+.ant-popover-container:has(.studio-control-menu),
+.ant-popover-container:has(.manual-composition-panel),
+.ant-popover-container:has(.model-picker-menu),
+.ant-popover-container:has(.quality-picker-menu){padding:0;border-radius:12px}

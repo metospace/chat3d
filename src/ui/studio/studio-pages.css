@@ -73,7 +73,7 @@
   outline: 2px solid var(--sc-ink);
   outline-offset: 3px;
 }
-.canvas-studio.frosted-studio :is(.resource-page, .settings-page, .task-center) .rt-TextFieldRoot {
+.canvas-studio.frosted-studio :is(.resource-page, .settings-page, .task-center) :is(.ant-input-affix-wrapper,.ant-input,.rt-TextFieldRoot) {
   min-height: 36px;
   border: 1px solid var(--sc-border);
   border-radius: 6px;
