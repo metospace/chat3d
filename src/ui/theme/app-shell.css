@@ -287,3 +287,29 @@
 .settings-presets .ant-btn{height:28px;padding:0 11px;font-size:11px;border-radius:8px;color:var(--sc-ink-muted,#526869)}
 .settings-presets .ant-btn[aria-pressed="true"]{border-color:var(--sc-accent,#176c6b);color:var(--sc-accent,#176c6b);background:var(--sc-accent-soft,#dfefed);font-weight:600}
 .settings-manual.ant-btn{height:auto;padding:0;font-size:12px}
+
+/* ---- model + quality pickers (chat composer) ---------------------------- */
+.model-picker-trigger.ant-btn,.quality-picker-trigger.ant-btn{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 8px;border:0;border-radius:8px;background:transparent;box-shadow:none;color:var(--sc-ink-muted,#526869);font-size:12px;font-weight:500}
+.model-picker-trigger.ant-btn:hover,.quality-picker-trigger.ant-btn:hover{background:var(--sc-surface-muted,#eaf0f0);color:var(--sc-ink,#203334)}
+.model-picker-trigger.ant-btn:disabled,.quality-picker-trigger.ant-btn:disabled{opacity:.5;background:transparent}
+.model-picker-trigger.ant-btn span{max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.model-picker-trigger.ant-btn svg,.quality-picker-trigger.ant-btn svg{width:13px;height:13px;flex:none}
+.model-picker-menu{display:flex;flex-direction:column;gap:8px;width:264px;padding:4px}
+.model-picker-menu .ant-input-affix-wrapper{height:30px;border-radius:8px;font-size:12px}
+.model-picker-menu .ant-input-affix-wrapper .ant-input-prefix svg{width:12px;height:12px;color:var(--sc-ink-muted,#526869)}
+.model-picker-menu .ant-input-suffix .ant-btn{width:24px;height:24px;min-width:24px;padding:0;color:var(--sc-ink-muted,#526869)}
+.model-picker-options{display:flex;flex-direction:column;gap:2px;max-height:220px;overflow-y:auto}
+.model-picker-option.ant-btn{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;height:30px;padding:0 8px;border:0;border-radius:7px;background:transparent;box-shadow:none;color:var(--sc-ink,#203334);font-size:12px;text-align:left}
+.model-picker-option.ant-btn:hover{background:var(--sc-surface-muted,#eaf0f0)}
+.model-picker-option.ant-btn[aria-pressed="true"]{background:var(--sc-accent-soft,#dfefed);color:var(--sc-accent,#176c6b);font-weight:600}
+.model-picker-option.ant-btn svg{width:12px;height:12px;flex:none}
+.model-picker-connect.ant-btn{justify-content:flex-start;width:100%;height:28px;padding:0 8px;border:0;border-radius:7px;background:transparent;box-shadow:none;color:var(--sc-ink-muted,#526869);font-size:11px}
+.model-picker-connect.ant-btn:hover{background:var(--sc-surface-muted,#eaf0f0);color:var(--sc-ink,#203334)}
+.model-picker-menu p{margin:0;font-size:11px;color:var(--sc-ink-muted,#526869)}
+.quality-picker-menu{display:flex;flex-direction:column;gap:2px;width:250px;padding:4px}
+.quality-picker-option{display:flex;align-items:flex-start;gap:8px;padding:8px 9px;border-radius:8px;cursor:pointer;color:var(--sc-ink,#203334)}
+.quality-picker-option:hover{background:var(--sc-surface-muted,#eaf0f0)}
+.quality-picker-option[aria-checked="true"]{background:var(--sc-accent-soft,#dfefed)}
+.quality-picker-option:focus-visible{outline:2px solid var(--sc-accent,#176c6b);outline-offset:1px}
+.quality-picker-option strong{display:block;font-size:12px;font-weight:600}
+.quality-picker-option small{display:block;margin-top:2px;font-size:11px;line-height:1.55;color:var(--sc-ink-muted,#526869)}

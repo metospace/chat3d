@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState} from 'react';
-import {Button,Popover,TextField} from '@radix-ui/themes';
+import {Button,Input,Popover} from 'antd';
 import {CheckIcon,ChevronDownIcon,MagnifyingGlassIcon,ReloadIcon} from '@radix-ui/react-icons';
 import {fetchModels} from '../ai/provider';
 import {useEditorStore} from '../store';
@@ -13,5 +13,21 @@ export function ModelPicker({onConfigure,forNewProject=false}:{onConfigure?:()=>
  useEffect(()=>{if(locked)setOpen(false)},[locked]);
  const configured=!!config?.baseURL&&!!config.apiKey&&!config.useMock;
  function choose(model:string){const current=useEditorStore.getState();if((!forNewProject&&['capturing','context','generating','validating','applying'].includes(current.aiStatus))||current.aiConfig?.baseURL!==config?.baseURL||current.aiConfig?.apiKey!==config?.apiKey||catalogScope.current?.baseURL!==current.aiConfig?.baseURL||catalogScope.current?.apiKey!==current.aiConfig?.apiKey||!models.includes(model))return;current.setAiConfig({...current.aiConfig!,model});setOpen(false);setQuery('')}
- return <Popover.Root open={open} onOpenChange={value=>{if(locked)return;if(value&&!configured){onConfigure?.();return;}setOpen(value)}}><Popover.Trigger><Button type="button" className="model-picker-trigger" variant="ghost" color="gray" disabled={locked} aria-label={configured?`切换模型，当前 ${config?.model||'未选择'}`:'连接并选择模型'} title={locked?'生成中不能切换模型':config?.model||'连接并选择模型'}><span>{configured?(config?.model||'选择模型'):'连接模型'}</span><ChevronDownIcon/></Button></Popover.Trigger><Popover.Content className="model-picker-menu" side="top" align="start" aria-label="选择模型"><TextField.Root aria-label="搜索模型" placeholder="搜索模型…" value={query} onChange={e=>setQuery(e.target.value)}><TextField.Slot><MagnifyingGlassIcon/></TextField.Slot><TextField.Slot side="right"><Button type="button" variant="ghost" color="gray" aria-label="刷新模型列表" title="刷新模型列表" disabled={loading} onClick={()=>setRefresh(x=>x+1)}><ReloadIcon/></Button></TextField.Slot></TextField.Root><div className="model-picker-options" role="group" aria-label="可用模型">{models.filter(m=>m.toLowerCase().includes(query.toLowerCase())).map(m=><Button type="button" variant="ghost" color="gray" key={m} aria-label={`使用模型 ${m}`} aria-pressed={config?.model===m} onClick={()=>choose(m)}><span>{m}</span>{config?.model===m&&<CheckIcon/>}</Button>)}</div>{loading&&<p role="status">正在获取模型…</p>}{error&&<p role="alert">{error}</p>}{!loading&&!error&&!models.filter(m=>m.toLowerCase().includes(query.toLowerCase())).length&&<p>没有匹配的模型</p>}<Button type="button" variant="ghost" color="gray" onClick={()=>{setOpen(false);onConfigure?.()}}>连接设置</Button></Popover.Content></Popover.Root>;
+ const shown=models.filter(m=>m.toLowerCase().includes(query.toLowerCase()));
+ return <Popover
+  open={open}
+  onOpenChange={value=>{if(locked)return;if(value&&!configured){onConfigure?.();return;}setOpen(value)}}
+  trigger={['click']}
+  placement="topLeft"
+  destroyOnHidden
+  content={<div className="model-picker-menu" aria-label="选择模型">
+   <Input aria-label="搜索模型" placeholder="搜索模型…" value={query} onChange={e=>setQuery(e.target.value)} prefix={<MagnifyingGlassIcon/>} suffix={<Button type="text" size="small" aria-label="刷新模型列表" title="刷新模型列表" disabled={loading} onClick={()=>setRefresh(x=>x+1)} icon={<ReloadIcon/>}/>}/>
+   <div className="model-picker-options" role="group" aria-label="可用模型">{shown.map(m=><Button type="text" key={m} className="model-picker-option" aria-label={`使用模型 ${m}`} aria-pressed={config?.model===m} onClick={()=>choose(m)}><span>{m}</span>{config?.model===m&&<CheckIcon/>}</Button>)}</div>
+   {loading&&<p role="status">正在获取模型…</p>}
+   {error&&<p role="alert">{error}</p>}
+   {!loading&&!error&&!shown.length&&<p>没有匹配的模型</p>}
+   <Button type="text" className="model-picker-connect" onClick={()=>{setOpen(false);onConfigure?.()}}>连接设置</Button>
+  </div>}>
+  <Button type="text" className="model-picker-trigger" disabled={locked} aria-label={configured?`切换模型，当前 ${config?.model||'未选择'}`:'连接并选择模型'} title={locked?'生成中不能切换模型':config?.model||'连接并选择模型'}><span>{configured?(config?.model||'选择模型'):'连接模型'}</span><ChevronDownIcon/></Button>
+ </Popover>;
 }
