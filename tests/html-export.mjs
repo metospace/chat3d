@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import {writeFile} from 'node:fs/promises';
 import {JSDOM} from 'jsdom';
 import {createServer} from 'vite';
+import {installBrowserGlobals} from './jsdom-env.mjs';
 import * as THREE from 'three';
 
 const server=await createServer({server:{middlewareMode:true},appType:'custom'});
-const dom=new JSDOM('<!doctype html><html><body></body></html>');
+const dom=new JSDOM('<!doctype html><html><body></body></html>');installBrowserGlobals(dom);
 const globals=['window','document','HTMLImageElement','HTMLCanvasElement','ImageData','Image'];
 const original=new Map(globals.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)]));
 const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aM9sAAAAASUVORK5CYII=';

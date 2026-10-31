@@ -160,3 +160,41 @@
 .prop-select{width:100%;height:30px;padding:0 8px;border:1px solid var(--sc-border,#c8d5d5);border-radius:8px;background:var(--sc-surface-page,#f3f6f6);color:var(--sc-ink,#203334);font-size:12px}
 .prop-swatches{display:flex;flex-wrap:wrap;gap:6px}
 .prop-swatch.ant-btn{width:26px;height:26px;min-width:26px;padding:0;border-radius:7px;border:1px solid var(--sc-border,#c8d5d5)}
+
+/* ---- account trigger and login dialog ---------------------------------- */
+.studio-account-trigger.ant-btn{width:100%;height:auto;min-height:44px;padding:8px 10px;display:flex;align-items:center;justify-content:flex-start;gap:9px;border:0;border-radius:10px;background:transparent;color:var(--sc-nav-ink,#eef7f6);box-shadow:none;text-align:left}
+.studio-account-trigger.ant-btn:hover{background:#ffffff0c;color:var(--sc-nav-ink,#eef7f6)}
+.studio-account-trigger.ant-btn:disabled{opacity:.55}
+.studio-account-trigger.ant-btn .studio-account-copy{display:flex;flex-direction:column;align-items:flex-start;gap:1px;min-width:0}
+.studio-account-trigger.ant-btn .studio-account-copy strong{font-size:12px;font-weight:600;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.studio-account-trigger.ant-btn .studio-account-copy small{font-size:10px;color:var(--sc-nav-muted,#aec2c2)}
+.studio-account-trigger.ant-btn .studio-account-chevron{margin-left:auto;width:13px;height:13px;opacity:.7}
+.studio-account-menu.ant-dropdown-menu{min-width:190px;border-radius:12px;padding:5px}
+.studio-account-menu .ant-dropdown-menu-item{font-size:12px;border-radius:8px}
+.studio-account-error{margin:4px 10px;font-size:11px;color:#d07a7a}
+
+.studio-login-dialog .ant-modal-title{font-size:17px;font-weight:600;letter-spacing:-.2px}
+.studio-login-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.studio-login-heading .ant-btn{width:28px;height:28px;padding:0;border:0;border-radius:8px;color:var(--sc-ink-muted,#526869)}
+.studio-login-lede{margin:0 0 14px;font-size:12px;line-height:1.7;color:var(--sc-ink-muted,#526869)}
+.studio-login-expired{margin:0 0 12px;padding:8px 10px;border-radius:8px;font-size:11px;background:#fdf3e2;color:#8a5a12}
+.studio-login-scope{margin:14px 0 0;font-size:11px;line-height:1.7;color:var(--sc-ink-muted,#526869)}
+.studio-login-local{margin-top:16px;padding:14px;border:1px solid var(--sc-border-subtle,#dce4e4);border-radius:12px;background:var(--sc-surface-muted,#eaf0f0)}
+.studio-login-local strong{display:block;font-size:12px;margin-bottom:4px}
+.studio-login-local p{margin:0 0 10px;font-size:11px;line-height:1.7;color:var(--sc-ink-muted,#526869)}
+.studio-login-local .ant-btn{height:30px;border-radius:9px;font-size:12px}
+
+/* ---- backup dialog ------------------------------------------------------ */
+.backup-dialog .ant-modal-content{position:relative;padding:22px 24px}
+.backup-dialog .ant-modal-title{font-size:17px;font-weight:600;letter-spacing:-.2px}
+.backup-close.ant-btn{position:absolute;top:14px;right:14px;width:28px;height:28px;padding:0;border:0;border-radius:8px;color:var(--sc-ink-muted,#526869)}
+.backup-close.ant-btn:hover{background:var(--sc-surface-muted,#eaf0f0);color:var(--sc-ink,#203334)}
+.backup-lede{margin:0 0 16px;font-size:12px;line-height:1.7;color:var(--sc-ink-muted,#526869)}
+.backup-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:14px}
+.backup-actions section{display:flex;flex-direction:column;gap:6px;padding:14px;border:1px solid var(--sc-border-subtle,#dce4e4);border-radius:12px;background:var(--sc-surface-muted,#eaf0f0)}
+.backup-actions h3{margin:0;font-size:13px;font-weight:600}
+.backup-actions p{margin:0 0 6px;font-size:11px;line-height:1.7;color:var(--sc-ink-muted,#526869)}
+.backup-actions .ant-btn{height:32px;border-radius:9px;font-size:12px;align-self:flex-start}
+.backup-dialog .settings-info{margin:12px 0;padding:10px 12px;border-radius:9px;background:var(--sc-surface-muted,#eaf0f0);color:var(--sc-ink-muted,#526869);font-size:11px;line-height:1.7}
+.backup-dialog .settings-module-footer{display:flex;justify-content:flex-end;padding-top:12px;border-top:1px solid var(--sc-border-subtle,#dce4e4)}
+.backup-dialog .settings-module-footer .ant-btn{height:32px;border-radius:9px;font-size:12px}

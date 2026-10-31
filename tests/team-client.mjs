@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import assert from 'node:assert/strict';import {createServer as viteServer} from 'vite';import {JSDOM} from 'jsdom';import {mkdtemp,rm} from 'node:fs/promises';import {join} from 'node:path';import {tmpdir} from 'node:os';import {createServer} from 'node:http';
 import {openTeam,teamMiddleware} from '../server/team/service.mjs';import {validateTeamPayload} from '../dist-team/validator.mjs';
-const dom=new JSDOM('<html><body></body></html>',{url:'http://localhost'});Object.defineProperty(globalThis,'localStorage',{value:dom.window.localStorage,configurable:true});
+const dom=new JSDOM('<html><body></body></html>',{url:'http://localhost'});installBrowserGlobals(dom);Object.defineProperty(globalThis,'localStorage',{value:dom.window.localStorage,configurable:true});
 const vite=await viteServer({server:{middlewareMode:true},appType:'custom'}),dir=await mkdtemp(join(tmpdir(),'chat3d-team-client-'));const team=openTeam(join(dir,'test.sqlite'));let server;
 try{
  const api=await vite.ssrLoadModule('/src/domain/teamLibrary.ts'),w=await vite.ssrLoadModule('/src/workspace.ts'),{createInitialDoc}=await vite.ssrLoadModule('/src/store.ts'),{applyBatch}=await vite.ssrLoadModule('/src/domain/commands.ts'),assets=await vite.ssrLoadModule('/src/domain/modelAssets.ts'),storage=await vite.ssrLoadModule('/src/domain/modelAssetStorage.ts');

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import {JSDOM} from 'jsdom';
 import {createServer} from 'vite';
-const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'https://test.invalid'});
+import {installBrowserGlobals} from './jsdom-env.mjs';
+const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'https://test.invalid'});installBrowserGlobals(dom);
 for(const key of ['window','document','HTMLElement','HTMLInputElement','Element','CustomEvent','Node','NodeFilter','MutationObserver','Event','MouseEvent','localStorage','location'])Object.defineProperty(globalThis,key,{value:dom.window[key],configurable:true});Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});globalThis.getComputedStyle=dom.window.getComputedStyle;globalThis.requestAnimationFrame=f=>setTimeout(f,0);globalThis.cancelAnimationFrame=clearTimeout;window.requestAnimationFrame=globalThis.requestAnimationFrame;window.cancelAnimationFrame=clearTimeout;globalThis.ResizeObserver=class{observe(){}unobserve(){}disconnect(){}};globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 const {render,fireEvent,act,cleanup}=await import('@testing-library/react');const {Theme}=await import('@radix-ui/themes');const server=await createServer({server:{middlewareMode:true},appType:'custom'});let tests=0;const pass=name=>{console.log('PASS '+name);tests++};
 try{
