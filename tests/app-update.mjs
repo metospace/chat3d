@@ -236,8 +236,7 @@ try {
   assert.equal(client.useAppUpdate.getState().dismissed, release.version);
   await act(async () => client.useAppUpdate.setState({dismissed: null}));
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
-  fireEvent(document.querySelector('.rt-DialogOverlay'), new MouseEvent('pointerdown', {bubbles: true, button: 0, ctrlKey: false}));
-  fireEvent.click(document.querySelector('.rt-DialogOverlay'));
+  fireEvent.mouseDown(document.querySelector('.app-modal-backdrop'), {button: 0});
   await waitFor(() => assert.equal(notice.queryByRole('dialog', {name: '应用更新'}) === null, true));
   assert.equal(client.useAppUpdate.getState().dismissed, release.version);
   await act(async () => client.useAppUpdate.setState({release, dismissed: null, remind: null, phase: 'installing', progress: '正在下载更新… 40%', progressMetrics: {loaded: 80, total: 200, label: '正在下载更新… 40%'}}));
@@ -247,8 +246,7 @@ try {
   assert.ok(noticeDialog.getByText('40%'));
   fireEvent.keyDown(notice.getByRole('dialog', {name: '应用更新'}), {key: 'Escape'});
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
-  fireEvent(document.querySelector('.rt-DialogOverlay'), new MouseEvent('pointerdown', {bubbles: true, button: 0, ctrlKey: false}));
-  fireEvent.click(document.querySelector('.rt-DialogOverlay'));
+  fireEvent.mouseDown(document.querySelector('.app-modal-backdrop'), {button: 0});
   assert.ok(notice.getByRole('dialog', {name: '应用更新'}));
   assert.equal(client.useAppUpdate.getState().phase, 'installing');
   assert.equal(noticeDialog.queryAllByRole('button').length, 0);
@@ -261,8 +259,8 @@ try {
   for (const selector of ['.app-update-dialog-header', '.app-update-dialog-heading', '.app-update-dialog-body', '.app-update-dialog-footer']) assert.ok(aboutDialog.querySelector(selector));
   const aboutHeading = aboutDialog.querySelector('.app-update-dialog-heading');
   assert.ok(aboutHeading);
-  assert.ok(aboutHeading.querySelector('.rt-Heading, .rt-DialogTitle, h1'));
-  assert.ok(aboutHeading.querySelector('.rt-Text, .rt-DialogDescription, p'));
+  assert.ok(aboutHeading.querySelector('.app-modal-title, h1, h2'));
+  assert.ok(aboutHeading.querySelector('.app-modal-description, p'));
   assert.match(aboutHeading.textContent ?? '', /查看当前版本、检查更新/);
   // Title+Description must live in column-2 wrapper (not as direct grid kids of the 24px icon column).
   assert.equal(aboutDialog.querySelector('.app-update-dialog-header')?.children.length, 2);
