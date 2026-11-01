@@ -139,8 +139,8 @@
 .adx-sender .ant-sender-prefix{margin:0 4px 0 0;align-self:flex-end;flex:0 0 auto;min-width:28px}
 .adx-chat .adx-sender .ant-sender-prefix{width:max-content}
 .adx-sender .ant-sender-footer{padding:4px 2px 0;border-top:1px solid var(--adx-line);margin-top:7px}
-.adx-attach-trigger.rt-Button{width:28px;height:28px;min-width:28px;padding:0;border-radius:9px;color:var(--adx-muted)}
-.adx-attach-trigger.rt-Button:hover{background:var(--adx-panel-soft);color:var(--adx-ink)}
+.adx-attach-trigger.ant-btn{width:28px;height:28px;min-width:28px;padding:0;border-radius:9px;color:var(--adx-muted)}
+.adx-attach-trigger.ant-btn:hover{background:var(--adx-panel-soft);color:var(--adx-ink)}
 .adx-attachments{display:flex;flex-wrap:wrap;gap:7px;padding:2px 2px 0}
 .adx-attachment{position:relative}
 .adx-attachment img{display:block;width:58px;height:46px;object-fit:cover;border-radius:8px;border:1px solid var(--adx-line)}
@@ -168,7 +168,7 @@
 .adx-queue-row{display:flex;align-items:center;gap:4px;padding:5px 8px;font-size:11.5px;border-top:1px solid color-mix(in srgb,var(--adx-line) 60%,transparent)}
 .adx-queue-row:first-child{border-top:0}
 .adx-queue-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--adx-ink)}
-.adx-queue-more.rt-Button{width:24px;height:24px;min-width:24px;padding:0;border-radius:7px}
+.adx-queue-more.ant-btn{width:24px;height:24px;min-width:24px;padding:0;border-radius:7px}
 .adx-queue-undo{padding:4px 2px;font-size:11px;color:var(--adx-muted)}
 
 /* ---------- compact canvas strips + lightbox ---------- */
@@ -184,3 +184,14 @@
   .adx-welcome .ant-welcome-title{font-size:18px}
   .adx-composer-hint{display:none}
 }
+
+/* Composer and queue menus: self-managed popups (src/ui/kit/PopoverPanel.tsx), so they
+   carry their own frame instead of inheriting one from a menu component. */
+.composer-action-menu{display:flex;flex-direction:column;gap:2px;min-width:190px;padding:6px;border:1px solid var(--sc-border-subtle,#dce4e4);border-radius:12px;background:var(--sc-surface-elevated,#fdfefe);box-shadow:var(--sc-shadow-float,0 14px 34px rgba(12,32,34,.16));color:var(--sc-ink,#203334)}
+.composer-action-item{display:flex;align-items:center;gap:8px;width:100%;padding:8px 9px;border:0;border-radius:8px;background:transparent;color:inherit;font:inherit;font-size:12px;text-align:left;cursor:pointer}
+.composer-action-item:hover:not(:disabled){background:var(--sc-surface-muted,#eaf0f0)}
+.composer-action-item:disabled{opacity:.45;cursor:not-allowed}
+.composer-action-item svg{width:14px;height:14px;flex:none}
+.composer-action-divider{height:1px;margin:4px 6px;background:var(--sc-border-subtle,#dce4e4)}
+.composer-action-check{display:grid;place-items:center;width:14px;height:14px;flex:none}
+.composer-action-note{margin:6px 8px 2px;font-size:10px;color:var(--sc-ink-muted,#526869)}

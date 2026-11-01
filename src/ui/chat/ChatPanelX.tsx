@@ -1,9 +1,9 @@
 import {forwardRef,useEffect,useImperativeHandle,useMemo,useRef,useState,type ComponentRef,type ComponentType} from 'react';
 import {prepareReference,isReferenceImage,attachmentInfo,MAX_ATTACHMENT_BYTES} from '../../domain/referenceAttachments';
 import {REFERENCE_IMAGE_JPEG_QUALITY,REFERENCE_IMAGE_MAX_SIDE} from '../../domain/referenceImageLimits';
-import {Button as RButton,DropdownMenu} from '@radix-ui/themes';
-import {PlusIcon,ArrowUpIcon,StopIcon,ImageIcon,PersonIcon,ChatBubbleIcon,DotsHorizontalIcon,Pencil1Icon,TrashIcon} from '@radix-ui/react-icons';
+import {PlusIcon,ArrowUpIcon,StopIcon,ImageIcon,PersonIcon,ChatBubbleIcon,DotsHorizontalIcon,Pencil1Icon,TrashIcon,CheckIcon} from '@radix-ui/react-icons';
 import {Button,Input,Tag,type GetProps} from 'antd';
+import {PopoverPanel} from '../kit/PopoverPanel';
 import {Bubble,Sender,Welcome} from '@ant-design/x';
 import {useStore} from 'zustand';
 import {useEditorStore,type ChatMessage} from '../../store';
@@ -60,6 +60,22 @@ const ComposerInput=forwardRef<ComposerInputRef,ComposerInputProps>(function Com
   return <Input.TextArea {...props} ref={areaRef} aria-label="建模指令" rows={props.rows??4} className="adx-composer-input" autoSize={props.autoSize}/>;
 });
 
+/** Per-row options for a queued message. Owns its trigger ref so the popup follows the row. */
+function QueueRowMenu({text,busy,canSteer,onQuestion,onEdit,onRemove}:{text:string;busy:boolean;canSteer:boolean;onQuestion:()=>void;onEdit:()=>void;onRemove:()=>void}){
+  const [open,setOpen]=useState(false),triggerRef=useRef<HTMLButtonElement>(null);
+  const run=(action:()=>void)=>{setOpen(false);action();};
+  return <>
+    <Button ref={triggerRef} type="text" size="small" className="adx-queue-more" aria-label={`消息选项 ${text}`} aria-haspopup="menu" aria-expanded={open} onClick={()=>setOpen(value=>!value)} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '||event.key==='ArrowDown'){event.preventDefault();setOpen(true);}}}><DotsHorizontalIcon/></Button>
+    <PopoverPanel anchor={triggerRef} open={open} onClose={()=>setOpen(false)} label={`消息选项 ${text}`}>
+      <div className="composer-action-menu" role="menu" aria-label="消息选项">
+        {busy&&<button type="button" role="menuitem" className="composer-action-item" disabled={!canSteer} onClick={()=>run(onQuestion)}>只提问，不修改模型</button>}
+        <button type="button" role="menuitem" className="composer-action-item" onClick={()=>run(onEdit)}><Pencil1Icon/>编辑消息</button>
+        <button type="button" role="menuitem" className="composer-action-item" onClick={()=>run(onRemove)}><TrashIcon/>移出队列</button>
+      </div>
+    </PopoverPanel>
+  </>;
+}
+
 const SendIcon=<ArrowUpIcon/>;
 
 export type ChatPanelProps={autoStartRequest?:{id:string;projectId:string}|null;onAutoStartConsumed?:(id:string)=>void;executionDetails?:boolean;onConfigure?:()=>void;onAssets?:()=>void;canvasMode?:boolean;expanded?:boolean;onExpand?:()=>void};
@@ -89,6 +105,8 @@ function ChatSurface({onConfigure,onAssets,canvasMode=false,expanded=true,onExpa
   const [now, setNow] = useState(Date.now());
   const [reuseReference, setReuseReference] = useState(true);
   const [imageView, setImageView] = useState<string | null>(null);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const attachRef = useRef<HTMLButtonElement>(null);
   const [newMessages, setNewMessages] = useState(false);
   const imageBusyRef = useRef(false);
   const aliveRef = useRef(true);
@@ -232,7 +250,7 @@ function ChatSurface({onConfigure,onAssets,canvasMode=false,expanded=true,onExpa
     {canvasMode&&!expanded&&previewing&&<div className="adx-compact-strip"><span>修改结果待确认</span><Button size="small" onClick={onExpand}>查看详情</Button><Button size="small" type="primary" disabled={compareBefore} onClick={commit}>应用修改</Button><Button size="small" onClick={discard}>放弃修改</Button></div>}
     {canvasMode&&!expanded&&busy&&<div className="adx-compact-strip"><span>正在处理 · {{idle:'就绪',capturing:'检查画面',context:'准备上下文',generating:'生成中',validating:'校验修改',applying:'应用修改',previewing:'待确认',error:'失败',cancelled:'已停止'}[aiStatus]}</span><Button size="small" onClick={onExpand}>查看过程</Button></div>}
     <div className="adx-composer">
-      {!!pendingMessages.length&&<section className="adx-queue" role="region" aria-label="排队消息"><div className="adx-queue-head">{pendingMessages.length} 条待处理消息</div><div className="adx-queue-list">{pendingMessages.map(m=><div className="adx-queue-row" key={m.id}><span className="adx-queue-text" title={m.text}>{m.text}{m.images?.length?` · ${m.images.length}张图`:''}</span>{busy?<Button type="text" size="small" disabled={!canSteer} onClick={()=>promoteQueued(m.id,'guide')} title="将这条消息交给当前任务调整方向">引导</Button>:<Button type="text" size="small" onClick={()=>prepareQueued(m.id)}>准备发送</Button>}<Button type="text" size="small" aria-label={`移出队列 ${m.text}`} title="移出队列" onClick={()=>removeQueued(m.id)}><TrashIcon/></Button><DropdownMenu.Root><DropdownMenu.Trigger><RButton type="button" variant="ghost" color="gray" className="adx-queue-more" aria-label={`消息选项 ${m.text}`}><DotsHorizontalIcon/></RButton></DropdownMenu.Trigger><DropdownMenu.Content className="composer-action-menu" side="top" align="end" color="gray">{busy&&<DropdownMenu.Item disabled={!canSteer} onSelect={()=>promoteQueued(m.id,'question')}>只提问，不修改模型</DropdownMenu.Item>}<DropdownMenu.Item onSelect={()=>prepareQueued(m.id)}><Pencil1Icon/>编辑消息</DropdownMenu.Item><DropdownMenu.Item onSelect={()=>removeQueued(m.id)}><TrashIcon/>移出队列</DropdownMenu.Item></DropdownMenu.Content></DropdownMenu.Root></div>)}</div></section>}
+      {!!pendingMessages.length&&<section className="adx-queue" role="region" aria-label="排队消息"><div className="adx-queue-head">{pendingMessages.length} 条待处理消息</div><div className="adx-queue-list">{pendingMessages.map(m=><div className="adx-queue-row" key={m.id}><span className="adx-queue-text" title={m.text}>{m.text}{m.images?.length?` · ${m.images.length}张图`:''}</span>{busy?<Button type="text" size="small" disabled={!canSteer} onClick={()=>promoteQueued(m.id,'guide')} title="将这条消息交给当前任务调整方向">引导</Button>:<Button type="text" size="small" onClick={()=>prepareQueued(m.id)}>准备发送</Button>}<Button type="text" size="small" aria-label={`移出队列 ${m.text}`} title="移出队列" onClick={()=>removeQueued(m.id)}><TrashIcon/></Button><QueueRowMenu text={m.text} busy={busy} canSteer={canSteer} onQuestion={()=>promoteQueued(m.id,'question')} onEdit={()=>prepareQueued(m.id)} onRemove={()=>removeQueued(m.id)}/></div>)}</div></section>}
       {removedQueueId&&<div className="adx-queue-undo">已移出队列 <button type="button" className="adx-link" onClick={restoreQueued}>撤销移除</button></div>}
       <input ref={fileRef} type="file" multiple className="hidden" onChange={e=>{void addImages(Array.from(e.target.files??[]));e.target.value='';}}/>
       <Sender
@@ -252,7 +270,7 @@ function ChatSurface({onConfigure,onAssets,canvasMode=false,expanded=true,onExpa
         placeholder={busy ? canSteer?'输入后发送到上方队列，可选择引导当前任务…':'正在准备，可先输入补充要求…' : previewing?'继续描述调整要求，将修改当前预览…': '描述结构、尺寸与需要修改的细节…'}
         components={{input: ComposerInput as ComponentType<ComposerInputProps>}}
         header={attachments.length?<div className="adx-attachments">{attachments.map((src,i)=><div key={i} className="adx-attachment">{isReferenceImage(src)?<button type="button" onClick={()=>setImageView(src)}><img src={src} alt={`待发送参考图 ${i+1}`}/></button>:<span className="adx-file-chip">{attachmentInfo(src).name}</span>}<button type="button" aria-label={`移除参考附件 ${i+1}`} className="adx-attachment-remove" onClick={()=>setAttachments(prev=>prev.filter((_,j)=>i!==j))}>×</button></div>)}</div>:undefined}
-        prefix={<DropdownMenu.Root><DropdownMenu.Trigger><RButton type="button" variant="ghost" color="gray" aria-label="添加与参考附件选项" title="添加参考附件与附件选项" className="composer-icon adx-attach-trigger"><PlusIcon/>{attachments.length>0&&<span className="attachment-count">{attachments.length}</span>}</RButton></DropdownMenu.Trigger><DropdownMenu.Content className="composer-action-menu" align="start" side="top" color="gray"><DropdownMenu.Item disabled={imageBusy} onSelect={()=>fileRef.current?.click()}><ImageIcon/>{imageBusy?'正在处理参考附件':'添加参考附件'}</DropdownMenu.Item>{!attachments.length&&messages.some(m=>m.images?.length)&&<><DropdownMenu.Separator/><DropdownMenu.CheckboxItem checked={reuseReference} onCheckedChange={setReuseReference}>沿用最近参考附件</DropdownMenu.CheckboxItem></>}<DropdownMenu.Label>每个附件100MB以内</DropdownMenu.Label></DropdownMenu.Content></DropdownMenu.Root>}
+        prefix={<><Button ref={attachRef} type="text" aria-label="添加与参考附件选项" title="添加参考附件与附件选项" className="composer-icon adx-attach-trigger" aria-haspopup="menu" aria-expanded={attachOpen} onClick={()=>setAttachOpen(open=>!open)} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '||event.key==='ArrowDown'){event.preventDefault();setAttachOpen(true);}}}><PlusIcon/>{attachments.length>0&&<span className="attachment-count">{attachments.length}</span>}</Button><PopoverPanel anchor={attachRef} open={attachOpen} onClose={()=>setAttachOpen(false)} label="参考附件选项"><div className="composer-action-menu" role="menu" aria-label="参考附件选项"><button type="button" role="menuitem" className="composer-action-item" disabled={imageBusy} onClick={()=>{setAttachOpen(false);fileRef.current?.click();}}><ImageIcon/>{imageBusy?'正在处理参考附件':'添加参考附件'}</button>{!attachments.length&&messages.some(m=>m.images?.length)&&<><div className="composer-action-divider" role="separator"/><button type="button" role="menuitemcheckbox" aria-checked={reuseReference} aria-label="沿用最近参考附件" className="composer-action-item" onClick={()=>setReuseReference(value=>!value)}><span className="composer-action-check" aria-hidden="true">{reuseReference&&<CheckIcon/>}</span>沿用最近参考附件</button></>}<p className="composer-action-note">每个附件100MB以内</p></div></PopoverPanel></>}
         suffix={<span className="adx-send-cluster">
           {busy&&(!!input.trim()||!!attachments.length)&&<Button shape="circle" title="停止当前任务，保留输入和已生成草稿" aria-label="停止生成" onClick={cancel} icon={<StopIcon/>}/>}
           <Button type="primary" shape="circle" className={busy?'is-running':''}
