@@ -4400,15 +4400,7 @@
   color: var(--gray-11);
   font-size: 12px
 }
-.result-message-details {
-  max-height: 240px;
-  overflow: auto;
-  margin-top: 8px;
-  padding: 10px;
-  border: 1px solid var(--gray-5);
-  border-radius: var(--sc-radius-md);
-  color: var(--gray-12)
-}
+
 .properties-panel input,.properties-panel select {
   background: var(--gray-3);
   color: var(--gray-12);
@@ -10625,8 +10617,9 @@ body:has(.frosted-studio) .background-color-swatch.is-dark {
 }
 .canvas-studio.frosted-studio .canvas-context-label {
   position: absolute;
-  top: 18px;
+  top: 58px;
   left: 18px;
+  right: 18px;
   z-index: 4;
   display: flex;
   align-items: center;
@@ -10634,7 +10627,7 @@ body:has(.frosted-studio) .background-color-swatch.is-dark {
   color: var(--sc-ink-muted);
   font-size: 13px;
   pointer-events: none;
-  max-width: 45%;
+  max-width: calc(100% - 36px);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis
@@ -10864,14 +10857,9 @@ body:has(.frosted-studio) .background-color-swatch.is-dark {
   color: var(--sc-ink-muted)!important;
   margin-bottom: 17px
 }
-.canvas-studio.frosted-studio .canvas-inspector input {
-  min-height: 34px;
-  border: 1px solid var(--sc-border-subtle);
-  background: var(--sc-surface-subtle);
-  color: var(--sc-ink);
-  border-radius: 5px;
-  font-variant-numeric: tabular-nums
-}
+
+.canvas-studio.frosted-studio .canvas-inspector .ant-input-number { width:100%; }
+.canvas-studio.frosted-studio .canvas-inspector .ant-input-number-input { border:0; background:transparent; min-height:0; box-shadow:none; }
 .canvas-studio.frosted-studio .canvas-inspector .canvas-apply-transform {
   min-height: 32px;
   margin-top: 12px;
@@ -14126,11 +14114,11 @@ body:has(.frosted-studio) .workbench-project-info .editor-save-state,body:has(.f
   border-bottom: 1px solid var(--sc-border-subtle);
   background: var(--sc-surface-elevated);
 }
-.canvas-studio.frosted-studio.editor-mode :is(.adx-orb, .adx-avatar) {
+.canvas-studio.frosted-studio.editor-mode .adx-orb {
   border-radius: 6px;
   box-shadow: none;
 }
-.canvas-studio.frosted-studio.editor-mode :is(.adx-starter, .adx-connect, .adx-run, .adx-queue, .adx-preview, .adx-chat-alert, .adx-scroll-latest) {
+.canvas-studio.frosted-studio.editor-mode :is(.adx-starter, .adx-connect, .adx-queue, .adx-preview, .adx-chat-alert, .adx-scroll-latest) {
   border-radius: 6px;
   box-shadow: none;
   background: var(--sc-surface-elevated);
@@ -14148,7 +14136,6 @@ body:has(.frosted-studio) .workbench-project-info .editor-save-state,body:has(.f
   box-shadow: none;
 }
 .canvas-studio.frosted-studio.editor-mode .adx-composer {
-  padding-top: 12px;
   border-top: 1px solid var(--sc-border-subtle);
   background: var(--sc-surface-elevated);
 }

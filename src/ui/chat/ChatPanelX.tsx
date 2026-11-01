@@ -2,7 +2,7 @@ import {AccessibleModal as Modal} from '../kit/AccessibleModal';
 import {forwardRef,useEffect,useImperativeHandle,useMemo,useRef,useState,type ComponentRef,type ComponentType} from 'react';
 import {prepareReference,isReferenceImage,attachmentInfo,MAX_ATTACHMENT_BYTES} from '../../domain/referenceAttachments';
 import {REFERENCE_IMAGE_JPEG_QUALITY,REFERENCE_IMAGE_MAX_SIDE} from '../../domain/referenceImageLimits';
-import {PlusIcon,ArrowUpIcon,StopIcon,ImageIcon,PersonIcon,ChatBubbleIcon,DotsHorizontalIcon,Pencil1Icon,TrashIcon,CheckIcon} from '@radix-ui/react-icons';
+import {PlusIcon,ArrowUpIcon,StopIcon,ImageIcon,ChatBubbleIcon,DotsHorizontalIcon,Pencil1Icon,TrashIcon,CheckIcon} from '@radix-ui/react-icons';
 import {Button,Input,Tag,Select,Checkbox,type GetProps} from 'antd';
 import {PopoverPanel} from '../kit/PopoverPanel';
 import {Bubble,Prompts,Sender,Welcome,FileCard} from '@ant-design/x';
@@ -20,6 +20,7 @@ import {QualityPicker} from '../QualityPicker';
 import {AppTheme} from '../theme/AppTheme';
 import {RunTrace} from './RunTrace';
 import './adx-chat.css';
+import './conversation.css';
 
 export {REQUEST_TIMEOUT_MS} from '../../runtime/conversationController';
 
@@ -58,7 +59,7 @@ const ComposerInput=forwardRef<ComposerInputRef,ComposerInputProps>(function Com
     clear: ()=>{const el=textarea(); if(!el) return; el.value=''; el.dispatchEvent(new Event('input',{bubbles:true}));},
     getValue: ()=>({value:String(props.value??''),slotConfig:[]}),
   }),[props.value]);
-  return <Input.TextArea {...props} ref={areaRef} aria-label="建模指令" rows={props.rows??4} className="adx-composer-input" autoSize={props.autoSize}/>;
+  return <Input.TextArea {...props} ref={areaRef} aria-label="建模指令" rows={props.rows??2} className="adx-composer-input" autoSize={props.autoSize}/>;
 });
 
 /** Per-row options for a queued message. Owns its trigger ref so the popup follows the row. */
@@ -229,16 +230,16 @@ function ChatSurface({onConfigure,onAssets,canvasMode=false,expanded=true,onExpa
       </div>}
       {(!aiConfig || aiConfig.useMock || !aiConfig.apiKey)&&<div className="adx-connect" role="note"><div><strong>连接模型，开始创作</strong><small>手动编辑、保存与导出始终可用</small></div><Button type="primary" onClick={onConfigure}>连接模型 ↗</Button></div>}
       {messages.filter(m=>!m.queuedTask).map(m=><div key={m.id} className="adx-turn">
-        <Bubble
+        {(m.text.trim()||m.images?.length||m.batch)&&<Bubble
           className={`adx-bubble ${m.role==='user'?'is-user':'is-assistant'} ${m.error?'is-error':''}`}
           placement={m.role==='user'?'end':'start'}
           variant={m.role==='user'?'filled':'outlined'}
-          avatar={canvasMode?<span className={`adx-avatar ${m.role}`} aria-hidden="true">{m.role==='user'?<PersonIcon/>:<ChatBubbleIcon/>}</span>:undefined}
-          header={<span className="adx-bubble-meta">{m.role==='user'?'你':'Scenivo'} · {new Date(m.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span>}
+          avatar={undefined}
+          header={undefined}
           content={bubbleContent(m)}
           footer={messageFooter(m)}
           footerPlacement={m.role==='user'?'outer-end':'outer-start'}
-        />
+        />}
         {m.run&&<RunTrace run={m.run} activity={busy&&m.id===runMessageId.current?agentActivity:undefined}/>}
         {!canvasMode&&previewing&&m.batch?.requestId===pendingBatch?.requestId&&previewCard}
       </div>)}
