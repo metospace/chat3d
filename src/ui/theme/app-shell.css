@@ -314,6 +314,27 @@
 .quality-picker-option strong{display:block;font-size:12px;font-weight:600}
 .quality-picker-option small{display:block;margin-top:2px;font-size:11px;line-height:1.55;color:var(--sc-ink-muted,#526869)}
 
+/* ---- asset library dialog ---------------------------------------------- */
+.asset-management-module{max-height:90vh;max-width:1080px;padding:24px}
+.asset-management-module .app-modal-description{margin-bottom:16px}
+.asset-library-layout{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(280px,1fr);gap:20px;margin-top:18px}
+.asset-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(145px,1fr));gap:12px;max-height:52vh;overflow:auto;padding-right:2px}
+.asset-card.ant-btn{display:flex;flex-direction:column;align-items:stretch;gap:6px;height:auto;min-height:0;padding:10px;border:1px solid var(--sc-border-subtle,#dce4e4);border-radius:12px;background:var(--sc-surface-subtle,#f6f9f9);color:var(--sc-ink,#203334);text-align:left;white-space:normal;box-shadow:none}
+.asset-card.ant-btn:hover{border-color:var(--sc-border,#c8d5d5);color:var(--sc-ink,#203334)}
+.asset-card.ant-btn.selected{border-color:var(--sc-accent,#176c6b);box-shadow:0 0 0 1px var(--sc-accent,#176c6b)}
+.asset-card.ant-btn:disabled{opacity:.45}
+.asset-card.ant-btn img{width:100%;aspect-ratio:4/3;object-fit:contain;border-radius:8px;background:var(--sc-surface-muted,#eaf0f0)}
+.asset-card.ant-btn .asset-placeholder{display:grid;place-items:center;width:100%;aspect-ratio:4/3;border-radius:8px;background:var(--sc-surface-muted,#eaf0f0);color:var(--sc-ink-muted,#526869);font-size:12px}
+.asset-card.ant-btn strong{font-size:12px;font-weight:600;line-height:1.35;overflow-wrap:anywhere}
+.asset-card.ant-btn span,.asset-card.ant-btn small{font-size:11px;line-height:1.35;color:var(--sc-ink-muted,#526869)}
+.asset-button.ant-btn{height:auto;min-height:34px;padding:7px 12px;border:1px solid var(--sc-border,#c8d5d5);border-radius:9px;background:var(--sc-surface-elevated,#fdfefe);color:var(--sc-ink,#203334);font-size:12px;white-space:normal;box-shadow:none}
+.asset-button.ant-btn:hover{border-color:var(--sc-accent,#176c6b);color:var(--sc-accent,#176c6b)}
+.asset-button.ant-btn:disabled{opacity:.45}
+.asset-button.ant-btn.primary{background:var(--sc-accent,#176c6b);border-color:var(--sc-accent,#176c6b);color:#fff}
+.asset-button.ant-btn.primary:disabled{background:var(--sc-accent,#176c6b);color:#fff}
+.asset-button.ant-btn[aria-pressed="true"]{background:var(--sc-accent-soft,#dfefed);border-color:var(--sc-accent,#176c6b);color:var(--sc-accent,#176c6b)}
+@media(max-width:760px){.asset-library-layout{grid-template-columns:1fr}.asset-card-grid{max-height:32vh}}
+
 /* antd popovers that host our own panel skin must not add their own frame. */
 .ant-popover-container:has(.studio-control-menu),
 .ant-popover-container:has(.manual-composition-panel),
