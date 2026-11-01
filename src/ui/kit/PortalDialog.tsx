@@ -11,7 +11,7 @@ import {ConfigProvider} from 'antd';
  * The provider pins `autoInsertSpace` off so two-character labels such as 取消 stay
  * verbatim even when the dialog is rendered outside the app theme (as tests do).
  */
-export function PortalDialog({label,onClose,closable=true,width=480,className,children}:{label:string;onClose:()=>void;closable?:boolean;width?:number;className?:string;children:ReactNode}){
+export function PortalDialog({label,onClose,closable=true,width=480,className,describedBy,children}:{label:string;onClose:()=>void;closable?:boolean;width?:number;className?:string;describedBy?:string;children:ReactNode}){
   const panelRef=useRef<HTMLDivElement>(null);
   useEffect(()=>{panelRef.current?.focus();},[]);
   useEffect(()=>{
@@ -22,7 +22,7 @@ export function PortalDialog({label,onClose,closable=true,width=480,className,ch
   },[closable,onClose]);
   return createPortal(
     <div className="app-modal-backdrop" onMouseDown={event=>{if(closable&&event.target===event.currentTarget)onClose();}}>
-      <div ref={panelRef} className={`app-modal-panel${className?' '+className:''}`} role="dialog" aria-modal="true" aria-label={label} style={{maxWidth:width}} tabIndex={-1}>
+      <div ref={panelRef} className={`app-modal-panel${className?' '+className:''}`} role="dialog" aria-modal="true" aria-label={label} aria-describedby={describedBy} style={{maxWidth:width}} tabIndex={-1}>
         <ConfigProvider button={{autoInsertSpace:false}}>{children}</ConfigProvider>
       </div>
     </div>,
