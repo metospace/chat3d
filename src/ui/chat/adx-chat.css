@@ -94,6 +94,13 @@
 .adx-orb{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:13px;background:var(--adx-accent);color:#fff;box-shadow:0 6px 18px color-mix(in srgb,var(--adx-accent) 30%,transparent)}
 .adx-starters{display:flex;flex-direction:column;gap:7px}
 .adx-starters-label{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--adx-muted)}
+.adx-starters .ant-prompts-title{margin:0;font:inherit;line-height:inherit}
+.adx-starters .ant-prompts-list{gap:7px}
+.adx-starters .ant-prompts-item.adx-starter{width:100%;padding:11px 13px;border-color:var(--adx-line);border-radius:12px;background:var(--adx-panel);color:var(--adx-ink);font:inherit;font-size:12.5px;text-align:left}
+.adx-starters .ant-prompts-content{width:100%}
+.adx-starters .ant-prompts-label{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0;font:inherit}
+.adx-starters .ant-prompts-item.adx-starter:hover{background:var(--adx-panel);border-color:color-mix(in srgb,var(--adx-accent) 42%,var(--adx-line))}
+.adx-starters .ant-prompts-item.adx-starter:focus-visible{outline:2px solid var(--adx-accent);outline-offset:2px}
 .adx-starter{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 13px;border:1px solid var(--adx-line);border-radius:12px;background:var(--adx-panel);color:var(--adx-ink);font:inherit;font-size:12.5px;text-align:left;cursor:pointer;transition:border-color .16s,transform .16s,box-shadow .16s}
 .adx-starter strong{font-weight:500}
 .adx-starter span{color:var(--adx-muted)}

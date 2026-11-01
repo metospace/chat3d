@@ -22,7 +22,9 @@ body:has(.frosted-studio) .model-settings-module :is(button,input,select):focus-
 .canvas-studio.frosted-studio .studio-text-link:disabled { opacity: .4; }
 .canvas-studio.frosted-studio :is(button,input,textarea,select):focus-visible { outline: 2px solid var(--sc-focus); outline-offset: 3px; }
 .canvas-studio.frosted-studio .composer-send,
-.canvas-studio.frosted-studio .workbench-save{ background: var(--sc-accent) !important; color: var(--sc-accent-ink) !important; border: 0 !important; box-shadow: none !important; }
+.canvas-studio.frosted-studio .workbench-save{ background: var(--sc-accent); color: var(--sc-accent-ink); border: 0; box-shadow: none; }
+.canvas-studio.frosted-studio :is(.composer-send,.workbench-save):enabled:hover{background:color-mix(in srgb,var(--sc-accent) 88%,var(--sc-ink));color:var(--sc-accent-ink)}
+.canvas-studio.frosted-studio :is(.composer-send,.workbench-save):enabled:active{background:color-mix(in srgb,var(--sc-accent) 76%,var(--sc-ink))}
 .canvas-studio.frosted-studio :is(.composer-send,.primary,.workbench-save):disabled { opacity: .4; }
 body:has(.frosted-studio) .app-update-version-chip { border-radius:6px;box-shadow:none;background:var(--gray-2); }
 body:has(.frosted-studio) .app-update-panel-lead,body:has(.frosted-studio) .app-update-status { font-size:12px;line-height:1.8; }

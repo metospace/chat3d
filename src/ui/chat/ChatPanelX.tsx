@@ -4,7 +4,7 @@ import {REFERENCE_IMAGE_JPEG_QUALITY,REFERENCE_IMAGE_MAX_SIDE} from '../../domai
 import {PlusIcon,ArrowUpIcon,StopIcon,ImageIcon,PersonIcon,ChatBubbleIcon,DotsHorizontalIcon,Pencil1Icon,TrashIcon,CheckIcon} from '@radix-ui/react-icons';
 import {Button,Input,Tag,type GetProps} from 'antd';
 import {PopoverPanel} from '../kit/PopoverPanel';
-import {Bubble,Sender,Welcome} from '@ant-design/x';
+import {Bubble,Prompts,Sender,Welcome} from '@ant-design/x';
 import {useStore} from 'zustand';
 import {useEditorStore,type ChatMessage} from '../../store';
 import {activeConversationStore} from '../../conversationStores';
@@ -216,12 +216,19 @@ function ChatSurface({onConfigure,onAssets,canvasMode=false,expanded=true,onExpa
           icon={<span className="adx-orb" aria-hidden="true"><ChatBubbleIcon/></span>}
           title={doc.nodes.length?'让模型更进一步。':'把想法，变成立体。'}
           description={doc.nodes.length?'描述你想改变的地方，或选择对象精确调整。每次修改都会先预览，由你决定是否应用。':'告诉我用途、尺寸和你在意的细节，也可以上传参考附件，一起完成你的第一个模型。'}/>
-        <div className="adx-starters" aria-label="从这里开始">
-          <span className="adx-starters-label">从这里开始</span>
-          <button type="button" className="adx-starter" onClick={()=>setInput('创建一个长 1.2 米、宽 0.8 米、高 0.75 米的工作台')}><strong>创建一个有明确尺寸的工作台</strong><span aria-hidden="true">↗</span></button>
-          {!doc.nodes.length&&<button type="button" className="adx-starter" onClick={()=>setInput('创建一个小型仓储场景，包含货架、周转箱和一条清晰通道；先给出布局和尺寸假设，再生成可编辑模型')}><strong>组合一个场景</strong><span aria-hidden="true">↗</span></button>}
-          {onAssets&&<button type="button" className="adx-starter" onClick={onAssets}><strong>从资产库开始</strong><span aria-hidden="true">↗</span></button>}
-        </div>
+        <Prompts className="adx-starters" aria-label="从这里开始" vertical
+          title={<span className="adx-starters-label">从这里开始</span>}
+          classNames={{item:'adx-starter'}}
+          items={[
+            {key:'workbench',label:<><strong>创建一个有明确尺寸的工作台</strong><span aria-hidden="true">↗</span></>},
+            ...(!doc.nodes.length?[{key:'scene',label:<><strong>组合一个场景</strong><span aria-hidden="true">↗</span></>}]:[]),
+            ...(onAssets?[{key:'assets',label:<><strong>从资产库开始</strong><span aria-hidden="true">↗</span></>}]:[]),
+          ]}
+          onItemClick={({data})=>{
+            if(data.key==='workbench')setInput('创建一个长 1.2 米、宽 0.8 米、高 0.75 米的工作台');
+            else if(data.key==='scene')setInput('创建一个小型仓储场景，包含货架、周转箱和一条清晰通道；先给出布局和尺寸假设，再生成可编辑模型');
+            else if(data.key==='assets')onAssets?.();
+          }}/>
         <p className="adx-welcome-note">参考图用于近似重建，背面与真实尺寸需要补充说明。</p>
       </div>}
       {(!aiConfig || aiConfig.useMock || !aiConfig.apiKey)&&<div className="adx-connect" role="note"><div><strong>连接模型，开始创作</strong><small>手动编辑、保存与导出始终可用</small></div><Button type="primary" onClick={onConfigure}>连接模型 ↗</Button></div>}
