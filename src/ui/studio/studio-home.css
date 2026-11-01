@@ -39,7 +39,6 @@
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-create-column::before { content: none; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-composer { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 206px; margin: 0; padding: 14px; border: 1px solid var(--sc-border); border-radius: 6px; background: var(--sc-surface-elevated); box-shadow: none; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-composer:focus-within { border-color: var(--sc-ink-muted); }
-.canvas-studio.frosted-studio.manager-mode .home-command-center .home-composer .rt-TextAreaRoot { flex: 1; min-width: 0; min-height: 132px; border: 0; background: transparent; box-shadow: none; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-composer textarea { width: 100%; min-height: 132px; padding: 2px; color: var(--sc-ink); font-size: 14px; line-height: 1.8; resize: vertical; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-composer textarea::placeholder { color: var(--sc-ink-muted); opacity: 1; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-composer-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--sc-border-subtle); }
@@ -65,9 +64,6 @@
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-library-links { display: flex; flex-wrap: wrap; gap: 8px; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-library-links button { min-height: 32px; padding: 0 9px; border: 1px solid var(--sc-border); border-radius: 6px; background: var(--sc-surface-elevated); color: var(--sc-ink-muted); font-size: 14px; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-recent { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
-.canvas-studio.frosted-studio.manager-mode .home-command-center .home-recent article.rt-Card { min-width: 0; margin: 0; padding: 0; overflow: hidden; border: 1px solid var(--sc-border); border-radius: 8px; background: var(--sc-surface-elevated); box-shadow: none; }
-.canvas-studio.frosted-studio.manager-mode .home-command-center .home-recent article.rt-Card::before, .canvas-studio.frosted-studio.manager-mode .home-command-center .home-recent article.rt-Card::after { display: none; }
-.canvas-studio.frosted-studio.manager-mode .home-command-center .home-recent article.rt-Card:has(.home-project-link:not(:disabled):hover) { border-color: var(--sc-ink-muted); }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-link { display: block; width: 100%; height: 100%; padding: 0; border: 0; background: none; color: var(--sc-ink); text-align: left; cursor: pointer; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-link > img, .canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-link > .resource-no-thumb { box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; width: 100%; height: auto; aspect-ratio: 1.9; object-fit: cover; border: 0; border-bottom: 1px solid var(--sc-border-subtle); border-radius: 0; background: var(--sc-surface-muted); color: var(--sc-ink-muted); font-size: 12px; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .resource-no-thumb > svg { width: 26px; height: 26px; }
@@ -135,7 +131,6 @@
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-creation{padding:22px;gap:14px;border-radius:10px;box-shadow:var(--sc-shadow-panel)}
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-new-project{background:var(--sc-surface-elevated);color:var(--sc-ink);border-color:var(--sc-border);min-height:40px;padding:0 16px;border-radius:7px}
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-composer{background:var(--sc-surface-subtle);border-radius:8px;min-height:170px}
-.canvas-studio.frosted-studio.manager-mode .home-command-center .home-composer .rt-TextAreaRoot{min-height:104px}
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-composer textarea{min-height:104px;height:104px}
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-composer:focus-within{border-color:var(--sc-accent);box-shadow:0 0 0 3px var(--sc-accent-soft)}
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-creation-copy .home-kind-description{font-size:13px;line-height:1.7}
@@ -156,16 +151,12 @@
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-model-status>div{flex:1;min-width:0}
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-model-status strong{font-weight:600}
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-model-status p{margin:4px 0 0;color:var(--sc-ink-muted);overflow-wrap:anywhere;font-size:12px}
-.canvas-studio.frosted-studio.manager-mode .home-command-center .home-model-status .rt-Button{flex-shrink:0;font-size:13px;color:var(--sc-accent);margin:0}
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-filters{display:flex;gap:4px;padding:4px;border:1px solid var(--sc-border);border-radius:8px;background:var(--sc-surface-elevated)}
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-filters button{padding:7px 14px;border:0;border-radius:5px;font:inherit;font-size:13px;background:transparent;color:var(--sc-ink-muted);cursor:pointer}
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-filters button[aria-pressed=true]{background:var(--sc-accent-soft);color:var(--sc-accent);font-weight:600}
-.canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-toolbar .rt-TextFieldRoot{width:260px;height:38px;border:1px solid var(--sc-border);background:var(--sc-surface-elevated);box-shadow:none;border-radius:7px}
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-library-links button{border:0;background:none;color:var(--sc-accent)}
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-caption{padding:16px}
-.canvas-studio.frosted-studio.manager-mode .home-command-center .home-recent article.rt-Card{border-radius:10px;transition:border-color .15s,box-shadow .15s}
-.canvas-studio.frosted-studio.manager-mode .home-command-center .home-recent article.rt-Card:has(.home-project-link:not(:disabled):hover){border-color:var(--sc-accent);box-shadow:0 4px 16px #193b3b0c}
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-link > img, .canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-link > .resource-no-thumb{aspect-ratio:1.9;object-fit:contain}
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-caption h3{font-size:15px}
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-empty{background:var(--sc-surface-elevated);min-height:148px;padding:24px}
@@ -173,12 +164,11 @@
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-prompt-suggestions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;color:var(--sc-ink-muted);font-size:13px}
 .home-prompt-suggestions button{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid var(--sc-border-subtle);border-radius:6px;background:var(--sc-surface-elevated);color:var(--sc-ink);font:inherit;cursor:pointer}.home-prompt-suggestions button:hover{border-color:var(--sc-accent);color:var(--sc-accent)}.home-prompt-suggestions svg{width:12px;height:12px}
 .home-setup-guide{padding:20px;border:1px solid var(--sc-border);border-radius:10px;background:var(--sc-surface-elevated)}.home-setup-guide h2{margin:0 0 16px;font-size:16px;font-weight:600}.home-setup-guide ol{display:flex;flex-direction:column;gap:16px;list-style:none;margin:0;padding:0}.home-setup-guide li{display:flex;gap:12px;align-items:flex-start}.home-setup-guide li>span{display:grid;place-items:center;flex:none;width:26px;height:26px;border:1px solid var(--sc-border-subtle);border-radius:50%;background:var(--sc-surface-subtle);font-size:12px;color:var(--sc-ink-muted)}.home-setup-guide li:first-child>span{background:var(--sc-accent-soft);border-color:transparent;color:var(--sc-accent)}.home-setup-guide strong{font-size:14px;font-weight:550}.home-setup-guide p{font-size:13px;line-height:1.6;color:var(--sc-ink-muted);margin:3px 0 0}
-.canvas-studio.frosted-studio .home-setup-guide .rt-Button{min-height:30px;margin:0;padding:5px 10px;border-radius:5px;background:var(--sc-accent-soft);color:var(--sc-accent);font-size:13px}
 .home-setup-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}.home-setup-heading h2{margin:0}
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-tasks-empty.studio-empty-state{display:grid;grid-template-columns:28px minmax(0,1fr);gap:4px 10px;padding:12px;min-height:0}
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-tasks-empty .studio-empty-icon{grid-row:1/3;width:28px;height:28px}
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-tasks-empty p{font-size:13px;grid-column:2}
 @media(max-width:1150px){.canvas-studio.frosted-studio.manager-mode .home-command-center .home-start-grid{grid-template-columns:minmax(0,1fr)}.canvas-studio.frosted-studio.manager-mode .home-command-center .home-activity{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,.6fr);align-items:start}}
-@media(max-width:720px){.canvas-studio.frosted-studio.manager-mode .home-command-center{padding:24px 18px}.canvas-studio.frosted-studio.manager-mode .home-command-center .home-activity{display:flex}.canvas-studio.frosted-studio.manager-mode .home-command-center .home-creation{padding:18px}.canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-toolbar .rt-TextFieldRoot{width:100%}.canvas-studio.frosted-studio.manager-mode .home-command-center .home-recent{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}}
+@media(max-width:720px){.canvas-studio.frosted-studio.manager-mode .home-command-center{padding:24px 18px}.canvas-studio.frosted-studio.manager-mode .home-command-center .home-activity{display:flex}.canvas-studio.frosted-studio.manager-mode .home-command-center .home-creation{padding:18px}.canvas-studio.frosted-studio.manager-mode .home-command-center .home-recent{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}}
 
 @media(max-width:520px){.canvas-studio.frosted-studio.manager-mode .home-command-center .home-composer-actions .model-picker-trigger{min-width:105px;max-width:100%;flex:1}.canvas-studio.frosted-studio.manager-mode .home-command-center .home-kind-switch button{min-height:40px}}
