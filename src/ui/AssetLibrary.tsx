@@ -4,7 +4,7 @@ import {CategoryPicker,useLibraryCategories} from './LibraryMetadataDialog';
 import {categoryLabel} from '../domain/libraryCategories';
 import {Button} from 'antd';
 import {AssetInspection} from './AssetInspection';
-import {Dialog} from '@radix-ui/themes';
+import {PortalDialog} from './kit/PortalDialog';
 import {useEffect,useRef,useState} from 'react';
 import {useEditorStore} from '../store';
 import {MAX_ASSET_BYTES,assetVersionSourceIssue,assetDocument,createModelAsset,parseModelAsset,selectedAssetNodes,type AssetCategory,type ModelAssetVersion,type ModelAssetSummary} from '../domain/modelAssets';
@@ -40,7 +40,7 @@ export function AssetLibrary({onClose,intent='manage',targetName}:{onClose:()=>v
  function download(){if(!selected)return;const url=URL.createObjectURL(new Blob([JSON.stringify(selected)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download=`${selected.name.replace(/[\\/:*?"<>|]/g,'_')}-v${selected.version}.chat3d-asset.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);setNotice('已发起资产文件下载，请确认已保存；该文件不含模型服务密钥或聊天。');}
  const visible=items.filter(i=>(query.trim()||categoryMatches(categories,i.category,filter))&&`${i.name} ${categoryLabel(categories,i.category)} ${i.purpose??''}`.toLowerCase().includes(query.trim().toLowerCase()));
  const input='w-full rounded border asset-field px-3 py-2 text-sm';
- return <Dialog.Root open onOpenChange={open=>{if(!open&&!busyRef.current)onClose();}}><Dialog.Content className="settings-module asset-management-module" style={{maxWidth:1080,maxHeight:'90vh',overflow:'auto'}}><Dialog.Title>{intent==='insert'?'引用资产':'模型资产库'}</Dialog.Title><Dialog.Description>{intent==='insert'?`添加到：${targetName??'当前项目'}。选择固定版本，插入后可撤销。`:'版本、导入与备份。资产保存在当前浏览器，不会自动跨设备同步。'}</Dialog.Description>
+ return <PortalDialog label={intent==='insert'?'引用资产':'模型资产库'} onClose={onClose} closable={!busy} width={1080} className="asset-management-module"><h2 className="app-modal-title">{intent==='insert'?'引用资产':'模型资产库'}</h2><p className="app-modal-description">{intent==='insert'?`添加到：${targetName??'当前项目'}。选择固定版本，插入后可撤销。`:'版本、导入与备份。资产保存在当前浏览器，不会自动跨设备同步。'}</p>
   {intent==='manage'&&<div className="flex gap-2 mt-4" aria-label="资产操作"><Button className="asset-button" aria-pressed={mode==='use'} onClick={()=>setMode('use')}>使用资产</Button><Button className="asset-button" aria-pressed={mode==='save'} onClick={()=>{setMode('save');if(!name.trim())setName(sourceLabel.slice(0,80));}}>保存选中模型</Button></div>}
   <div className="asset-library-layout"><section className="space-y-3">
    <div className="flex gap-2"><input aria-label="搜索模型资产" className={input} placeholder="搜索名称、分类或用途" value={query} onChange={e=>setQuery(e.target.value)}/><CategoryPicker label="资产分类筛选" value={filter} onChange={setFilter} categories={[{value:"全部",label:"全部",revision:0},...categories]}/></div>
@@ -65,5 +65,5 @@ export function AssetLibrary({onClose,intent='manage',targetName}:{onClose:()=>v
   </section></div>
   {(error||categoryError)&&<p role="alert" className="mt-3 asset-error">{error||categoryError}</p>}{notice&&<p role="status" className="mt-3 asset-info">{notice}</p>}
   <div className="mt-4 flex justify-end"><Button className="asset-button" disabled={busy} onClick={onClose}>{busy?'处理中…':'关闭'}</Button></div>
- </Dialog.Content></Dialog.Root>;
+ </PortalDialog>;
 }
