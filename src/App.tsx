@@ -31,7 +31,7 @@ import { useEditorStore, useDisplayDoc } from './store';
 import { exportGlb } from './scene/export';
 import {Button,Tag,Dropdown,Popover,Spin,Modal} from 'antd';
 import {LayersIcon,ChevronDownIcon,GearIcon,CubeIcon,UploadIcon,DownloadIcon,Cross1Icon,CounterClockwiseClockIcon,ReloadIcon,MixerHorizontalIcon,ChatBubbleIcon} from '@radix-ui/react-icons';
-import '@radix-ui/themes/styles.css';
+import './ui/theme/legacy-tokens.css';
 import './workspace.css';
 import {TaskPanel} from './ui/TaskPanel';
 import {SessionSidebar} from './ui/SessionSidebar';

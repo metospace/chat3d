@@ -1,0 +1,52 @@
+/*
+ * Legacy variable bridge.
+ *
+ * Radix Themes used to publish its palette as custom properties on the theme root
+ * (--gray-1 … --gray-12, --blue-*, --red-*, --accent-9, --color-panel-solid …). The
+ * studio palette now lives in tokens.css as --sc-*, but a lot of older rules still
+ * read the Radix names, and components that portal outside the app root need those
+ * names on the document rather than on a wrapper.
+ *
+ * This file keeps that contract alive without the Radix stylesheet: every grey step
+ * is derived from the studio tokens, so light and dark follow tokens.css, and the
+ * remaining hues keep Radix's own light/dark values. Nothing here introduces a new
+ * colour of its own.
+ */
+:root{
+  --gray-1:var(--sc-surface-elevated,#fdfefe);
+  --gray-2:var(--sc-surface-subtle,#f6f9f9);
+  --gray-3:var(--sc-surface-muted,#eaf0f0);
+  --gray-4:color-mix(in srgb,var(--sc-surface-muted,#eaf0f0) 82%,var(--sc-ink,#203334));
+  --gray-5:color-mix(in srgb,var(--sc-surface-muted,#eaf0f0) 68%,var(--sc-ink,#203334));
+  --gray-6:var(--sc-border-subtle,#dce4e4);
+  --gray-7:color-mix(in srgb,var(--sc-border,#c8d5d5) 82%,var(--sc-ink,#203334));
+  --gray-8:color-mix(in srgb,var(--sc-border,#c8d5d5) 62%,var(--sc-ink,#203334));
+  --gray-9:color-mix(in srgb,var(--sc-ink-muted,#526869) 62%,var(--sc-surface-page,#f3f6f6));
+  --gray-10:var(--sc-ink-muted,#526869);
+  --gray-11:var(--sc-ink-muted,#526869);
+  --gray-12:var(--sc-ink,#203334);
+  --gray-a2:color-mix(in srgb,var(--sc-ink,#203334) 4%,transparent);
+  --gray-a3:color-mix(in srgb,var(--sc-ink,#203334) 7%,transparent);
+  --gray-a4:color-mix(in srgb,var(--sc-ink,#203334) 11%,transparent);
+  --gray-a5:color-mix(in srgb,var(--sc-ink,#203334) 15%,transparent);
+  --color-panel-solid:var(--sc-surface-elevated,#fdfefe);
+  --color-surface:var(--sc-surface-elevated,#fdfefe);
+  --accent-8:color-mix(in srgb,var(--sc-accent,#176c6b) 82%,var(--sc-ink,#203334));
+  --accent-9:var(--sc-accent,#176c6b);
+  --accent-10:color-mix(in srgb,var(--sc-accent,#176c6b) 84%,var(--sc-ink,#203334));
+  --blue-2:#f4faff;--blue-3:#e6f4fe;--blue-5:#c2e5ff;--blue-6:#acd8fc;--blue-7:#8ec8f6;--blue-8:#5eb1ef;--blue-9:#0090ff;--blue-10:#0588f0;--blue-11:#0d74ce;--blue-a3:#0090ff29;
+  --red-3:#feebec;--red-6:#fdbdbe;--red-11:#ce2c31;
+  --amber-2:#fefbe9;--amber-3:#fff7c2;--amber-4:#ffee9c;--amber-6:#f3d673;--amber-8:#e2b05c;--amber-11:#ad5700;
+  --green-2:#f4fbf6;--green-3:#e6f6eb;--green-6:#adddc0;--green-9:#30a46c;--green-11:#218358;
+  --tomato-11:#d13415;
+  --default-font-family:var(--sc-font,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif);
+  --radius-3:var(--sc-radius-md,6px);
+  --radix-popover-content-available-height:min(320px,60vh);
+}
+:root.dark{
+  --blue-2:#111927;--blue-3:#0d2847;--blue-5:#004074;--blue-6:#104d87;--blue-7:#205d9e;--blue-8:#2870bd;--blue-9:#0090ff;--blue-10:#3b9eff;--blue-11:#70b8ff;--blue-a3:#0090ff33;
+  --red-3:#3b1219;--red-6:#72232d;--red-11:#ff9592;
+  --amber-2:#1d180f;--amber-3:#302008;--amber-4:#3f2700;--amber-6:#5c3d05;--amber-8:#8f6424;--amber-11:#ffca16;
+  --green-2:#121b17;--green-3:#132d21;--green-6:#20573e;--green-9:#30a46c;--green-11:#3dd68c;
+  --tomato-11:#ff977d;
+}

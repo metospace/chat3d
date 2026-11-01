@@ -1,6 +1,6 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
-import '@radix-ui/themes/styles.css';
+import '../ui/theme/legacy-tokens.css';
 import '../ui-system.css';
 import '../ui/team-library.css';
 import './team-web.css';
