@@ -1,5 +1,5 @@
 import {selectionPropertyCommands} from '../domain/selectionProperties';
-import {Button} from 'antd';
+import {Button,Input,InputNumber,ColorPicker,Select} from 'antd';
 import {boundsFor} from '../domain/sceneQuality';
 import {focusSceneObjects} from '../scene/focus';
 import {useMemo,useState} from 'react';
@@ -16,6 +16,7 @@ function FocusObject({doc,node}:{doc:SceneDocument;node:SceneNode}){const ready=
 
 // 属性面板：精确尺寸、位置。空值/非法输入不能提交（方案第 8 节）
 export function PropertiesPanel() {
+  const [error,setError]=useState('');
   const doc = useDisplayDoc();
   const selection = useEditorStore((s) => s.selection);
   const applyCommandBatch = useEditorStore((s) => s.applyCommandBatch);
@@ -37,8 +38,8 @@ export function PropertiesPanel() {
   if(selection.length>1){
     const ids=new Set(selection);const members=doc.nodes.filter(n=>ids.has(n.id));const assembly=node.assemblyId;
     const same=!!assembly&&members.every(n=>n.assemblyId===assembly)&&members.length===doc.nodes.filter(n=>n.assemblyId===assembly).length;
-    return <div className="properties-panel is-scrollable"><h3 className="prop-title">{same?node.assemblyName??'组件':'多选对象'}</h3>{lockNotice}{status==='previewing'&&<Button type="primary" className="prop-confirm-btn" onClick={()=>useEditorStore.getState().confirmPending()}>应用当前草稿并编辑属性</Button>}<FocusObject doc={doc} node={node}/><p className="prop-hint">已选 {members.length} 个零件。外观修改只影响所选范围，可撤销。</p>
-      <fieldset disabled={locked} className="prop-fieldset">{same&&<div className="prop-grid prop-grid-2">{([['左移 1m',[-1,0,0]],['右移 1m',[1,0,0]],['前移 1m',[0,0,1]],['后移 1m',[0,0,-1]]] as const).map(([title,value])=><Button key={title} className="prop-btn" onClick={()=>{const r=applyCommandBatch([{op:'translateAssembly',targetId:node.id,value:[...value]}],title);if(!r.ok)window.alert(r.error);}}>{title}</Button>)}</div>}
+    return <div className="properties-panel is-scrollable"><h3 className="prop-title">{same?node.assemblyName??'组件':'多选对象'}</h3>{lockNotice}{error&&<p role="alert" className="prop-notice is-warn">{error}</p>}{status==='previewing'&&<Button type="primary" className="prop-confirm-btn" onClick={()=>useEditorStore.getState().confirmPending()}>应用当前草稿并编辑属性</Button>}<FocusObject doc={doc} node={node}/><p className="prop-hint">已选 {members.length} 个零件。外观修改只影响所选范围，可撤销。</p>
+      <fieldset disabled={locked} className="prop-fieldset">{same&&<div className="prop-grid prop-grid-2">{([['左移 1m',[-1,0,0]],['右移 1m',[1,0,0]],['前移 1m',[0,0,1]],['后移 1m',[0,0,-1]]] as const).map(([title,value])=><Button key={title} className="prop-btn" onClick={()=>{const r=applyCommandBatch([{op:'translateAssembly',targetId:node.id,value:[...value]}],title);if(!r.ok)setError(r.error??'修改失败');}}>{title}</Button>)}</div>}
       {same&&<AssemblyTransformEditor nodes={members} wholeAssembly/>}
       <AppearanceEditor key={members.map(n=>n.id+':'+n.materialId).join('|')} doc={doc} nodes={members}/></fieldset>
       <p className="prop-hint">展开对象树后选择单个零件，可编辑它的尺寸与位置。</p></div>;
@@ -53,19 +54,19 @@ export function PropertiesPanel() {
 
   const commit = (op: 'rename' | 'translate', payload: Record<string, unknown>) => {
     const r = applyCommandBatch([{ op, targetId: node.id, ...payload } as never], `修改 ${node.name}`);
-    if (!r.ok && r.error) window.alert(r.error); // 如：预览待确认期间编辑被拒绝
+    if (!r.ok && r.error) setError(r.error??'修改失败'); // 如：预览待确认期间编辑被拒绝
   };
 
   return (
     <div className="properties-panel">
       <div className="prop-heading">属性</div>
-      {lockNotice}{status==='previewing'&&<Button type="primary" className="prop-confirm-btn" onClick={()=>useEditorStore.getState().confirmPending()}>应用当前草稿并编辑属性</Button>}
+      {lockNotice}{error&&<p role="alert" className="prop-notice is-warn">{error}</p>}{status==='previewing'&&<Button type="primary" className="prop-confirm-btn" onClick={()=>useEditorStore.getState().confirmPending()}>应用当前草稿并编辑属性</Button>}
       <FocusObject doc={doc} node={node}/>
       <fieldset disabled={locked} className="prop-fieldset prop-fieldset-main">
         {/* 名称 */}
         <div className="prop-field">
           <label className="prop-label">名称</label>
-          <input
+          <Input
             type="text" aria-label="对象名称"
             key={`${node.id}:${node.name}`}
             defaultValue={node.name}
@@ -85,11 +86,11 @@ export function PropertiesPanel() {
           <label className="prop-label">位置 X / Y / Z（米）</label>
           <div className="prop-grid prop-grid-3">
             {node.transform.position.map((v, i) => (
-              <input
+              <InputNumber
                 key={`${node.id}:${i}:${v}`}
-                type="number" aria-label={`位置 ${['X','Y','Z'][i]}（米）`}
-                step="0.05"
-                defaultValue={v.toFixed(3)}
+                aria-label={`位置 ${['X','Y','Z'][i]}（米）`}
+                step={0.05}
+                defaultValue={Number(v.toFixed(3))}
                 onBlur={(e) => {
                   const nv = parseFloat(e.target.value);
                   if (!Number.isFinite(nv)) return; // 非法输入不提交
@@ -111,7 +112,7 @@ export function PropertiesPanel() {
               {Object.entries(g.params).filter(([,v])=>typeof v==='number').map(([k, v]) => (
                 <div key={k} className="prop-param-row">
                   <span className="prop-param-name">{parameterLabel(k)}</span>
-                  <input aria-label={parameterLabel(k)} type="number" step="any" key={`${node.id}:${k}:${v}`} defaultValue={v} className="prop-input" onBlur={e=>{const value=Number(e.target.value);if(!e.target.value.trim()||!Number.isFinite(value)){e.target.value=String(v);return;}if(value===v)return;const geometry={...g,params:{...g.params,[k]:value}} as Geometry;const r=applyCommandBatch([{op:'updateParameters',targetId:node.id,geometry}],`修改 ${node.name} ${k}`);if(!r.ok){window.alert(r.error);e.target.value=String(v);}}} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur();}}/>
+                  <InputNumber aria-label={parameterLabel(k)} key={`${node.id}:${k}:${v}`} defaultValue={v} className="prop-input" onBlur={e=>{const value=Number(e.target.value);if(!e.target.value.trim()||!Number.isFinite(value)){e.target.value=String(v);return;}if(value===v)return;const geometry={...g,params:{...g.params,[k]:value}} as Geometry;const r=applyCommandBatch([{op:'updateParameters',targetId:node.id,geometry}],`修改 ${node.name} ${k}`);if(!r.ok){setError(r.error??'修改失败');e.target.value=String(v);}}} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur();}}/>
                 </div>
               ))}
             </div>
@@ -151,7 +152,7 @@ function AssemblyTransformEditor({nodes,wholeAssembly=false}:{nodes:SceneNode[];
   const result=useEditorStore.getState().applyCommandBatch([command],'旋转/等比缩放选中对象');
   if(!result.ok){setError(result.error??'变换失败');return;}setAngles(['0','0','0']);setFactor('1');setError('');
  };
- return <section className="prop-section"><h4 className="prop-section-title">{wholeAssembly?'整机旋转与等比缩放':'零件旋转与等比缩放'}</h4><p className="prop-hint">世界外包尺寸：X {size.x.toFixed(3)} · Y {size.y.toFixed(3)} · Z {size.z.toFixed(3)} m。底部 Y {bounds.min.y.toFixed(3)} m；以底部中心为变换支点</p><div className="prop-grid prop-grid-3">{['X','Y','Z'].map((axis,i)=><label key={axis} className="prop-label">{axis} 旋转角<input aria-label={`整体旋转 ${axis}`} type="number" step="15" value={angles[i]} onChange={e=>setAngles(old=>old.map((v,j)=>i===j?e.target.value:v))} className="prop-input"/></label>)}</div><label className="prop-label">等比缩放倍数<input aria-label="整体等比缩放倍数" type="number" min="0.001" max="1000" step="0.1" value={factor} onChange={e=>setFactor(e.target.value)} className="prop-input"/></label><Button className="prop-btn" onClick={apply}>应用整体变换</Button>{error&&<p role="status" className="prop-notice is-warn">{error}</p>}</section>;
+ return <section className="prop-section"><h4 className="prop-section-title">{wholeAssembly?'整机旋转与等比缩放':'零件旋转与等比缩放'}</h4><p className="prop-hint">世界外包尺寸：X {size.x.toFixed(3)} · Y {size.y.toFixed(3)} · Z {size.z.toFixed(3)} m。底部 Y {bounds.min.y.toFixed(3)} m；以底部中心为变换支点</p><div className="prop-grid prop-grid-3">{['X','Y','Z'].map((axis,i)=><label key={axis} className="prop-label">{axis} 旋转角<InputNumber aria-label={`整体旋转 ${axis}`} step={15} value={angles[i]===''?null:Number(angles[i])} onChange={value=>setAngles(old=>old.map((v,j)=>i===j?String(value??''):v))} className="prop-input"/></label>)}</div><label className="prop-label">等比缩放倍数<InputNumber aria-label="整体等比缩放倍数" min={0.001} max={1000} step={0.1} value={factor===''?null:Number(factor)} onChange={value=>setFactor(String(value??''))} className="prop-input"/></label><Button className="prop-btn" onClick={apply}>应用整体变换</Button>{error&&<p role="status" className="prop-notice is-warn">{error}</p>}</section>;
 }
 
 function AppearanceEditor({doc,nodes}:{doc:SceneDocument;nodes:SceneNode[]}){
@@ -169,11 +170,11 @@ function AppearanceEditor({doc,nodes}:{doc:SceneDocument;nodes:SceneNode[]}){
     const result=useEditorStore.getState().applyCommandBatch(operations,label);setNotice(result.ok?'已修改，可撤销':result.error??'修改失败');
   };
   return <section className="prop-section"><h4 className="prop-section-title">颜色与材质</h4>
-    {nodes.length>1&&<label className="prop-label">修改范围<select aria-label="外观修改范围" value={sourceId} onChange={e=>setSourceId(e.target.value)} className="prop-select"><option value="all">全部选中零件（{nodes.length}）</option>{originals.map(id=><option key={id} value={id}>{nodes.filter(n=>n.materialId===id).slice(0,2).map(n=>n.name).join('、')} · {doc.materials.find(m=>m.id===id)?.baseColor??id}（{nodes.filter(n=>n.materialId===id).length}）</option>)}</select></label>}
+    {nodes.length>1&&<label className="prop-label">修改范围<Select aria-label="外观修改范围" value={sourceId} onChange={setSourceId} className="prop-select" options={[{value:'all',label:`全部选中零件（${nodes.length}）`},...originals.map(id=>({value:id,label:`${nodes.filter(n=>n.materialId===id).slice(0,2).map(n=>n.name).join('、')} · ${doc.materials.find(m=>m.id===id)?.baseColor??id}（${nodes.filter(n=>n.materialId===id).length}）`}))]}/></label>}
     <p className="prop-hint">本次影响 {targets.length} 个零件；修改颜色会保留各零件原有的粗糙度、金属度和透明度。</p>
     {nodes.length>1&&sourceId==='all'&&<p className="prop-notice is-warn">将统一所有选中零件的颜色，包括轮子、外壳等。只改部分时请先选择上方范围。</p>}
-    <div className="prop-color-row"><input aria-label="选择颜色" type="color" value={/^#[0-9a-f]{6}$/i.test(color)?color:'#9099a4'} onChange={e=>setColor(e.target.value)} className="prop-color-input"/><input aria-label="颜色十六进制" value={color} onChange={e=>setColor(e.target.value)} className="prop-input prop-input-hex"/><Button type="primary" className="prop-btn" onClick={()=>{if(!/^#[0-9a-f]{6}$/i.test(color)){setNotice('请输入 #RRGGBB 颜色');return;}apply({baseColor:color},'修改选中对象颜色')}}>应用颜色</Button></div>
-    <div className="prop-grid prop-grid-3">{([['粗糙度',roughness,setRoughness],['金属度',metalness,setMetalness],['不透明度',opacity,setOpacity]] as const).map(([label,value,set])=><label key={label} className="prop-label">{label}<input aria-label={label} type="number" min="0" max="1" step="0.05" value={value} onChange={e=>set(e.target.value)} className="prop-input"/></label>)}</div>
+    <div className="prop-color-row"><ColorPicker aria-label="选择颜色" value={/^#[0-9a-f]{6}$/i.test(color)?color:'#9099a4'} onChange={value=>setColor(value.toHexString())} disabledAlpha/><Input aria-label="颜色十六进制" value={color} onChange={e=>setColor(e.target.value)} className="prop-input prop-input-hex"/><Button type="primary" className="prop-btn" onClick={()=>{if(!/^#[0-9a-f]{6}$/i.test(color)){setNotice('请输入 #RRGGBB 颜色');return;}apply({baseColor:color},'修改选中对象颜色')}}>应用颜色</Button></div>
+    <div className="prop-grid prop-grid-3">{([['粗糙度',roughness,setRoughness],['金属度',metalness,setMetalness],['不透明度',opacity,setOpacity]] as const).map(([label,value,set])=><label key={label} className="prop-label">{label}<InputNumber aria-label={label} step={0.05} value={value===''?null:Number(value)} onChange={v=>set(String(v??''))} className="prop-input"/></label>)}</div>
     <Button className="prop-btn" onClick={()=>{const values=[roughness,metalness,opacity];if(values.some(v=>!v.trim()||!Number.isFinite(Number(v))||Number(v)<0||Number(v)>1)){setNotice('材质参数需为0–1');return;}apply({roughness:Number(roughness),metalness:Number(metalness),opacity:Number(opacity)},'修改选中对象材质参数')}}>应用材质参数</Button>
     <p className="prop-hint">替换为现有材质（将同时替换颜色与表面参数）</p><div className="prop-swatches">{doc.materials.map(m=><Button key={m.id} aria-label={`使用材质 ${m.id}`} title={`${m.id} ${m.baseColor}`} onClick={()=>apply({materialId:m.id},'替换选中对象材质')} className="prop-swatch" style={{backgroundColor:m.baseColor}}/>)}</div>
     {notice&&<p role="status" className="prop-notice is-warn">{notice}</p>}

@@ -19,6 +19,14 @@ const {render:rtlRender,fireEvent,waitFor,cleanup,act}=await import('@testing-li
 const server=await createServer({plugins:[{name:'mock-isolated-renderer',enforce:'pre',load(id){if(id.endsWith('/src/scene/isolatedGpuCapture.ts'))return `import {useEditorStore} from '/src/store.ts';let handler=null;export const isIsolatedGpuCaptureAvailable=()=>useEditorStore.getState().viewportStatus==='ready';export const captureIsolatedGpu=async(...args)=>{if(!handler)throw Error('test renderer unavailable');return handler(...args)};export const resetIsolatedGpuCapture=()=>{};export const registerTestCapture=fn=>{handler=fn;return()=>handler=null;};`;}}],server:{middlewareMode:true},appType:'custom'});
 let passed=0;
 const test=async(name,fn)=>{await fn();passed++;console.log('PASS',name);cleanup()};
+// Control only the production idle deadline. DOM/React timers keep using real time.
+// This makes expiry assertions independent of CPU contention during render/SSR work.
+function controlIdleTimeouts(){
+ const realSet=globalThis.setTimeout,realClear=globalThis.clearTimeout,timers=new Map();let scheduled=0;
+ globalThis.setTimeout=(fn,ms,...args)=>{if(ms!==180000)return realSet(fn,ms,...args);const handle=realSet(()=>{},2147483647);timers.set(handle,()=>fn(...args));scheduled++;return handle;};
+ globalThis.clearTimeout=handle=>{timers.delete(handle);return realClear(handle);};
+ return {get scheduled(){return scheduled},expire(){assert.ok(timers.size>0,'request has an active idle deadline');const pending=[...timers.entries()];timers.clear();for(const [handle,callback] of pending){realClear(handle);callback();}},restore(){for(const handle of timers.keys())realClear(handle);globalThis.setTimeout=realSet;globalThis.clearTimeout=realClear;}};
+}
 try {
  const {ChatPanel}=await server.ssrLoadModule('/src/ui/ChatPanel.tsx');
  const {useEditorStore:store,createInitialDoc}=await server.ssrLoadModule('/src/store.ts');
@@ -28,6 +36,9 @@ try {
  const send=(ui,text='创建一个盒子')=>{fireEvent.change(ui.getByLabelText('建模指令'),{target:{value:text}});fireEvent.click(ui.getByRole('button',{name:'发送',exact:true}))};
  const directOps=()=>JSON.parse(output).operations.map(op=>({...op,parentId:null,materialId:'mat_white',transform:{position:[0,.5,0],scale:[1,1,1],rotationQuaternion:[0,0,0,1]}}));
  const output=JSON.stringify({summary:'一个盒子',operations:[{op:'createPrimitive',name:'box',geometry:{type:'box',params:{width:1,height:1,depth:1}}}]});
+ await test('composition and Shift Enter preserve text; Enter submits once',async()=>{
+  reset();handler=async()=>new Response(JSON.stringify({choices:[{message:{content:output}}]}));const ui=mount();const input=ui.getByLabelText('建模指令');fireEvent.change(input,{target:{value:'创建一个盒子'}});fireEvent.keyDown(input,{key:'Enter',isComposing:true});fireEvent.keyDown(input,{key:'Enter',keyCode:229});fireEvent.keyDown(input,{key:'Enter',shiftKey:true});assert.equal(requests.length,0);assert.equal(input.value,'创建一个盒子');fireEvent.keyDown(input,{key:'Enter'});await waitFor(()=>assert.equal(store.getState().aiStatus,'previewing'));assert.equal(requests.length,1);
+ });
  await test('home launch starts exactly once under StrictMode and does not restart after consumed rerenders',async()=>{
   reset();store.getState().setComposerText('创建一个盒子');let consumed=[];handler=async()=>new Response(JSON.stringify({choices:[{message:{content:output}}]}));const request={id:'home-once',projectId:store.getState().doc.projectId};const props={autoStartRequest:request,onAutoStartConsumed:id=>consumed.push(id)};const ui=render(React.createElement(React.StrictMode,null,React.createElement(ChatPanel,props)));await waitFor(()=>assert.equal(store.getState().aiStatus,'previewing'));assert.equal(requests.length,1);assert.deepEqual(consumed,['home-once']);ui.rerender(React.createElement(React.StrictMode,null,React.createElement(ChatPanel,props)));await act(async()=>new Promise(r=>setTimeout(r,20)));assert.equal(requests.length,1);assert.equal(store.getState().messages.filter(m=>m.role==='user').length,1);
  });
@@ -38,7 +49,7 @@ try {
   Object.defineProperty(files[5],'size',{value:100*1024*1024});
   const oversized=new dom.window.File(['x'],'too-big.bin');Object.defineProperty(oversized,'size',{value:100*1024*1024+1});
   fireEvent.change(picker,{target:{files:[...files,oversized]}});
-  await waitFor(()=>assert.equal(store.getState().composerImages.length,6));assert.ok(ui.getByText('sixth.bin'));assert.ok(ui.getByText('单个附件不能超过 100 MB'));assert.equal(ui.container.querySelectorAll('img').length,0);
+  await waitFor(()=>assert.equal(store.getState().composerImages.length,6));assert.ok(ui.getByLabelText('sixth.bin'));assert.ok(ui.getByText('单个附件不能超过 100 MB'));assert.equal(ui.container.querySelectorAll('img').length,0);
   const {attachmentInfo,prepareReference,MAX_ATTACHMENT_BYTES}=await server.ssrLoadModule('/src/domain/referenceAttachments.ts');
   assert.deepEqual(attachmentInfo(store.getState().composerImages[0]),{name:'clip.mp4',mime:'video/mp4',size:14});
   let compressed=0;const image=await prepareReference(new dom.window.File(['pixels'],'image.png',{type:'image/png'}),async()=>{compressed++;return 'data:image/jpeg;base64,cGl4ZWxz';});assert.equal(compressed,1);
@@ -47,7 +58,7 @@ try {
   await waitFor(()=>assert.equal(store.getState().aiStatus,'idle'));
   const body=JSON.parse(requests[0][1].body),parts=body.messages.at(-1).content;
   assert.deepEqual(parts.filter(p=>p.type==='image_url').map(p=>p.image_url.url),[image]);assert.match(JSON.stringify(parts),/clip.mp4/);assert.match(JSON.stringify(parts),/video\/mp4/);assert.match(JSON.stringify(parts),/尚未解析文件内容/);assert.equal(JSON.stringify(body).includes('YmluYXJ5IHBheWxvYWQ='),false);
-  assert.ok(ui.getByText('sixth.bin'));assert.equal(store.getState().messages.find(m=>m.role==='user').images.length,7);
+  assert.ok(ui.getByLabelText('sixth.bin'));assert.equal(store.getState().messages.find(m=>m.role==='user').images.length,7);
  });
  await test('run history records the selected quality snapshot, not a later preference',async()=>{
   reset();store.setState({aiConfig:{...config,generationQuality:'fast'}});let release;handler=()=>new Promise(r=>release=r);const ui=mount();send(ui,'创建一个盒子');await waitFor(()=>assert.ok(release));assert.equal(store.getState().messages.find(m=>m.run).run.generationQuality,'fast');assert.equal(ui.getByRole('button',{name:'生成档位，当前快速'}).disabled,true);await act(async()=>store.setState({aiConfig:{...config,generationQuality:'fine'}}));await act(async()=>release(new Response(JSON.stringify({choices:[{message:{content:output}}]}))));await waitFor(()=>assert.equal(store.getState().aiStatus,'previewing'));assert.equal(store.getState().messages.find(m=>m.run).run.generationQuality,'fast');
@@ -69,8 +80,8 @@ try {
   assert.equal(store.getState().messages[0].text,batch.summary);assert.equal(requests.length,0);
   fireEvent.click(ui.getByRole('button',{name:'放弃修改'}));assert.equal(store.getState().doc.nodes.length,0);assert.equal(store.getState().pendingBatch,null);
  });
- await test('scope selector is visible and empty selected-only requests retain the draft without calling model',async()=>{reset();const {applyBatch}=await server.ssrLoadModule('/src/domain/commands.ts');const d=applyBatch(createInitialDoc(),{operations:directOps()}).doc;store.setState({doc:d,selection:[]});const ui=mount();fireEvent.change(ui.getByLabelText('对话修改范围'),{target:{value:'selection'}});send(ui,'改颜色');assert.match(ui.getByRole('status').textContent,/先选择/);assert.equal(requests.length,0);assert.equal(ui.getByLabelText('建模指令').value,'改颜色');assert.equal(store.getState().messages.length,0);});
- await test('explicit selected-only UI rejects out-of-scope model edits before showing preview',async()=>{reset();const {applyBatch}=await server.ssrLoadModule('/src/domain/commands.ts');const d=applyBatch(createInitialDoc(),{operations:[...directOps(),...directOps()]}).doc;store.setState({doc:d,selection:[d.nodes[0].id]});handler=async()=>new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({summary:'bad edit',operations:[{op:'rename',targetId:d.nodes[1].id,name:'outside'}]})}}]}));const ui=mount();fireEvent.change(ui.getByLabelText('对话修改范围'),{target:{value:'selection'}});send(ui,'改所有名称');await waitFor(()=>assert.equal(store.getState().aiStatus,'error'));assert.equal(store.getState().pendingResult,null);assert.deepEqual(store.getState().doc,d);});
+ await test('scope selector is visible and empty selected-only requests retain the draft without calling model',async()=>{reset();const {applyBatch}=await server.ssrLoadModule('/src/domain/commands.ts');const d=applyBatch(createInitialDoc(),{operations:directOps()}).doc;store.setState({doc:d,selection:[]});const ui=mount();fireEvent.mouseDown(ui.getByRole('combobox',{name:'对话修改范围'}));fireEvent.click(ui.getByText(`仅选中对象（${store.getState().selection.length}）`));send(ui,'改颜色');assert.match(ui.getByRole('status').textContent,/先选择/);assert.equal(requests.length,0);assert.equal(ui.getByLabelText('建模指令').value,'改颜色');assert.equal(store.getState().messages.length,0);});
+ await test('explicit selected-only UI rejects out-of-scope model edits before showing preview',async()=>{reset();const {applyBatch}=await server.ssrLoadModule('/src/domain/commands.ts');const d=applyBatch(createInitialDoc(),{operations:[...directOps(),...directOps()]}).doc;store.setState({doc:d,selection:[d.nodes[0].id]});handler=async()=>new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({summary:'bad edit',operations:[{op:'rename',targetId:d.nodes[1].id,name:'outside'}]})}}]}));const ui=mount();fireEvent.mouseDown(ui.getByRole('combobox',{name:'对话修改范围'}));fireEvent.click(ui.getByText(`仅选中对象（${store.getState().selection.length}）`));send(ui,'改所有名称');await waitFor(()=>assert.equal(store.getState().aiStatus,'error'));assert.equal(store.getState().pendingResult,null);assert.deepEqual(store.getState().doc,d);});
  await test('missing configuration preserves draft and does not create misleading sent message',async()=>{reset();store.setState({aiConfig:null});const ui=mount();send(ui);assert.equal(ui.getByLabelText('建模指令').value,'创建一个盒子');assert.equal(store.getState().messages.length,0);assert.equal(requests.length,0)});
  await test('waiting visible, messages queue without duplicate request, stop aborts and stale response ignored',async()=>{reset();let release;handler=()=>new Promise(r=>release=r);const ui=mount();send(ui);await waitFor(()=>assert.equal(requests.length,1));assert.ok(ui.getByText('正在处理你的请求，模型返回说明后会在这里显示。'));fireEvent.change(ui.getByLabelText('建模指令'),{target:{value:'下一条草稿'}});fireEvent.keyDown(ui.getByLabelText('建模指令'),{key:'Enter'});assert.equal(requests.length,1);fireEvent.click(ui.getByRole('button',{name:'停止生成'}));assert.equal(requests[0][1].signal.aborted,true);await act(async()=>release(new Response(JSON.stringify({choices:[{message:{content:output}}]}))));assert.equal(store.getState().pendingBatch,null);assert.equal(ui.getByLabelText('建模指令').value,'');assert.ok(store.getState().messages.some(m=>m.text==='下一条草稿'&&m.queuedTask?.status==='waiting'));assert.equal(store.getState().doc.nodes.length,0)});
  // The first Pi run compiles lazy agent modules through Vite; allow cold-start time, not extra model time.
@@ -120,20 +131,21 @@ try {
  });
  for(const mode of ['stop','timeout'])await test(`Pi ${mode} preserves successful checkpoint and ignores late reply`,async()=>{
   reset();store.setState({aiConfig:{...config,agentMode:'pi',stream:true}});let n=0,release;handler=async()=>++n===1?firstDraftResponse():new Promise(r=>release=r);
-  const realSet=globalThis.setTimeout;if(mode==='timeout')globalThis.setTimeout=(fn,ms,...args)=>realSet(fn,ms===180000?100:ms,...args);
-  try{const ui=mount();send(ui);await waitFor(()=>assert.ok(release));if(mode==='stop')fireEvent.click(ui.getByRole('button',{name:'停止生成'}));await waitFor(()=>assert.ok(ui.getByRole('button',{name:'应用修改'})));assert.equal(store.getState().doc.nodes.length,0);assert.equal(store.getState().previewDoc.nodes.length,1);const requestId=store.getState().pendingBatch.requestId;await act(async()=>release(new Response('data: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}})));assert.equal(store.getState().pendingBatch.requestId,requestId);fireEvent.click(ui.getByRole('button',{name:'放弃修改'}));assert.equal(store.getState().pendingBatch,null);assert.equal(store.getState().doc.nodes.length,0);}finally{globalThis.setTimeout=realSet}
+  const clock=mode==='timeout'?controlIdleTimeouts():null;
+  try{const ui=mount();send(ui);await waitFor(()=>assert.ok(release),{timeout:5000});if(mode==='stop')fireEvent.click(ui.getByRole('button',{name:'停止生成'}));else act(()=>clock.expire());await waitFor(()=>assert.ok(ui.getByRole('button',{name:'应用修改'})));assert.equal(store.getState().doc.nodes.length,0);assert.equal(store.getState().previewDoc.nodes.length,1);const requestId=store.getState().pendingBatch.requestId;await act(async()=>release(new Response('data: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}})));assert.equal(store.getState().pendingBatch.requestId,requestId);fireEvent.click(ui.getByRole('button',{name:'放弃修改'}));assert.equal(store.getState().pendingBatch,null);assert.equal(store.getState().doc.nodes.length,0);}finally{clock?.restore()}
  });
- await test('Pi active stream outlives the idle window, then pauses only when activity stops',async()=>{
+ await test('Pi stream activity rearms the idle deadline, then expiry preserves its checkpoint',async()=>{
   reset();store.setState({aiConfig:{...config,agentMode:'pi',stream:true}});
   let n=0,body;handler=async()=>++n===1?firstDraftResponse():new Response(new ReadableStream({start(c){body=c}}),{headers:{'content-type':'text/event-stream'}});
-  const realSet=globalThis.setTimeout;globalThis.setTimeout=(fn,ms,...args)=>realSet(fn,ms===180000?180:ms,...args);
+  const clock=controlIdleTimeouts();
   try{
-   const ui=mount();send(ui);await waitFor(()=>assert.ok(body));
-   for(let i=0;i<8;i++)await act(async()=>{body.enqueue(new TextEncoder().encode('data: '+JSON.stringify({choices:[{index:0,delta:{content:'继续细化'},finish_reason:null}]})+'\n\n'));await new Promise(r=>realSet(r,60));});
+   const ui=mount();send(ui);await waitFor(()=>assert.ok(body),{timeout:5000});
+   for(let i=0;i<8;i++){const before=clock.scheduled;await act(async()=>{body.enqueue(new TextEncoder().encode('data: '+JSON.stringify({choices:[{index:0,delta:{content:'继续细化'},finish_reason:null}]})+'\n\n'));});await waitFor(()=>assert.ok(clock.scheduled>before,'each chunk renews the idle deadline'));}
    assert.equal(store.getState().aiStatus,'generating');assert.equal(store.getState().pendingBatch.incomplete,true);
-   await waitFor(()=>assert.equal(store.getState().aiStatus,'previewing'));assert.match(store.getState().pendingBatch.summary,/连续3分钟/);assert.equal(store.getState().previewDoc.nodes.length,1);
+   act(()=>clock.expire());
+   await waitFor(()=>assert.equal(store.getState().aiStatus,'previewing'),{timeout:3000});assert.match(store.getState().pendingBatch.summary,/连续3分钟/);assert.equal(store.getState().previewDoc.nodes.length,1);
    assert.equal(requests.at(-1)[1].signal.aborted,true);
-  }finally{globalThis.setTimeout=realSet}
+  }finally{clock.restore()}
  });
  await test('preview comparison switches displayed document only and requires after-view before apply',async()=>{
   reset();handler=async()=>new Response(JSON.stringify({choices:[{message:{content:output}}]}));const ui=mount();send(ui);await waitFor(()=>assert.equal(store.getState().aiStatus,'previewing'));

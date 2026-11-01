@@ -11,13 +11,13 @@ Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configu
 globalThis.CSS={escape:value=>String(value).replace(/[^a-zA-Z0-9_-]/g,char=>'\\'+char)};globalThis.SVGElement=dom.window.SVGElement;globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 HTMLElement.prototype.scrollIntoView=()=>{};
 const {render,fireEvent,waitFor,cleanup,act}=await import('@testing-library/react');
-const {Theme}=await import('@radix-ui/themes');
-const server=await createServer({plugins:[{name:'workbench-viewport-fixture',enforce:'pre',load(id){if(id.endsWith('/src/ui/ViewportPanel.tsx'))return "import React from 'react';export function ViewportPanel(){return React.createElement('div',{'data-testid':'viewport-fixture'});}";}}],server:{middlewareMode:true},appType:'custom'});let passed=0;
+const {ConfigProvider}=await import('antd');
+const server=await createServer({plugins:[{name:'workbench-viewport-fixture',enforce:'pre',load(id){if(id.endsWith('/src/ui/ViewportPanel.tsx'))return "import React from 'react';export function ViewportPanel(){return React.createElement('div',{'data-testid':'viewport-fixture'});}";}}],server:{middlewareMode:true,hmr:false},optimizeDeps:{noDiscovery:true,include:[]},appType:'custom'});let passed=0;
 
 try{
  const {default:App}=await server.ssrLoadModule('/src/App.tsx'),w=await server.ssrLoadModule('/src/workspace.ts'),{useEditorStore:store}=await server.ssrLoadModule('/src/store.ts'),{clampConversationWidth,CONVERSATION_WIDTH_KEY}=await server.ssrLoadModule('/src/ui/ConversationResize.tsx');
  Object.defineProperty(window,'innerWidth',{value:1440,writable:true,configurable:true});
- await w.initializeWorkspace();await w.flushWorkspace();localStorage.removeItem(CONVERSATION_WIDTH_KEY);let ui=render(React.createElement(App));fireEvent.click(ui.getByRole('button',{name:'建模工作台',exact:true}));
+ await w.initializeWorkspace();await w.flushWorkspace();localStorage.removeItem(CONVERSATION_WIDTH_KEY);let ui=render(React.createElement(ConfigProvider,{theme:{token:{motion:false}}},React.createElement(App)));fireEvent.click(ui.getByRole('button',{name:'新建项目',exact:true}));fireEvent.click(ui.getByRole('menuitem',{name:/新建空白/}));
  const input=ui.getByRole('textbox',{name:'建模指令'}),separator=ui.getByRole('separator',{name:'调整对话区宽度'});assert.equal(input.rows,4);console.log('PASS conversation and multiline composer are open by default');passed++;
  fireEvent.change(input,{target:{value:'保持其他模型不变\n只调整托盘位置'}});const initial=Number(separator.getAttribute('aria-valuenow'));fireEvent.keyDown(separator,{key:'ArrowLeft'});assert.equal(Number(separator.getAttribute('aria-valuenow')),initial+24);assert.equal(input.value,'保持其他模型不变\n只调整托盘位置');console.log('PASS keyboard resizing widens conversation without losing draft');passed++;
  fireEvent.keyDown(separator,{key:'Home'});assert.equal(separator.getAttribute('aria-valuenow'),'360');fireEvent.keyDown(separator,{key:'End'});assert.equal(Number(separator.getAttribute('aria-valuenow')),clampConversationWidth(720));assert.equal(Number(localStorage.getItem(CONVERSATION_WIDTH_KEY)),clampConversationWidth(720));console.log('PASS separator is bounded and width preference is saved');passed++;

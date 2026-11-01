@@ -10,8 +10,8 @@ Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configu
 globalThis.CSS={escape:value=>String(value).replace(/[^a-zA-Z0-9_-]/g,char=>'\\'+char)};globalThis.SVGElement=dom.window.SVGElement;globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 HTMLElement.prototype.scrollIntoView=()=>{};
 const {render,fireEvent,waitFor,cleanup,act}=await import('@testing-library/react');
-const {Theme}=await import('@radix-ui/themes');
-const server=await createServer({plugins:[{name:'workbench-viewport-fixture',enforce:'pre',load(id){if(id.endsWith('/src/ui/ViewportPanel.tsx'))return "import React from 'react';export function ViewportPanel(){return React.createElement('div',{'data-testid':'viewport-fixture'});}";}}],server:{middlewareMode:true},appType:'custom'});let passed=0;
+const {ConfigProvider}=await import('antd');
+const server=await createServer({plugins:[{name:'workbench-viewport-fixture',enforce:'pre',load(id){if(id.endsWith('/src/ui/ViewportPanel.tsx'))return "import React from 'react';export function ViewportPanel(){return React.createElement('div',{'data-testid':'viewport-fixture'});}";}}],server:{middlewareMode:true,hmr:false},optimizeDeps:{noDiscovery:true,include:[]},appType:'custom'});let passed=0;
 
 try{
  const {CanvasAssetShelf,CanvasInspector}=await server.ssrLoadModule('/src/ui/CanvasPanels.tsx'),{AppearanceProvider}=await server.ssrLoadModule('/src/ui/Appearance.tsx');
@@ -20,7 +20,7 @@ try{
  store.getState().applyCommandBatch([{op:'createPrimitive',name:'测试托盘',parentId:null,geometry:{type:'box',params:{width:1.2,height:.15,depth:1}},transform:{position:[0,.075,0],scale:[1,1,1],rotationQuaternion:[0,0,0,1]},materialId:'mat_blue'}],'fixture');
  const node=store.getState().doc.nodes[0],asset=createModelAsset(store.getState().doc,[node.id],{name:'测试托盘',category:'仓储'});await storage.saveModelAsset(asset,0);
  const {useCompositionTool,cancelAssetPlacement}=await server.ssrLoadModule('/src/ui/manualComposition.tsx');store.setState({viewportStatus:'ready'});
- const wrap=child=>React.createElement(AppearanceProvider,null,child);let closed=false;
+ const wrap=child=>React.createElement(ConfigProvider,{theme:{token:{motion:false}}},React.createElement(AppearanceProvider,null,child));let closed=false;
  let ui=render(wrap(React.createElement(CanvasAssetShelf,{onClose:()=>closed=true,onLibrary:()=>{}})));
  await waitFor(()=>assert.ok(ui.getByRole('button',{name:'选择资产 测试托盘'})));console.log('PASS asset shelf reads actual saved assets');passed++;
  fireEvent.change(ui.getByRole('textbox',{name:'搜索画布资产'}),{target:{value:'missing'}});assert.equal(ui.queryByRole('button',{name:'选择资产 测试托盘'}),null);fireEvent.change(ui.getByRole('textbox',{name:'搜索画布资产'}),{target:{value:''}});console.log('PASS asset shelf filters without changing models');passed++;

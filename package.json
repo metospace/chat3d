@@ -22,14 +22,14 @@
     "test:team": "npm run build:team && npm run build:team-web && node tests/auth-transport.mjs && node tests/team-auth-resources.mjs && node tests/team-library.mjs && node tests/team-client.mjs && node tests/team-resource-links.mjs && node tests/team-ui.mjs && node tests/team-web.mjs && node tests/team-oauth-callback.mjs && node tests/team-static.mjs",
     "test:scene-quality": "node tests/scene-quality-browser.mjs",
     "test:realistic-rendering": "node tests/realistic-rendering.mjs",
-    "test:runtime": "node tests/docker-runtime.mjs"
+    "test:runtime": "node tests/docker-runtime.mjs",
+    "test:product-ui": "node tests/product-redesign-browser.mjs",
+    "test:glb-interaction": "node tests/glb-interaction-browser.mjs"
   },
   "dependencies": {
     "@ant-design/x": "^2.10.0",
     "@earendil-works/pi-agent-core": "1.0.0",
     "@earendil-works/pi-ai": "1.0.0",
-    "@heroui/react": "^3.2.6",
-    "@heroui/styles": "^3.2.6",
     "@radix-ui/react-icons": "1.3.2",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/api": "^2",

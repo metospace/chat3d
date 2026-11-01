@@ -92,7 +92,7 @@ try{
  await picker.click();await ui.waitForTimeout(250);await ui.screenshot({path:resolve(output,'realistic-menu-desktop.png')});
  await ui.keyboard.press('Escape');await ui.setViewportSize({width:390,height:844});await picker.click();
  const menu=ui.getByRole('menu',{name:'生成档位'});const bounds=await menu.boundingBox();assert.ok(bounds.x>=0&&bounds.x+bounds.width<=391);await ui.waitForTimeout(250);await ui.screenshot({path:resolve(output,'realistic-menu-mobile.png')});
- await ui.keyboard.press('Escape');await ui.setViewportSize({width:1280,height:800});await ui.getByRole('button',{name:'建模工作台',exact:true}).click();
+ await ui.keyboard.press('Escape');await ui.setViewportSize({width:1280,height:800});await ui.getByRole('button',{name:'新建项目',exact:true}).click();await ui.getByRole('menuitem',{name:/新建空白/}).click();
  await ui.getByRole('button',{name:'显示选项',exact:true}).click();
  const display=ui.getByRole('dialog',{name:'显示设置'});await display.getByRole('radio',{name:'流畅',exact:true}).click();
  assert.equal(await ui.evaluate(()=>localStorage.getItem('chat3d.renderQuality.v1')),'fast');

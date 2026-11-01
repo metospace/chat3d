@@ -1,7 +1,13 @@
+import {AccessibleModal as Modal} from './ui/kit/AccessibleModal';
+import './ui/studio/tokens.css';
+import './ui/theme/legacy-tokens.css';
+import './ui/theme/product.css';
 import {usePublishUpdateContext} from './ui/appUpdateContext';
 import {AppUpdateDialog, AppUpdateNotice} from './ui/AppUpdateNotice';
 import {SaveToast,isLibrarySaveNotice} from './ui/SaveToast';
 import {StudioShell,StudioMain,type StudioNavPage} from './ui/studio';
+import {useCompositionTool} from './ui/manualComposition';
+import {PanelResize,usePanelWidth} from './ui/PanelResize';
 import {useSelectionTool} from './ui/selectionTool';
 import {DeleteSelectionAction} from './ui/DeleteSelectionAction';
 import {ToolbarAction} from './ui/ToolbarAction';
@@ -29,36 +35,12 @@ const ObjectTree=modelingModule.Objects;
 const PropertiesPanel=modelingModule.Properties;
 import { useEditorStore, useDisplayDoc } from './store';
 import { exportGlb } from './scene/export';
-import {Button,Tag,Dropdown,Popover,Spin,Modal} from 'antd';
+import {Button,Tag,Dropdown,Popover,Spin,Segmented} from 'antd';
 import {LayersIcon,ChevronDownIcon,GearIcon,CubeIcon,UploadIcon,DownloadIcon,Cross1Icon,CounterClockwiseClockIcon,ReloadIcon,MixerHorizontalIcon,ChatBubbleIcon} from '@radix-ui/react-icons';
-import './ui/theme/legacy-tokens.css';
-import './workspace.css';
 import {TaskPanel} from './ui/TaskPanel';
 import {SessionSidebar} from './ui/SessionSidebar';
 import {StudioHome} from './ui/StudioHome';
 import {TaskCenter,StudioSettings} from './ui/StudioPages';
-import './studio-redesign.css';
-import './ui-system.css';
-import './canvas-studio.css';
-import './canvas-conversation.css';
-import './option2.css';
-import './frosted-studio.css';
-import './creative-gallery.css';
-import './studio-control-polish.css';
-import './graphite-controls.css';
-import './thumbnail-layout.css';
-import './settings-refresh.css';
-import './ui/studio/tokens.css';
-import './ui/studio/studio-shell.css';
-import './ui/studio/studio-home.css';
-import './ui/studio/studio-pages.css';
-import './ui/studio/studio-workbench.css';
-import './ui/studio/studio-shared.css';
-import './ui/studio/studio-account.css';
-import './ui/theme/app-shell.css';
-import './ui/theme/workspace-refresh.css';
-import './ui/theme/workbench-refresh.css';
-import './ui/theme/control-polish.css';
 import {downloadJson} from './util/downloadJson';
 import {exportFile} from './util/exportFile';
 import {initializeWorkspace,useWorkspaceStore,createSession,anySessionRunning,exportWorkspaceBackup} from './workspace';
@@ -150,24 +132,28 @@ export default function App() {
   const [assistantOpen,setAssistantOpen]=useState(true);
   const [assistantWidth,setAssistantWidth]=useConversationWidth();
   const [inspectorOpen,setInspectorOpen]=useState(false);
-  const [structureOpen,setStructureOpen]=useState(false),[shelfOpen,setShelfOpen]=useState(false),[advancedOpen,setAdvancedOpen]=useState(false);
+  const [objectsWidth,setObjectsWidth]=usePanelWidth('objects',240,200,360);
+  const [inspectorWidth,setInspectorWidth]=usePanelWidth('inspector',280,260,400);
+  const compositionMode=useCompositionTool(s=>s.mode);
+  const [structureOpen,setStructureOpen]=useState(()=>window.innerWidth>1280),[shelfOpen,setShelfOpen]=useState(false),[advancedOpen,setAdvancedOpen]=useState(false);
   const [propertyTab,setPropertyTab]=useState<CanvasPropertyTab>('position');
   const selectionBox=useSelectionTool(s=>s.box),wholeModelBox=useSelectionTool(s=>s.wholeModel),throughBox=useSelectionTool(s=>s.through);
   const selection=useEditorStore(s=>s.selection);const viewportReady=useEditorStore(s=>s.viewportStatus==='ready');
   function openEditorPanel(panel:'asset'|'structure'|'inspector'){
-    setShelfOpen(panel==='asset');setStructureOpen(panel==='structure');setInspectorOpen(panel==='inspector');
-    if(window.innerWidth<1200)setAssistantOpen(false);
+    if(panel==='inspector'){setInspectorOpen(true);if(window.innerWidth<=1280){setShelfOpen(false);setStructureOpen(false);}}else{setShelfOpen(panel==='asset');setStructureOpen(panel==='structure');if(window.innerWidth<=1280)setInspectorOpen(false);}
+    if(panel==='inspector'||window.innerWidth<=1280)setAssistantOpen(false);
   }
   function openInspector(){openEditorPanel('inspector');}
   function toggleAssistant(){
     const next=!assistantOpen;setAssistantOpen(next);setAssistantTab('chat');
-    if(next&&window.innerWidth<1200){setShelfOpen(false);setStructureOpen(false);setInspectorOpen(false);}
+    if(next){setInspectorOpen(false);if(window.innerWidth<=1280){setShelfOpen(false);setStructureOpen(false);}}
   }
   useEffect(()=>{
-    const resize=()=>{if(window.innerWidth<1200&&(shelfOpen||structureOpen||inspectorOpen))setAssistantOpen(false);};
+    const resize=()=>{if(window.innerWidth<=1280&&(shelfOpen||structureOpen||inspectorOpen))setAssistantOpen(false);};
     resize();window.addEventListener('resize',resize);return()=>window.removeEventListener('resize',resize);
   },[shelfOpen,structureOpen,inspectorOpen]);
   useEffect(()=>{!selection.length&&setInspectorOpen(false)},[selection.join('|')]);
+  useEffect(()=>{if(assistantOpen)setInspectorOpen(false);},[assistantOpen]);
   const [assistantTab,setAssistantTab]=useState<'chat'|'tasks'>('chat');
   const [focusScene,setFocusScene]=useState(false);
   const navigateStudio=useCallback((page:StudioNavPage)=>{setModulePage(page);setFocusScene(false);},[]);
@@ -175,7 +161,7 @@ export default function App() {
   useEffect(()=>{setAssistantTab('chat');},[workspace.activeId]);
   useEffect(()=>{setProjectNotice('');},[modulePage]);
   useEffect(()=>{const key=(e:KeyboardEvent)=>{if(e.key==='Escape'){setFocusScene(false);}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[]);
-  useEffect(()=>{if(locked){setAssistantOpen(true);if(window.innerWidth<1200){setShelfOpen(false);setStructureOpen(false);setInspectorOpen(false);}}},[locked]);
+  useEffect(()=>{if(locked){setAssistantOpen(true);setInspectorOpen(false);if(window.innerWidth<=1280){setShelfOpen(false);setStructureOpen(false);setInspectorOpen(false);}}},[locked]);
   usePublishUpdateContext();
 
   /** antd menu model for the export / import actions. */
@@ -191,7 +177,7 @@ export default function App() {
   ];
 
   return <AppearanceProvider>
-    <div style={{'--chat-width':`${assistantWidth}px`,'--chat-space':assistantOpen?`${assistantWidth}px`:'0px'} as CSSProperties} className={`studio redesigned-studio canvas-studio frosted-studio ${modulePage==='workbench'?'editor-mode':'manager-mode'} ${focusScene?'focus-scene':''}`}>
+    <div style={{'--objects-width':`${objectsWidth}px`,'--inspector-width':`${inspectorWidth}px`,'--chat-width':`${assistantWidth}px`,'--chat-space':assistantOpen?`${assistantWidth}px`:'0px'} as CSSProperties} className={`studio redesigned-studio canvas-studio frosted-studio ${modulePage==='workbench'?'editor-mode':'manager-mode'} ${focusScene?'focus-scene':''}`}>
       <StudioShell activePage={modulePage} disabled={librarySaving||!workspace.ready} taskQueueRequest={taskQueueRequest} onNavigate={navigateStudio} onTaskOpen={()=>{setModulePage('workbench');setFocusScene(false);setAssistantOpen(true);setAssistantTab('chat');}} onTaskHistory={()=>{setModulePage('tasks');setFocusScene(false);}}/>
       <StudioMain>
 
@@ -201,16 +187,16 @@ export default function App() {
         {workspace.error&&!conflictDismissed&&<div role="alert" className="workspace-notice is-error"><div className="workspace-conflict-copy"><span>{workspace.error}</span><small>请关闭其他标签页，下载备份后刷新本页。</small>{backupStatus&&<span role="status">{backupStatus}</span>}</div><Button disabled={backupBusy} onClick={()=>void backupConflict()}>下载工作台备份</Button><Button type="primary" onClick={()=>window.location.reload()}>我已备份，刷新本页</Button><Button type="text" aria-label="隐藏冲突提示" icon={<Cross1Icon/>} onClick={()=>setConflictDismissed(true)}/></div>}
         {!workspace.error&&(autosaveError||(projectNotice&&!saveNotice))&&<div role="status" className={`workspace-notice ${autosaveError?'is-error':''}`}><span>{autosaveError||projectNotice}</span>{!autosaveError&&<Button type="text" aria-label="关闭通知" icon={<Cross1Icon/>} onClick={()=>setProjectNotice('')}/>}</div>}
         {!workspace.ready&&<div className="workspace-loading"><Spin size="large"/><p>正在恢复项目…</p></div>}
-        {workspace.ready&&<StudioHome onTasks={()=>setTaskQueueRequest(v=>v+1)} onConfigure={()=>setShowSettings(true)} onGenerate={projectId=>setAutoStartRequest({id:makeId(),projectId})} hidden={modulePage!=='home'} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);setAssistantTab('chat');}} onLibrary={setModulePage}/>}
+        {workspace.ready&&<StudioHome onImport={()=>modelFileRef.current?.click()} onTasks={()=>setTaskQueueRequest(v=>v+1)} onConfigure={()=>setShowSettings(true)} onGenerate={projectId=>setAutoStartRequest({id:makeId(),projectId})} hidden={modulePage!=='home'} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);setAssistantTab('chat');}} onLibrary={setModulePage}/>}
         {workspace.ready&&(modulePage==='asset'||modulePage==='scene')&&<ProjectLibrary key={modulePage+libraryRefresh} kind={modulePage} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);}} onManage={()=>setShowAssets(true)}/>}
         {workspace.ready&&modulePage==='team'&&<TeamStudioPage onCopied={()=>setLibraryRefresh(v=>v+1)}/>}
         {workspace.ready&&modulePage==='tasks'&&<TaskCenter locked={locked} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);setAssistantTab('chat');}}/>}
-        {workspace.ready&&modulePage==='settings'&&<StudioSettings onModel={()=>setShowSettings(true)} onBackup={()=>setShowTools(true)} onAssets={()=>setShowAssets(true)} onHistory={()=>setShowHistory(true)}/>}
-        {workspace.ready&&<div className={`editor-workspace ${assistantOpen?'assistant-expanded':''} ${inspectorOpen||structureOpen||shelfOpen?'editor-panel-open':''}`} hidden={modulePage!=='workbench'}>
+        {workspace.ready&&modulePage==='settings'&&<StudioSettings onTeam={()=>setModulePage('team')} onModel={()=>setShowSettings(true)} onBackup={()=>setShowTools(true)} onAssets={()=>setShowAssets(true)} onHistory={()=>setShowHistory(true)}/>}
+        {workspace.ready&&<div className={`editor-workspace ${assistantOpen?'assistant-expanded':''} ${structureOpen||shelfOpen?'editor-panel-open':''} ${inspectorOpen?'inspector-expanded':''}`} hidden={modulePage!=='workbench'}>
         <header className="studio-header workbench-project-actions" hidden={modulePage!=='workbench'}>
           <Button className="workbench-back" type="text" aria-label="返回首页" icon={<ArrowLeftIcon/>} onClick={()=>navigateStudio('home')}/>
           <div className="workbench-project-summary"><strong title={active?.title}>{active?.title??'未命名项目'}</strong><span className="workbench-kind-tag">{active?.moduleKind==='asset'?'资产':'场景'}</span><span className={`workbench-save-status ${workspace.error?'is-error':''}`}>{workspace.error?'本机保存异常':workspace.saving?'正在保存':'已保存到本机'}<span aria-hidden="true"> · </span>{previewing?'待确认':!active?.librarySavedAt?'草稿':active.savedRevision===revision?'已入库':'修改未入库'}</span></div>
-          <div className="workbench-view-controls"/>
+          <div className="workbench-view-controls"><Button type="text" aria-label="撤销" title="撤销" disabled={!canUndo||locked} onClick={undo} icon={<CounterClockwiseClockIcon/>}/><Button type="text" aria-label="重做" title="重做" disabled={!canRedo||locked} onClick={redo} icon={<ReloadIcon/>}/></div>
           <div className="workbench-document-controls"><Popover trigger="click" placement="topRight" content={<div role="dialog" aria-label="项目信息" className="workbench-project-info">
           <span className="canvas-project-title" title={active?.title}>{active?.title??'正在恢复工作台…'}</span>
           <Tag color={workspace.error?'error':workspace.saving?'warning':'default'} className="save-badge">{workspace.error?'保存异常':workspace.saving?'正在保存':'会话已自动保存到本浏览器'}</Tag>
@@ -222,36 +208,36 @@ export default function App() {
           <Dropdown trigger={['click']} menu={{items:exportItems}} disabled={locked||!workspace.ready}><Button type="text" aria-label="导出与更多" disabled={locked||!workspace.ready}>导出 <ChevronDownIcon/></Button></Dropdown>
           </div>
           <input ref={fileRef} type="file" accept=".json,.chat3d.json" className="hidden" onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void openProject(file);}}/>
-          <input ref={modelFileRef} type="file" accept=".glb" className="hidden" onChange={async e=>{const file=e.target.files?.[0];e.target.value='';if(!file)return;try{if(file.size>20*1024*1024)throw Error('GLB超过20MB');setProjectNotice('正在校验并导入网格模型…');const result=await importGlb(await file.arrayBuffer(),file.name);if(!createSession(result.doc))throw Error('请结束当前生成后再导入');setProjectNotice(`已导入 ${result.doc.nodes.length} 个网格部件到新会话。${result.warnings.join(' ')}`);}catch(error){setProjectNotice(`网格导入失败：${error instanceof Error?error.message:String(error)}`);}}}/>
+          <input ref={modelFileRef} type="file" accept=".glb" className="hidden" onChange={async e=>{const file=e.target.files?.[0];e.target.value='';if(!file)return;try{if(file.size>20*1024*1024)throw Error('GLB超过20MB');setProjectNotice('正在校验并导入网格模型…');const result=await importGlb(await file.arrayBuffer(),file.name);if(!createSession(result.doc))throw Error('请结束当前生成后再导入');setModulePage('workbench');useCompositionTool.setState({mode:'orbit'});setProjectNotice(`已导入 ${result.doc.nodes.length} 个网格部件到新会话。${result.warnings.join(' ')}`);}catch(error){setProjectNotice(`网格导入失败：${error instanceof Error?error.message:String(error)}`);}}}/>
         </header>
         <nav className="canvas-tool-rail canvas-surface" aria-label="画布工具"><Button type="text" aria-pressed={shelfOpen} onClick={()=>shelfOpen?setShelfOpen(false):openEditorPanel('asset')} icon={<CubeIcon/>}><span>资产</span></Button><Button type="text" aria-pressed={structureOpen} onClick={()=>structureOpen?setStructureOpen(false):openEditorPanel('structure')} icon={<LayersIcon/>}><span>结构</span></Button><Button type="text" aria-pressed={inspectorOpen} disabled={!selection.length} onClick={()=>inspectorOpen?setInspectorOpen(false):openInspector()} icon={<MixerHorizontalIcon/>}><span>属性</span></Button></nav>
         <div className="canvas-transform-tools canvas-surface" role="group" aria-label="场景编辑工具">
-          <ToolbarAction label="选择对象" help="打开场景结构，从列表中选择要编辑的对象" onPress={()=>structureOpen?setStructureOpen(false):openEditorPanel('structure')}><CursorArrowIcon/></ToolbarAction>
+          <ToolbarAction label="浏览场景" help="左键拖动旋转视角，右键平移，滚轮缩放；单击选择不切换编辑模式" pressed={compositionMode==='orbit'&&!selectionBox} onPress={()=>{useSelectionTool.setState({box:false});useCompositionTool.setState({mode:'orbit'});}}><span>浏览</span></ToolbarAction>
+          <ToolbarAction label="选择对象" help="打开场景结构，从列表中选择要编辑的对象" onPress={()=>structureOpen?setStructureOpen(false):openEditorPanel('structure')}><CursorArrowIcon/><span>选择</span></ToolbarAction>
           <ToolbarAction pressed={selectionBox} label={selectionBox?'退出框选':'框选对象'} help="默认按可见表面框选；Shift / Ctrl / ⌘ 追加，Esc 取消。本次选择可在旁边开启穿透" disabled={!viewportReady||locked} disabledReason={!viewportReady?'三维视图不可用，可在结构列表中多选':'请先结束生成或处理预览'} onPress={()=>useSelectionTool.setState({box:!selectionBox})}><span aria-hidden="true">▧</span></ToolbarAction>
           {selectionBox&&<button className="box-selection-scope" aria-label={wholeModelBox?'框选范围：完整模型':'框选范围：零件'} title={wholeModelBox?'命中零件后扩展到完整模型，包含隐藏和框外成员':'仅选择框内命中的零件，不扩展同模型成员'} onClick={()=>useSelectionTool.setState({wholeModel:!wholeModelBox})}>{wholeModelBox?'框选模型':'框选零件'}</button>}
           {selectionBox&&<button className="box-selection-scope box-selection-through" aria-label="穿透框选" aria-pressed={throughBox} title={throughBox?'穿透已开启：包括被前方模型遮挡的几何；点击恢复可见表面框选':'穿透已关闭：只选最近几何表面（透明面按实体选取）；孔洞中的后方零件仍可能可见'} onClick={()=>useSelectionTool.setState({through:!throughBox})}>{throughBox?'穿透：开':'穿透：关'}</button>}
-          <ToolbarAction label="移动选中对象" help="打开位置设置，调整选中内容的 X、Y、Z 坐标" disabled={!selection.length||locked} disabledReason={!selection.length?'请先选中一个或多个对象':previewing?'请先应用或放弃当前预览':'任务执行中，暂不能修改位置'} onPress={()=>{setPropertyTab('position');openInspector()}}><MoveIcon/></ToolbarAction>
-          <ToolbarAction label="旋转选中对象" help="打开旋转设置，调整选中内容的朝向与角度" disabled={!selection.length||locked} disabledReason={!selection.length?'请先选中一个或多个对象':previewing?'请先应用或放弃当前预览':'任务执行中，暂不能旋转对象'} onPress={()=>{setPropertyTab('rotation');openInspector()}}><RotateCounterClockwiseIcon/></ToolbarAction>
-          <ToolbarAction label="缩放选中对象" help="打开尺寸设置，调整选中内容的大小" disabled={!selection.length||locked} disabledReason={!selection.length?'请先选中一个或多个对象':previewing?'请先应用或放弃当前预览':'任务执行中，暂不能缩放对象'} onPress={()=>{setPropertyTab('size');openInspector()}}><SizeIcon/></ToolbarAction>
+          <ToolbarAction label="移动选中对象" pressed={compositionMode==='move'} help="拖动蓝色手柄移动对象；表面及空白处拖动仍浏览场景" disabled={!selection.length||locked} disabledReason={!selection.length?'请先选中一个或多个对象':previewing?'请先应用或放弃当前预览':'任务执行中，暂不能修改位置'} onPress={()=>{useSelectionTool.setState({box:false});useCompositionTool.setState({mode:'move'});setPropertyTab('position');openInspector()}}><MoveIcon/><span>移动</span></ToolbarAction>
+          <ToolbarAction label="旋转选中对象" pressed={compositionMode==='rotate'} help="拖动蓝色手柄旋转对象，或在属性中输入精确角度" disabled={!selection.length||locked} disabledReason={!selection.length?'请先选中一个或多个对象':previewing?'请先应用或放弃当前预览':'任务执行中，暂不能旋转对象'} onPress={()=>{useSelectionTool.setState({box:false});useCompositionTool.setState({mode:'rotate'});setPropertyTab('rotation');openInspector()}}><RotateCounterClockwiseIcon/><span>旋转</span></ToolbarAction>
+          <ToolbarAction label="缩放选中对象" pressed={compositionMode==='scale'} help="拖动蓝色手柄等比缩放，或在属性中输入倍数" disabled={!selection.length||locked} disabledReason={!selection.length?'请先选中一个或多个对象':previewing?'请先应用或放弃当前预览':'任务执行中，暂不能缩放对象'} onPress={()=>{useSelectionTool.setState({box:false});useCompositionTool.setState({mode:'scale'});setPropertyTab('size');openInspector()}}><SizeIcon/><span>缩放</span></ToolbarAction>
+          <ToolbarAction label="适应场景" help="完整显示当前场景" disabled={!nodeCount||!viewportReady} onPress={()=>focusSceneObjects(useEditorStore.getState().doc.nodes.map(n=>n.id))}><span>适应</span></ToolbarAction>
           <ToolbarAction label="聚焦选中对象" help="把镜头移动到选中内容附近，方便查看" disabled={!selection.length||!viewportReady} disabledReason={!selection.length?'请先选中一个或多个对象':'当前三维视图不可用'} onPress={()=>focusSceneObjects(selection)}><EnterFullScreenIcon/></ToolbarAction><span/>
           <DeleteSelectionAction active={workspace.ready&&modulePage==='workbench'} onNotice={setProjectNotice}/>
-          <ToolbarAction label="撤销" help="撤回最近一次已应用的模型修改" disabled={!canUndo||locked} disabledReason={locked?(previewing?'请先应用或放弃当前预览':'请等待当前任务结束'):'当前没有可撤销的修改'} onPress={undo}><CounterClockwiseClockIcon/></ToolbarAction>
-          <ToolbarAction label="重做" help="恢复刚才撤销的模型修改" disabled={!canRedo||locked} disabledReason={locked?(previewing?'请先应用或放弃当前预览':'请等待当前任务结束'):'当前没有可重做的修改'} onPress={redo}><ReloadIcon/></ToolbarAction>
           <ToolbarAction label={focusScene?'恢复工作台':'专注场景'} help={focusScene?'恢复对话与编辑面板':'暂时收起周边面板，放大模型画布'} onPress={()=>setFocusScene(!focusScene)}><EnterFullScreenIcon/></ToolbarAction>
         </div>
         {shelfOpen&&<CanvasAssetShelf onClose={()=>setShelfOpen(false)} onLibrary={()=>setShowAssets(true)}/>}
-        <div className="editor-upper"><aside className="editor-objects canvas-surface" hidden={!structureOpen}><div className="editor-panel-heading">场景结构<Button type="text" aria-label="收起场景结构" icon={<Cross1Icon/>} onClick={()=>setStructureOpen(false)}/></div><ObjectTree/></aside>
+        <div className="editor-upper"><aside className="editor-objects canvas-surface" hidden={!structureOpen}><div className="editor-panel-heading">场景结构<Button type="text" aria-label="收起场景结构" icon={<Cross1Icon/>} onClick={()=>setStructureOpen(false)}/></div><ObjectTree/><PanelResize label="调整对象面板宽度" width={objectsWidth} min={200} max={360} side="right" onChange={setObjectsWidth}/></aside>
           <main className="scene-region">
             <div className="scene-stage"><ViewportPanel/></div>
             <div className="canvas-context-label"><LayersIcon/>{previewing?'修改预览':locked?'正在处理草稿':active?.title??'三维视图'}<small>{nodeCount} 个零件 · m</small></div>
             {nodeCount===0&&!locked&&viewportReady&&<div className="canvas-empty-guide"><span className="canvas-empty-symbol" aria-hidden="true"><CubeIcon/></span><h2>{active?.moduleKind==='asset'?'从一个模型开始':'搭建你的三维场景'}</h2><p>向 AI 描述想法，也可以从本地资源开始。</p><div><Button onClick={()=>openEditorPanel('asset')} icon={<CubeIcon/>}>浏览本地资产</Button><Button onClick={()=>modelFileRef.current?.click()} icon={<UploadIcon/>}>导入 GLB 模型</Button></div><small>模型可继续编辑，并保存为本地资产或场景</small></div>}
-            <footer className="scene-footer"><span><span className="status-dot"/>{previewing?'预览尚未提交':locked?'正在处理草稿':'可编辑场景'}</span><span>单位 m · Y 轴向上</span><span>{dirty?'当前修改尚未导出备份':'项目文件无待导出修改'}</span></footer>
+            <footer className="scene-footer"><span className="mobile-editor-note">移动设备支持查看项目和任务；精确编辑请使用桌面设备。</span><span><span className="status-dot"/>{previewing?'预览尚未提交':locked?'正在处理草稿':'可编辑场景'}</span><span>单位 m · Y 轴向上</span><span>{dirty?'当前修改尚未导出备份':'项目文件无待导出修改'}</span></footer>
           </main>
           {!inspectorOpen&&<CanvasSelectionSummary onEdit={()=>openInspector()}/>}
-          {inspectorOpen&&selection.length>0&&<CanvasInspector onClose={()=>setInspectorOpen(false)} onAdvanced={()=>setAdvancedOpen(true)} tab={propertyTab} setTab={setPropertyTab}/>}
+          {inspectorOpen&&selection.length>0&&<CanvasInspector panelTabs={<Segmented className="workbench-panel-tabs" aria-label="右侧工作区" value="properties" options={[{label:"属性",value:"properties"},{label:"AI 助手",value:"assistant"}]} onChange={()=>{setInspectorOpen(false);setAssistantOpen(true);}}/>} resize={<PanelResize label="调整属性面板宽度" width={inspectorWidth} min={260} max={400} side="left" onChange={setInspectorWidth}/>} onClose={()=>setInspectorOpen(false)} onAdvanced={()=>setAdvancedOpen(true)} tab={propertyTab} setTab={setPropertyTab}/>}
 
         </div>
-          <aside className="conversation-region" hidden={!assistantOpen}><ConversationResize width={assistantWidth} onChange={setAssistantWidth}/><header className="conversation-panel-title"><strong>AI 建模</strong><Button type="text" aria-label="收起对话区" icon={<Cross1Icon/>} onClick={()=>setAssistantOpen(false)}/></header><div className="conversation-heading"><div className="assistant-tabs" role="tablist" aria-label="助手工作区" onKeyDown={e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const next=e.key==='Home'?'chat':e.key==='End'?'tasks':assistantTab==='chat'?'tasks':'chat';setAssistantTab(next);document.getElementById(next==='chat'?'chat-tab':'task-tab')?.focus();}}}><button role="tab" id="chat-tab" tabIndex={assistantTab==='chat'?0:-1} aria-controls="chat-content" aria-selected={assistantTab==='chat'} onClick={()=>setAssistantTab('chat')}><ChatBubbleIcon/>对话</button><button role="tab" id="task-tab" tabIndex={assistantTab==='tasks'?0:-1} aria-controls="task-content" aria-selected={assistantTab==='tasks'} onClick={()=>setAssistantTab('tasks')}>任务记录{locked&&<span className="tab-activity"/>}</button></div></div><div role="tabpanel" id="chat-content" aria-labelledby="chat-tab" hidden={assistantTab!=='chat'} className="assistant-content"><ChatPanel autoStartRequest={autoStartRequest} onAutoStartConsumed={id=>setAutoStartRequest(current=>current?.id===id?null:current)} key={workspace.activeId} canvasMode expanded onExpand={()=>setAssistantOpen(true)} executionDetails={false} onAssets={()=>setShowAssets(true)} onConfigure={()=>setShowSettings(true)}/></div><div role="tabpanel" id="task-content" aria-labelledby="task-tab" hidden={assistantTab!=='tasks'} className="assistant-content"><TaskPanel onConversation={()=>setAssistantTab('chat')}/></div></aside>
+          <aside className="conversation-region" hidden={!assistantOpen}><ConversationResize width={assistantWidth} onChange={setAssistantWidth}/><header className="conversation-panel-title"><Segmented className="workbench-panel-tabs" aria-label="右侧工作区" value="assistant" options={[{label:"属性",value:"properties",disabled:!selection.length},{label:"AI 助手",value:"assistant"}]} onChange={()=>openInspector()}/><Button type="text" aria-label="收起对话区" icon={<Cross1Icon/>} onClick={()=>setAssistantOpen(false)}/></header><div className="conversation-heading"><div className="assistant-tabs" role="tablist" aria-label="助手工作区" onKeyDown={e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const next=e.key==='Home'?'chat':e.key==='End'?'tasks':assistantTab==='chat'?'tasks':'chat';setAssistantTab(next);document.getElementById(next==='chat'?'chat-tab':'task-tab')?.focus();}}}><button role="tab" id="chat-tab" tabIndex={assistantTab==='chat'?0:-1} aria-controls="chat-content" aria-selected={assistantTab==='chat'} onClick={()=>setAssistantTab('chat')}><ChatBubbleIcon/>对话</button><button role="tab" id="task-tab" tabIndex={assistantTab==='tasks'?0:-1} aria-controls="task-content" aria-selected={assistantTab==='tasks'} onClick={()=>setAssistantTab('tasks')}>任务记录{locked&&<span className="tab-activity"/>}</button></div></div><div role="tabpanel" id="chat-content" aria-labelledby="chat-tab" hidden={assistantTab!=='chat'} className="assistant-content"><ChatPanel autoStartRequest={autoStartRequest} onAutoStartConsumed={id=>setAutoStartRequest(current=>current?.id===id?null:current)} key={workspace.activeId} canvasMode expanded onExpand={()=>setAssistantOpen(true)} executionDetails={false} onAssets={()=>setShowAssets(true)} onConfigure={()=>setShowSettings(true)}/></div><div role="tabpanel" id="task-content" aria-labelledby="task-tab" hidden={assistantTab!=='tasks'} className="assistant-content"><TaskPanel onConversation={()=>setAssistantTab('chat')}/></div></aside>
         </div>}
       </StudioMain>
       {advancedOpen&&<Modal open title="对象与属性" onCancel={()=>setAdvancedOpen(false)} width={640} footer={<Button onClick={()=>setAdvancedOpen(false)}>关闭高级属性</Button>}><p>精确编辑几何参数、外观和组件关系。</p><PropertiesPanel/></Modal>}

@@ -1,7 +1,0 @@
-/* Scoped polish: keep the floating editor layout and unify its controls. */
-.canvas-studio.frosted-studio .canvas-project-title{display:block;min-width:0;max-width:34vw;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:13px;font-weight:550;padding:0 8px;color:var(--studio-ink)}
-.canvas-studio.frosted-studio .navigation-utilities{gap:12px}
-.canvas-studio.frosted-studio .viewport-bottom-bar{position:absolute;left:16px;right:auto;bottom:70px;width:auto;max-width:calc(100% - 32px);display:flex;flex-direction:row;align-items:center;flex-wrap:wrap;gap:3px;padding:5px;border:1px solid var(--glass-line);border-radius:14px;background:var(--glass);box-shadow:var(--glass-shadow);backdrop-filter:blur(20px);z-index:10}
-.canvas-studio.frosted-studio .viewport-bottom-bar .viewport-selection-tools{display:flex;flex-direction:row;flex-wrap:wrap;gap:3px;position:static;border-left:1px solid var(--glass-line);padding-left:4px;margin-left:3px}
-.canvas-studio.frosted-studio .viewport-host .animation-controls{bottom:118px}
-@media(max-width:720px){.canvas-studio.frosted-studio .viewport-bottom-bar{left:8px;bottom:47px;max-width:calc(100% - 16px);padding:3px;border-radius:10px;gap:1px}.canvas-studio.frosted-studio .viewport-bottom-bar .viewport-selection-tools{gap:1px;margin-left:0;padding-left:2px}.canvas-studio.frosted-studio .canvas-project-title{font-size:11px;max-width:35vw}.canvas-studio.frosted-studio .viewport-host .animation-controls{bottom:91px}}

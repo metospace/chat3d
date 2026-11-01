@@ -2,6 +2,7 @@
 // Design X) reads both while mounting, so every test that renders the chat surface installs these
 // after creating its JSDOM instance and before importing React DOM.
 export function installBrowserGlobals(dom){
+  globalThis.getComputedStyle=(element)=>dom.window.getComputedStyle(element);
   for(const name of Object.getOwnPropertyNames(dom.window)){
     if(!/^[A-Z]/.test(name))continue;
     let value;

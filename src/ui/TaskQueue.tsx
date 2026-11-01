@@ -1,5 +1,6 @@
+import {AccessibleModal as Modal} from './kit/AccessibleModal';
 import {useEffect,useState} from 'react';
-import {Button,Drawer,Input,Modal} from 'antd';
+import {Button,Drawer,Input} from 'antd';
 import {ActivityLogIcon,Cross1Icon,ArrowRightIcon} from '@radix-ui/react-icons';
 import {getSessionEditor,switchSession,useWorkspaceStore,type WorkspaceSession} from '../workspace';
 import {conversationController} from '../runtime/conversationController';

@@ -264,7 +264,7 @@ export class Viewport {
       (e: WheelEvent) => {
         e.preventDefault();
         if(down?.box)return;
-        this.orbitRadius = Math.min(Math.max(this.orbitRadius * (1 + e.deltaY * 0.001), 0.3), 800);
+        this.orbitRadius = Math.min(Math.max(this.orbitRadius * Math.exp(e.deltaY * 0.001), Math.max(this.sceneScale*.001,.0001)), Math.max(this.sceneScale*100,800));
         this.updateOrbitCamera();
       },
       { passive: false },
@@ -293,6 +293,9 @@ export class Viewport {
       this.orbitTarget.y + this.orbitRadius * Math.cos(this.orbitPhi),
       this.orbitTarget.z + this.orbitRadius * sinPhi * Math.cos(this.orbitTheta),
     );
+    this.camera.near=Math.max(.00001,Math.min(this.orbitRadius*.01,this.sceneScale*.01));
+    this.camera.far=Math.max(this.orbitRadius+this.sceneScale*10,100);
+    this.camera.updateProjectionMatrix();
     this.camera.lookAt(this.orbitTarget);
     this.markDirty();
   }
@@ -332,7 +335,7 @@ export class Viewport {
     // 让最长边约占视野 55%，留出周边呼吸空间
     const aspect=Math.max(this.host.clientWidth,1)/Math.max(this.host.clientHeight,1);
     const radius = fitDistance(size.toArray() as [number,number,number],this.orbitTheta,this.orbitPhi,fov,aspect);
-    this.orbitRadius = Math.min(Math.max(radius, 0.8), 1000);
+    this.orbitRadius = Math.max(radius, this.sceneScale*.1, .001);
 
     // 仰角太低（贴地看）时抬到默认观察角
     // Preserve explicit overhead or user-selected angles during fitting.
@@ -364,7 +367,7 @@ export class Viewport {
     this.animationClock.configure(doc.animation?.duration,doc.animation?.loop);
     this.animationEvaluator=doc.animation?createAnimationEvaluator(doc):null;
     const animatedIds=new Set(doc.animation?.tracks.flatMap(t=>t.targetIds)??[]);
-    const firstContent=this.nodeMap.size===0;this.clearSelectionHelpers();
+    const firstContent=this.nodeMap.size===0||this.lastSyncedDoc?.projectId!==doc.projectId;this.clearSelectionHelpers();
     const visible=new Set(doc.nodes.filter(n=>(n.visible||animatedIds.has(n.id))&&n.kind==='primitive'&&n.geometry).map(n=>n.id));
     for(const [id,res] of this.nodeMap)if(!visible.has(id)){this.scene.remove(res.mesh);this.nodeMap.delete(id);}
     for(const node of doc.nodes){
@@ -466,7 +469,7 @@ export class Viewport {
     this.capturing=true;this.previousDraw=false;this.quality.resetSamples();
     const savedPlayback={...this.animationClock.state};this.animationClock.pause();
     const saved = {target:this.orbitTarget.clone(),radius:this.orbitRadius,theta:this.orbitTheta,phi:this.orbitPhi,sceneScale:this.sceneScale,light:this.keyLight?{position:this.keyLight.position.clone(),target:this.keyLight.target.position.clone(),left:this.keyLight.shadow.camera.left,right:this.keyLight.shadow.camera.right,top:this.keyLight.shadow.camera.top,bottom:this.keyLight.shadow.camera.bottom,far:this.keyLight.shadow.camera.far}:null};
-    const helpers = [...this.scene.children].filter(o => o.type === 'BoxHelper'||o.name==='__manualPlacementPreview');
+    const helpers = [...this.scene.children].filter(o => o.type === 'BoxHelper'||o.name==='__manualPlacementPreview'||o.name==='__manualTransformHandle');
     const helperVisibility=new Map(helpers.map(h=>[h,h.visible]));
     try {
       if(time!==undefined)this.applyAnimation(time);else this.restoreBasePose();

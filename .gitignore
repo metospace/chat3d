@@ -42,3 +42,6 @@ team-data
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# Local product acceptance evidence
+/artifacts/product-redesign/

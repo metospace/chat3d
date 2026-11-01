@@ -169,9 +169,9 @@ globalThis.getComputedStyle = dom.window.getComputedStyle;
 globalThis.requestAnimationFrame = fn => setTimeout(fn, 0);
 globalThis.cancelAnimationFrame = clearTimeout;
 const {render, fireEvent, waitFor, cleanup, act, within} = await import('@testing-library/react');
-const {Theme} = await import('@radix-ui/themes');
-const vite = await createVite({server: {middlewareMode: true}, appType: 'custom'});
-const renderInTheme = ui => render(React.createElement(Theme, null, ui));
+const {ConfigProvider} = await import('antd');
+const vite = await createVite({server: {middlewareMode: true,hmr:false}, optimizeDeps:{noDiscovery:true,include:[]}, appType: 'custom'});
+const renderInTheme = ui => render(React.createElement(ConfigProvider, {theme:{token:{motion:false}}}, ui));
 try {
   const {deriveUpdateView, reduceUpdateProgress, updateSignals, classifyUpdaterError, publicUpdateError, APP_VERSION} = await vite.ssrLoadModule('/src/domain/appUpdate.ts');
   assert.equal(APP_VERSION, pkg);
@@ -236,7 +236,8 @@ try {
   assert.equal(client.useAppUpdate.getState().dismissed, release.version);
   await act(async () => client.useAppUpdate.setState({dismissed: null}));
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
-  fireEvent.mouseDown(document.querySelector('.app-modal-backdrop'), {button: 0});
+  fireEvent.mouseDown(document.querySelector('.ant-modal-wrap'), {button: 0});
+  fireEvent.click(document.querySelector('.ant-modal-wrap'), {button: 0});
   await waitFor(() => assert.equal(notice.queryByRole('dialog', {name: '应用更新'}) === null, true));
   assert.equal(client.useAppUpdate.getState().dismissed, release.version);
   await act(async () => client.useAppUpdate.setState({release, dismissed: null, remind: null, phase: 'installing', progress: '正在下载更新… 40%', progressMetrics: {loaded: 80, total: 200, label: '正在下载更新… 40%'}}));
@@ -246,7 +247,8 @@ try {
   assert.ok(noticeDialog.getByText('40%'));
   fireEvent.keyDown(notice.getByRole('dialog', {name: '应用更新'}), {key: 'Escape'});
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
-  fireEvent.mouseDown(document.querySelector('.app-modal-backdrop'), {button: 0});
+  fireEvent.mouseDown(document.querySelector('.ant-modal-wrap'), {button: 0});
+  fireEvent.click(document.querySelector('.ant-modal-wrap'), {button: 0});
   assert.ok(notice.getByRole('dialog', {name: '应用更新'}));
   assert.equal(client.useAppUpdate.getState().phase, 'installing');
   assert.equal(noticeDialog.queryAllByRole('button').length, 0);

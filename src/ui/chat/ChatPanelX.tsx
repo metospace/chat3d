@@ -1,10 +1,11 @@
+import {AccessibleModal as Modal} from '../kit/AccessibleModal';
 import {forwardRef,useEffect,useImperativeHandle,useMemo,useRef,useState,type ComponentRef,type ComponentType} from 'react';
 import {prepareReference,isReferenceImage,attachmentInfo,MAX_ATTACHMENT_BYTES} from '../../domain/referenceAttachments';
 import {REFERENCE_IMAGE_JPEG_QUALITY,REFERENCE_IMAGE_MAX_SIDE} from '../../domain/referenceImageLimits';
 import {PlusIcon,ArrowUpIcon,StopIcon,ImageIcon,PersonIcon,ChatBubbleIcon,DotsHorizontalIcon,Pencil1Icon,TrashIcon,CheckIcon} from '@radix-ui/react-icons';
-import {Button,Input,Tag,type GetProps} from 'antd';
+import {Button,Input,Tag,Select,Checkbox,type GetProps} from 'antd';
 import {PopoverPanel} from '../kit/PopoverPanel';
-import {Bubble,Prompts,Sender,Welcome} from '@ant-design/x';
+import {Bubble,Prompts,Sender,Welcome,FileCard} from '@ant-design/x';
 import {useStore} from 'zustand';
 import {useEditorStore,type ChatMessage} from '../../store';
 import {activeConversationStore} from '../../conversationStores';
@@ -132,11 +133,6 @@ function ChatSurface({onConfigure,onAssets,canvasMode=false,expanded=true,onExpa
     if (stickRef.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     else setNewMessages(true);
   }, [messages, aiStatus]);
-  useEffect(() => {
-    if (!imageView) return;
-    const key = (e: KeyboardEvent) => { if(e.key === 'Escape') setImageView(null); };
-    window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
-  }, [imageView]);
 
   const addImages = async (files: (File | Blob)[]) => {
     if (imageBusyRef.current) return;
@@ -201,7 +197,7 @@ function ChatSurface({onConfigure,onAssets,canvasMode=false,expanded=true,onExpa
   </>;
 
   const bubbleContent=(m:ChatMessage)=><div className="adx-bubble-body">
-    {!!m.images?.length && <div className="adx-bubble-images">{m.images.map((src,i)=>isReferenceImage(src)?<button type="button" key={i} onClick={()=>setImageView(src)} title="放大参考图"><img src={src} alt={`参考图 ${i+1}`}/></button>:<span key={i} className="adx-file-chip">{attachmentInfo(src).name}</span>)}</div>}
+    {!!m.images?.length && <div className="adx-bubble-images">{m.images.map((src,i)=>isReferenceImage(src)?<button type="button" key={i} onClick={()=>setImageView(src)} title="放大参考图"><img src={src} alt={`参考图 ${i+1}`}/></button>:<FileCard type="file" aria-label={attachmentInfo(src).name} key={i} name={attachmentInfo(src).name} byte={attachmentInfo(src).size} size="small" description="仅提供文件信息，尚未解析内容"/>)}</div>}
     {m.role==='assistant'&&m.error?<><MessageText text={m.text.includes('倒角半径')?'零件倒角超出尺寸限制，生成已暂停。请恢复指令后重试。':'本次生成未完成，请查看错误详情。'}/>{!(aiError&&m.text.includes(aiError))&&<details className="adx-bubble-error"><summary>错误详情</summary><MessageText text={m.text}/></details>}</>:m.role==='assistant'&&m.batch?<ResultMessage text={m.text}/>:<MessageText text={m.text}/>}
   </div>;
 
@@ -270,13 +266,13 @@ function ChatSurface({onConfigure,onAssets,canvasMode=false,expanded=true,onExpa
           // Sender only submits through its own SendButton, which this panel replaces. Handle Enter here and
           // stop the built-in submit so queuing while a run is active keeps working.
           if(event.key!=='Enter'||event.shiftKey||event.ctrlKey||event.altKey||event.metaKey)return;
-          if((event.nativeEvent as KeyboardEvent).isComposing)return;
+          if((event.nativeEvent as KeyboardEvent).isComposing||event.keyCode===229)return;
           event.preventDefault();void send(busy?'later':'guide');return false;
         }}
         readOnly={imageBusy}
         placeholder={busy ? canSteer?'输入后发送到上方队列，可选择引导当前任务…':'正在准备，可先输入补充要求…' : previewing?'继续描述调整要求，将修改当前预览…': '描述结构、尺寸与需要修改的细节…'}
         components={{input: ComposerInput as ComponentType<ComposerInputProps>}}
-        header={attachments.length?<div className="adx-attachments">{attachments.map((src,i)=><div key={i} className="adx-attachment">{isReferenceImage(src)?<button type="button" onClick={()=>setImageView(src)}><img src={src} alt={`待发送参考图 ${i+1}`}/></button>:<span className="adx-file-chip">{attachmentInfo(src).name}</span>}<button type="button" aria-label={`移除参考附件 ${i+1}`} className="adx-attachment-remove" onClick={()=>setAttachments(prev=>prev.filter((_,j)=>i!==j))}>×</button></div>)}</div>:undefined}
+        header={attachments.length?<div className="adx-attachments">{attachments.map((src,i)=><div key={i} className="adx-attachment">{isReferenceImage(src)?<button type="button" onClick={()=>setImageView(src)}><img src={src} alt={`待发送参考图 ${i+1}`}/></button>:<FileCard type="file" aria-label={attachmentInfo(src).name} name={attachmentInfo(src).name} byte={attachmentInfo(src).size} size="small" description="仅提供文件信息，尚未解析内容"/>}<button type="button" aria-label={`移除参考附件 ${i+1}`} className="adx-attachment-remove" onClick={()=>setAttachments(prev=>prev.filter((_,j)=>i!==j))}>×</button></div>)}</div>:undefined}
         prefix={<><Button ref={attachRef} type="text" aria-label="添加与参考附件选项" title="添加参考附件与附件选项" className="composer-icon adx-attach-trigger" aria-haspopup="menu" aria-expanded={attachOpen} onClick={()=>setAttachOpen(open=>!open)} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '||event.key==='ArrowDown'){event.preventDefault();setAttachOpen(true);}}}><PlusIcon/>{attachments.length>0&&<span className="attachment-count">{attachments.length}</span>}</Button><PopoverPanel anchor={attachRef} open={attachOpen} onClose={()=>setAttachOpen(false)} label="参考附件选项"><div className="composer-action-menu" role="menu" aria-label="参考附件选项"><button type="button" role="menuitem" className="composer-action-item" disabled={imageBusy} onClick={()=>{setAttachOpen(false);fileRef.current?.click();}}><ImageIcon/>{imageBusy?'正在处理参考附件':'添加参考附件'}</button>{!attachments.length&&messages.some(m=>m.images?.length)&&<><div className="composer-action-divider" role="separator"/><button type="button" role="menuitemcheckbox" aria-checked={reuseReference} aria-label="沿用最近参考附件" className="composer-action-item" onClick={()=>setReuseReference(value=>!value)}><span className="composer-action-check" aria-hidden="true">{reuseReference&&<CheckIcon/>}</span>沿用最近参考附件</button></>}<p className="composer-action-note">每个附件100MB以内</p></div></PopoverPanel></>}
         suffix={<span className="adx-send-cluster">
           {busy&&(!!input.trim()||!!attachments.length)&&<Button shape="circle" title="停止当前任务，保留输入和已生成草稿" aria-label="停止生成" onClick={cancel} icon={<StopIcon/>}/>}
@@ -289,11 +285,11 @@ function ChatSurface({onConfigure,onAssets,canvasMode=false,expanded=true,onExpa
             icon={busy&&!input.trim()&&!attachments.length?<StopIcon/>:SendIcon}/>
         </span>}
         footer={<>
-          {doc.nodes.length>0&&<details className="adx-scope" open={!canvasMode}><summary hidden={!canvasMode}>修改范围：{scopeMode==='selection'?'仅选中对象':'全场景'}</summary><fieldset disabled={busy} className="adx-scope-body"><div className="adx-scope-row"><label htmlFor="adx-scope-select">修改范围</label><select id="adx-scope-select" aria-label="对话修改范围" value={scopeMode} onChange={e=>setScopeMode(e.target.value as 'scene'|'selection')}><option value="scene">全场景</option><option value="selection">仅选中对象（{selection.length}）</option></select></div><p>{scopeMode==='selection'?(selection.length?`仅允许修改选中的 ${selection.length} 个零件；其他对象受保护。`:'请先在对象列表中选择对象，再发送指令。'):'可以修改全场景；选中对象仅用于指代，仍遵守指令中的局部限制。'}</p><details><summary>更多修改选项</summary><label className="adx-lock"><input type="checkbox" checked={lockPlacement} onChange={e=>setLockPlacement(e.target.checked)}/>锁定已有对象的位置与朝向</label></details></fieldset></details>}
+          {doc.nodes.length>0&&<details className="adx-scope" open={!canvasMode}><summary hidden={!canvasMode}>修改范围：{scopeMode==='selection'?'仅选中对象':'全场景'}</summary><fieldset disabled={busy} className="adx-scope-body"><div className="adx-scope-row"><label htmlFor="adx-scope-select">修改范围</label><Select id="adx-scope-select" aria-label="对话修改范围" value={scopeMode} disabled={busy} onChange={setScopeMode} options={[{value:"scene",label:"全场景"},{value:"selection",label:`仅选中对象（${selection.length}）`}]}/></div><p>{scopeMode==='selection'?(selection.length?`仅允许修改选中的 ${selection.length} 个零件；其他对象受保护。`:'请先在对象列表中选择对象，再发送指令。'):'可以修改全场景；选中对象仅用于指代，仍遵守指令中的局部限制。'}</p><details><summary>更多修改选项</summary><Checkbox className="adx-lock" disabled={busy} checked={lockPlacement} onChange={e=>setLockPlacement(e.target.checked)}>锁定已有对象的位置与朝向</Checkbox></details></fieldset></details>}
           <div className="adx-composer-tools"><QualityPicker onConfigure={onConfigure}/><span className="adx-tool-divider"/><ModelPicker onConfigure={onConfigure}/><span className="adx-tool-spacer"/><span className="adx-composer-hint">{busy?(canSteer?'Enter 加入队列':'Enter 补充要求'):'Enter 发送 · Shift+Enter 换行'}</span></div>
         </>}
       />
     </div>
-    {imageView && <div role="dialog" aria-modal="true" aria-label="参考图预览" onKeyDown={e=>{if(e.key==='Tab')e.preventDefault();}} className="adx-lightbox" onClick={()=>setImageView(null)}><img src={imageView} alt="参考图大图" onClick={e=>e.stopPropagation()}/><button autoFocus type="button" aria-label="关闭参考图" onClick={()=>setImageView(null)} className="adx-lightbox-close">×</button></div>}
+    <Modal open={!!imageView} title="参考图预览" onCancel={()=>setImageView(null)} footer={null} width={900} destroyOnHidden><img src={imageView??undefined} alt="参考图大图" style={{display:"block",maxWidth:"100%",maxHeight:"75vh",margin:"auto",objectFit:"contain"}}/></Modal>
   </div>;
 }

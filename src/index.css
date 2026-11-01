@@ -1,5 +1,4 @@
 @import "tailwindcss" source("./");
-@import "./ui/hero-styles.css";
 
 /* 全局基础：桌面应用占满视口、无滚动条 */
 html,
@@ -12,10 +11,9 @@ body,
 body {
   overflow: hidden;
   font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, -apple-system, sans-serif;
-  background: #fafafa;
-  color: #202020;
-  -webkit-user-select: none; /* 桌面应用习惯：正文不默认选中 */
-  user-select: none;
+  background: var(--sc-surface-page, #f5f7fb);
+  color: var(--sc-ink, #182338);
+
 }
 
 /* 输入框允许选择 */
@@ -38,11 +36,11 @@ input[type="number"]::-webkit-outer-spin-button {
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: color-mix(in srgb, var(--sc-ink-muted) 35%, transparent);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.28);
+  background: color-mix(in srgb, var(--sc-ink-muted) 65%, transparent);
 }
 ::-webkit-scrollbar-track {
   background: transparent;

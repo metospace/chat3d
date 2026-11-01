@@ -1,6 +1,7 @@
+import {AccessibleModal as Modal} from './kit/AccessibleModal';
 import {downloadJson} from '../util/downloadJson';
 import {useRef,useState} from 'react';
-import {Button,Modal} from 'antd';
+import {Button} from 'antd';
 import {DownloadIcon,UploadIcon,Cross1Icon} from '@radix-ui/react-icons';
 import {exportWorkspaceBackup,importWorkspaceBackup} from '../workspace';
 export function WorkspaceTools({onClose}:{onClose:()=>void}){
