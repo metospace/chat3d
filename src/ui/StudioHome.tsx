@@ -1,7 +1,9 @@
 import {prepareReference,isReferenceImage,attachmentInfo,MAX_ATTACHMENT_BYTES} from '../domain/referenceAttachments';
 import {HomeTasks} from './HomeTasks';
 import {Button,Card,Input,Modal,Tag} from 'antd';
-import {useEffect,useRef,useState,type ComponentRef} from 'react';
+import {Prompts,Sender,Welcome} from '@ant-design/x';
+import {HomeSenderInput} from './chat/HomeSenderInput';
+import {useEffect,useRef,useState,type ComponentRef,type ComponentType} from 'react';
 import {CubeIcon,LayersIcon,ArrowRightIcon,PlusIcon,ArrowUpIcon,Cross1Icon,ImageIcon,MagnifyingGlassIcon,MixerHorizontalIcon} from '@radix-ui/react-icons';
 import {createSession,switchSession,useWorkspaceStore} from '../workspace';
 import {useEditorStore} from '../store';
@@ -24,8 +26,15 @@ export function StudioHome({onOpen,onLibrary,onGenerate,onConfigure,onTasks,hidd
  const [kind,setKind]=useState<'asset'|'scene'>('asset'),[draft,setDraft]=useState(''),[images,setImages]=useState<string[]>([]),[preview,setPreview]=useState<string|null>(null),[imageBusy,setImageBusy]=useState(false);
  const [items,setItems]=useState<ModelAssetSummary[]>([]),[error,setError]=useState('');
  const [search,setSearch]=useState(''),[filter,setFilter]=useState<'all'|'asset'|'scene'>('all');
- const creating=useRef(false),imageBusyRef=useRef(false),fileRef=useRef<HTMLInputElement>(null),draftRef=useRef<ComponentRef<typeof Input.TextArea>>(null);
+ const creating=useRef(false),imageBusyRef=useRef(false),fileRef=useRef<HTMLInputElement>(null),draftRef=useRef<ComponentRef<typeof Sender>>(null);
  const locked=!ready||!!workspaceError;
+ const promptSuggestions=kind==='asset'?[
+  {key:'metal-workbench',label:'金属工作台',description:'创建一个长 1.5 米、宽 0.7 米、高 0.8 米的金属工作台，浅灰台面，深灰方管支腿。'},
+  {key:'storage-rack',label:'仓储货架',description:'创建一个长 2 米、深 0.6 米、高 2 米的四层仓储货架，蓝色立柱，橙色横梁。'},
+ ]:[
+  {key:'assembly-station',label:'装配工位',description:'创建一个 8 米 × 6 米的装配区域，包含两张工作台、一个工具柜和物料架，保留中间通道。'},
+  {key:'warehouse-layout',label:'仓储布局',description:'创建一个 12 米 × 8 米的仓储场景，包含两排货架和中央通道，物件排列整齐。'},
+ ];
  useEffect(()=>{if(hidden)return;let alive=true;listModelAssets().then(a=>{if(alive)setItems(a);}).catch(()=>{if(alive)setItems([]);});return()=>{alive=false;};},[hidden]);
  const projects=sessions.filter(s=>!s.deletedAt&&(s.moduleKind||s.snapshot.doc.nodes.length||s.snapshot.messages.length)).sort((a,b)=>b.updatedAt-a.updatedAt);
  const matching=projects.filter(s=>(filter==='all'||(s.moduleKind??'scene')===filter)&&s.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
@@ -62,35 +71,29 @@ export function StudioHome({onOpen,onLibrary,onGenerate,onConfigure,onTasks,hidd
  useEffect(()=>{if(!hidden)creating.current=false;},[hidden]);
  return <StudioPage className="home-page home-command-center" hidden={hidden}>
   <header className="home-hero">
-   <div><h1 id="home-title">创作工作空间</h1><p className="home-hero-lead">从一个想法开始，或继续打磨你的三维项目。</p></div>
+   <div><span className="home-workspace-eyebrow">SCENIVO / 创作空间</span><h1 id="home-title">把想法，变成三维作品。</h1><p className="home-hero-lead">描述你的构想，让 AI 完成第一步。每个细节，仍由你掌控。</p></div>
    <Button className="home-new-project" aria-label="新建空白项目" disabled={locked} onClick={startBlankProject}><PlusIcon/>新建空白{kind==='asset'?'资产':'场景'}</Button>
   </header>
   <div className="home-start-grid">
   <section className="home-creation" aria-labelledby="home-create-title">
    <div className="home-creation-copy">
-    <h2 id="home-create-title">用 AI 开始创作</h2>
-    <p>先选择类型，再描述你想创建的内容。</p>
+    <Welcome className="home-x-welcome" variant="borderless" title={<span id="home-create-title">用 AI 开始创作</span>} styles={{title:{fontSize:18,fontWeight:600,margin:0}}} description="先选择类型，再描述你想创建的内容。"/>
+
     <div className="home-kind-switch" role="group" aria-label="新项目类型"><button type="button" aria-pressed={kind==='asset'} onClick={()=>setKind('asset')}><CubeIcon/>资产</button><button type="button" aria-pressed={kind==='scene'} onClick={()=>setKind('scene')}><LayersIcon/>场景</button></div>
     <p className="home-kind-description">{kind==='asset'?'单个可复用的三维模型，可在场景中组合使用。':'由多个模型组成的空间布局，可继续编辑物件与位置。'}</p>
    </div>
    <div className="home-create-column">
-   <form className="home-composer" aria-label="创建项目" onSubmit={e=>{e.preventDefault();startProject();}}>
-    <Input.TextArea ref={draftRef} onPaste={e=>{const files=Array.from(e.clipboardData.items).filter(i=>i.kind==='file').map(i=>i.getAsFile()).filter((f):f is File=>!!f);if(files.length){e.preventDefault();void addImages(files);}}} aria-label="新项目描述" value={draft} onChange={e=>setDraft(e.target.value)} autoSize={{minRows:5,maxRows:10}} placeholder={kind==='asset'?'描述模型的外形、尺寸、材质与细节…':'描述场景的空间、物件，以及它们之间的关系…'}/>
-    {!!images.length&&<div className="home-reference-images">{images.map((image,i)=><div key={i}>{isReferenceImage(image)?<button type="button" aria-label={`预览首页参考附件 ${i+1}`} onClick={()=>setPreview(image)}><img src={image} alt={`首页参考附件 ${i+1}`}/></button>:<span>{attachmentInfo(image).name}</span>}<Button type="text" aria-label={`移除首页参考附件 ${i+1}`} onClick={()=>setImages(old=>old.filter((_,j)=>i!==j))} icon={<Cross1Icon/>}/></div>)}</div>}
-    <div className="home-composer-actions">
+   <form className="home-x-form" aria-label="创建项目" onSubmit={e=>{e.preventDefault();startProject();}}>
+    <Sender ref={draftRef} className="home-composer home-x-sender" components={{input:HomeSenderInput as ComponentType<React.ComponentProps<typeof Input.TextArea>>}} value={draft} onChange={setDraft} onPasteFile={files=>void addImages(Array.from(files))} onSubmit={startProject} submitType="shiftEnter" disabled={locked} readOnly={imageBusy} suffix={false} autoSize={{minRows:5,maxRows:10}} placeholder={kind==='asset'?'描述模型的外形、尺寸、材质与细节…':'描述场景的空间、物件，以及它们之间的关系…'} header={
+    !!images.length&&<div className="home-reference-images">{images.map((image,i)=><div key={i}>{isReferenceImage(image)?<button type="button" aria-label={`预览首页参考附件 ${i+1}`} onClick={()=>setPreview(image)}><img src={image} alt={`首页参考附件 ${i+1}`}/></button>:<span>{attachmentInfo(image).name}</span>}<Button type="text" aria-label={`移除首页参考附件 ${i+1}`} onClick={()=>setImages(old=>old.filter((_,j)=>i!==j))} icon={<Cross1Icon/>}/></div>)}</div>}
+    footer={<div className="home-composer-actions">
      <input ref={fileRef} type="file" multiple hidden onChange={e=>{const files=Array.from(e.target.files??[]);e.target.value='';void addImages(files);}}/>
      <Button className="home-add-image" aria-label={imageBusy?'正在处理参考附件':'添加参考附件'} title="添加参考附件（不限类型与数量，单文件100MB以内）" type="text" disabled={imageBusy} onClick={()=>fileRef.current?.click()} icon={<ImageIcon/>}>{imageBusy?'处理中':'参考附件'}{images.length>0&&<span className="attachment-count">{images.length}</span>}</Button>
      <div className="composer-spacer"/><QualityPicker forNewProject onConfigure={onConfigure}/><ModelPicker forNewProject onConfigure={onConfigure}/>
      <Button type="primary" className="home-start composer-send" aria-label="开始生成" title="开始生成" htmlType="submit" disabled={locked||imageBusy||(!draft.trim()&&!images.length)}><span>开始生成</span><ArrowUpIcon/></Button>
-    </div>
+    </div>}/>
    </form>
-   <div className="home-prompt-suggestions" role="group" aria-label="需求参考"><span>试着描述</span>{(kind==='asset'?[
-    ['金属工作台','创建一个长 1.5 米、宽 0.7 米、高 0.8 米的金属工作台，浅灰台面，深灰方管支腿。'],
-    ['仓储货架','创建一个长 2 米、深 0.6 米、高 2 米的四层仓储货架，蓝色立柱，橙色横梁。'],
-   ]:[
-    ['装配工位','创建一个 8 米 × 6 米的装配区域，包含两张工作台、一个工具柜和物料架，保留中间通道。'],
-    ['仓储布局','创建一个 12 米 × 8 米的仓储场景，包含两排货架和中央通道，物件排列整齐。'],
-   ]).map(([label,prompt])=><button key={label} type="button" onClick={()=>{setDraft(prompt);draftRef.current?.focus();}}>{label}<ArrowRightIcon/></button>)}</div>
+   <Prompts className="home-prompt-suggestions" role="group" aria-label="需求参考" title="试着描述" wrap items={promptSuggestions.map(item=>({...item,description:<span hidden>{item.description}</span>,disabled:locked}))} onItemClick={({data})=>{if(locked||data.disabled)return;const selected=promptSuggestions.find(item=>item.key===data.key);if(!selected)return;setDraft(selected.description);draftRef.current?.focus();}}/>
    <p className="home-composer-note">可粘贴图片或上传参考文件，单文件最大 100 MB。生成后可先预览，再确认修改。</p>
    {(error||workspaceError)&&<p className="resource-error" role="alert">{error||'工作区保存异常，请关闭其他标签页后刷新本页'}</p>}
    </div>
