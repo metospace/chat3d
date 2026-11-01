@@ -341,6 +341,9 @@
 .ant-popover-container:has(.model-picker-menu),
 .ant-popover-container:has(.quality-picker-menu){padding:0;border-radius:12px}
 
+/* Self-managed popup shell (see src/ui/kit/PopoverPanel.tsx). */
+.app-popover-panel{position:fixed;z-index:1300}
+
 /* Self-managed dialog shell (see src/ui/kit/PortalDialog.tsx). */
 .app-modal-backdrop{position:fixed;inset:0;z-index:120;display:grid;place-items:center;padding:24px;background:rgba(9,20,21,.42);backdrop-filter:blur(2px)}
 .app-modal-panel{width:100%;max-height:calc(100vh - 48px);overflow:auto;padding:20px;border:1px solid var(--sc-border-subtle,#dce4e4);border-radius:16px;background:var(--sc-surface-elevated,#fdfefe);box-shadow:0 24px 64px rgba(6,20,20,.28);color:var(--sc-ink,#203334);outline:none}
