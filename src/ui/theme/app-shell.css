@@ -169,11 +169,14 @@
 .studio-account-trigger.ant-btn .studio-account-copy strong{font-size:12px;font-weight:600;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .studio-account-trigger.ant-btn .studio-account-copy small{font-size:10px;color:var(--sc-nav-muted,#aec2c2)}
 .studio-account-trigger.ant-btn .studio-account-chevron{margin-left:auto;width:13px;height:13px;opacity:.7}
-.studio-account-menu.ant-dropdown-menu{min-width:190px;border-radius:12px;padding:5px}
-.studio-account-menu .ant-dropdown-menu-item{font-size:12px;border-radius:8px}
+.studio-account-menu{min-width:210px;padding:6px;border:1px solid var(--sc-border-subtle,#dce4e4);border-radius:12px;background:var(--sc-surface-elevated,#fdfefe);box-shadow:var(--sc-shadow-float,0 12px 36px rgba(6,20,20,.18))}
+.studio-account-menu-label{margin:0;padding:6px 8px;font-size:11px;color:var(--sc-ink-muted,#526869)}
+.studio-account-menu-item{display:flex;align-items:center;gap:8px;width:100%;padding:8px;border:0;border-radius:8px;background:transparent;color:var(--sc-ink,#203334);font:inherit;font-size:12px;text-align:left;cursor:pointer}
+.studio-account-menu-item:hover:not(:disabled){background:var(--sc-surface-muted,#eaf0f0)}
+.studio-account-menu-item:disabled{opacity:.5;cursor:not-allowed}
+.studio-account-menu-divider{height:1px;margin:4px 6px;background:var(--sc-border-subtle,#dce4e4)}
 .studio-account-error{margin:4px 10px;font-size:11px;color:#d07a7a}
 
-.studio-login-dialog .ant-modal-title{font-size:17px;font-weight:600;letter-spacing:-.2px}
 .studio-login-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
 .studio-login-heading .ant-btn{width:28px;height:28px;padding:0;border:0;border-radius:8px;color:var(--sc-ink-muted,#526869)}
 .studio-login-lede{margin:0 0 14px;font-size:12px;line-height:1.7;color:var(--sc-ink-muted,#526869)}
