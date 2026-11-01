@@ -1,3 +1,5 @@
+import {loadRenderPreset} from './renderPreset';
+import {loadRenderQuality} from './renderQuality';
 import type {SceneDocument} from '../domain/types';
 import type {CaptureView} from './capture';
 import type {Viewport} from './Viewport';
@@ -36,6 +38,8 @@ export const captureIsolatedGpu=serializeCapture(async(doc,view,ids,time,signal)
   }
   // captureDocument draws synchronously after its texture readiness barrier.
   // The serial lease covers that barrier, rendering, copy, and state restoration.
+  viewport.setRenderPreset(loadRenderPreset());
+  viewport.setRenderQuality(loadRenderQuality());
   return await viewport.captureDocument(doc,view,ids,time);
  }catch(error){
   if(!signal?.aborted){dispose();failed=true;}

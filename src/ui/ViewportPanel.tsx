@@ -1,4 +1,7 @@
 import './manual-composition.css';
+import './realistic-modeling.css';
+import {loadRenderQuality,saveRenderQuality,type RenderQuality} from '../scene/renderQuality';
+import {loadRenderPreset,saveRenderPreset,type RenderPreset} from '../scene/renderPreset';
 import {useManualComposition,ManualCompositionTools,ManualCompositionHint} from './manualComposition';
 import {wholeObjectIds} from '../domain/manualComposition';
 import {createPortal} from 'react-dom';
@@ -25,8 +28,20 @@ export function ViewportPanel() {
   const choosePreset=(value:'presentation'|'top')=>{if(viewportStatus!=='ready')return;setCameraPreset(value);if(value==='top')viewportRef.current?.topView();else viewportRef.current?.presentationView();setViewMenuOpen(false);};
   const displayTriggerRef=useRef<HTMLButtonElement>(null),displayPanelRef=useRef<HTMLDivElement>(null);
   const [displayAnchor,setDisplayAnchor]=useState<{left:number;top:number}|null>(null);
-  const toggleDisplay=()=>{if(viewportStatus!=='ready')return;if(displayOpen){setDisplayOpen(false);return;}const rect=displayTriggerRef.current?.getBoundingClientRect();if(rect)setDisplayAnchor({left:Math.max(8,Math.min(rect.left,Math.max(8,window.innerWidth-296))),top:Math.max(8,Math.min(rect.bottom+10,Math.max(8,window.innerHeight-360)))});setDisplayOpen(true);};
+  const toggleDisplay=()=>{if(viewportStatus!=='ready')return;if(displayOpen){setDisplayOpen(false);return;}const rect=displayTriggerRef.current?.getBoundingClientRect();if(rect)setDisplayAnchor({left:Math.max(8,Math.min(rect.left,Math.max(8,window.innerWidth-296))),top:Math.max(8,Math.min(rect.bottom+10,Math.max(8,window.innerHeight-480)))});setDisplayOpen(true);};
   useEffect(()=>{if(!displayOpen)return;const onDown=(event:MouseEvent)=>{const target=event.target as Node;if(displayPanelRef.current?.contains(target)||displayTriggerRef.current?.contains(target))return;setDisplayOpen(false);};document.addEventListener('pointerdown',onDown,true);return()=>document.removeEventListener('pointerdown',onDown,true);},[displayOpen]);
+  useEffect(()=>{
+    if(!displayOpen)return;
+    const reposition=()=>{
+      const trigger=displayTriggerRef.current?.getBoundingClientRect(),panel=displayPanelRef.current?.getBoundingClientRect();if(!trigger)return;
+      const width=Math.min(panel?.width||296,window.innerWidth-16),height=Math.min(panel?.height||480,window.innerHeight-16);
+      const next={left:Math.max(8,Math.min(trigger.left,window.innerWidth-width-8)),top:Math.max(8,Math.min(trigger.bottom+10,window.innerHeight-height-8))};
+      setDisplayAnchor(previous=>previous?.left===next.left&&previous.top===next.top?previous:next);
+    };
+    reposition();window.addEventListener('resize',reposition);window.addEventListener('scroll',reposition,true);
+    const observer=new ResizeObserver(reposition);if(displayPanelRef.current)observer.observe(displayPanelRef.current);
+    return()=>{window.removeEventListener('resize',reposition);window.removeEventListener('scroll',reposition,true);observer.disconnect();};
+  },[displayOpen]);
   const [controlsHost,setControlsHost]=useState<HTMLElement|null>(null);
   useEffect(()=>{setControlsHost(document.querySelector<HTMLElement>('.workbench-view-controls'));},[]);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -34,6 +49,10 @@ export function ViewportPanel() {
   const [selectionError,setSelectionError]=useState('');
   const [attempt,setAttempt]=useState(0);
   const [gridVisible,setGridVisible]=useState(false);
+  const [renderQuality,setRenderQuality]=useState<RenderQuality>(loadRenderQuality);
+  const chooseRenderQuality=(value:RenderQuality)=>{setRenderQuality(value);saveRenderQuality(value);viewportRef.current?.setRenderQuality(value);};
+  const [renderPreset,setRenderPreset]=useState<RenderPreset>(loadRenderPreset);
+  const chooseRenderPreset=(value:RenderPreset)=>{setRenderPreset(value);saveRenderPreset(value);viewportRef.current?.setRenderPreset(value);};
   const {resolved}=useAppearance();
   const [backdropOverride,setBackdropOverride]=useState<'light'|'slate'|null>(null);
   const backdrop=backdropOverride??(resolved==='dark'?'slate':'light');
@@ -84,6 +103,8 @@ export function ViewportPanel() {
 
   useEffect(()=>{viewportRef.current?.setGridVisible(gridVisible);},[gridVisible,attempt]);
   useEffect(()=>{viewportRef.current?.setBackdrop(backdrop);},[backdrop,attempt]);
+  useEffect(()=>{viewportRef.current?.setRenderPreset(renderPreset);},[renderPreset,attempt]);
+  useEffect(()=>{viewportRef.current?.setRenderQuality(renderQuality);},[renderQuality,attempt]);
   useEffect(()=>{if(busy)viewportRef.current?.resetAnimation();},[busy]);
   // 文档变化 → 同步到视口
   useEffect(() => {
@@ -98,7 +119,7 @@ export function ViewportPanel() {
   const viewControls=(<div className="viewport-bottom-bar" role="group" aria-label="视图工具"><div className="viewport-view-tools">
        <Popover trigger={['click']} placement="topLeft" open={viewMenuOpen} onOpenChange={setViewMenuOpen} destroyOnHidden content={<div className="studio-control-menu" role="menu" aria-label="视角"><div role="menuitemradio" aria-checked={cameraPreset==='presentation'} aria-label="沙盘视角" tabIndex={0} className="studio-menu-item" onClick={()=>choosePreset('presentation')}><CubeIcon/>沙盘视角</div><div role="menuitemradio" aria-checked={cameraPreset==='top'} aria-label="俯视布局" tabIndex={0} className="studio-menu-item" onClick={()=>choosePreset('top')}><ViewVerticalIcon/>俯视布局</div><div className="studio-menu-separator"/><div role="menuitem" aria-label="适应场景" tabIndex={0} className="studio-menu-item" onClick={()=>{viewportRef.current?.fitToScene();setViewMenuOpen(false)}}><FrameIcon/>适应场景</div></div>}><Button type="text" className="viewport-tool" disabled={viewportStatus!=='ready'} aria-label="切换视角" onKeyDown={event=>openMenu(event,setViewMenuOpen)}>{cameraPreset==='presentation'?<CubeIcon/>:<ViewVerticalIcon/>}{cameraPreset==='presentation'?'沙盘视角':'俯视布局'}<ChevronDownIcon/></Button></Popover>
        <Button ref={displayTriggerRef} type="text" className="viewport-tool" disabled={viewportStatus!=='ready'} aria-label="显示选项" aria-haspopup="dialog" aria-expanded={displayOpen} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleDisplay();}}} onClick={toggleDisplay}><EyeOpenIcon/>显示<ChevronDownIcon/></Button>
-       {displayOpen&&createPortal(<div ref={displayPanelRef} className="viewport-display-panel" role="dialog" aria-label="显示设置" style={{position:'fixed',left:displayAnchor?.left??12,top:displayAnchor?.top??88,zIndex:60}}><header><strong>显示设置</strong><Button type="text" aria-label="关闭显示设置" icon={<Cross1Icon/>} onClick={()=>setDisplayOpen(false)}/></header><div className="display-grid-row"><span>网格</span><Switch aria-label="显示网格" checked={gridVisible} disabled={viewportStatus!=='ready'} onChange={checked=>{if(viewportStatus!=='ready')return;setGridVisible(checked);viewportRef.current?.setGridVisible(checked);}}/></div><fieldset className="display-background"><legend>画布背景</legend><div className="display-background-tiles" role="radiogroup" aria-label="画布背景">{([['light','浅色','is-light'],['slate','深色','is-dark']] as const).map(([value,label,swatch])=><button key={value} type="button" role="radio" aria-checked={backdrop===value} disabled={viewportStatus!=='ready'} className={`display-background-tile ${backdrop===value?'is-selected':''}`} onClick={()=>{if(viewportStatus==='ready')setBackdropOverride(value)}}><span className={`background-color-swatch ${swatch}`} aria-hidden="true"/><span>{label}</span></button>)}</div></fieldset></div>,document.body)}
+       {displayOpen&&createPortal(<div ref={displayPanelRef} className="viewport-display-panel" role="dialog" aria-label="显示设置" style={{position:'fixed',left:displayAnchor?.left??12,top:displayAnchor?.top??88,zIndex:60,maxHeight:'calc(100dvh - 16px)',maxWidth:'calc(100vw - 16px)',boxSizing:'border-box',overflowY:'auto'}}><header><strong>显示设置</strong><Button type="text" aria-label="关闭显示设置" icon={<Cross1Icon/>} onClick={()=>setDisplayOpen(false)}/></header><fieldset className="render-preset-field"><legend>显示质量</legend><div className="render-quality-options" role="radiogroup" aria-label="显示质量">{([['auto','自动'],['high','精细'],['balanced','均衡'],['fast','流畅']] as const).map(([value,label])=><button key={value} type="button" role="radio" aria-checked={renderQuality===value} disabled={viewportStatus!=='ready'} onClick={()=>{if(viewportStatus==='ready')chooseRenderQuality(value);}}>{label}</button>)}</div><p className="render-quality-hint">精细档增强接触阴影；自动模式会按持续渲染表现调整。</p></fieldset><fieldset className="render-preset-field"><legend>灯光效果</legend><div className="render-preset-options" role="radiogroup" aria-label="灯光效果">{([['studio','写实棚拍'],['classic','经典展示']] as const).map(([value,label])=><button key={value} type="button" role="radio" aria-checked={renderPreset===value} disabled={viewportStatus!=='ready'} onClick={()=>{if(viewportStatus==='ready')chooseRenderPreset(value);}}>{label}</button>)}</div></fieldset><div className="display-grid-row"><span>网格</span><Switch aria-label="显示网格" checked={gridVisible} disabled={viewportStatus!=='ready'} onChange={checked=>{if(viewportStatus!=='ready')return;setGridVisible(checked);viewportRef.current?.setGridVisible(checked);}}/></div><fieldset className="display-background"><legend>画布背景</legend><div className="display-background-tiles" role="radiogroup" aria-label="画布背景">{([['light','浅色','is-light'],['slate','深色','is-dark']] as const).map(([value,label,swatch])=><button key={value} type="button" role="radio" aria-checked={backdrop===value} disabled={viewportStatus!=='ready'} className={`display-background-tile ${backdrop===value?'is-selected':''}`} onClick={()=>{if(viewportStatus==='ready')setBackdropOverride(value)}}><span className={`background-color-swatch ${swatch}`} aria-hidden="true"/><span>{label}</span></button>)}</div></fieldset></div>,document.body)}
        <ManualCompositionTools playing={playback.playing||playback.time>0}/></div>
        {!!selection.length&&<Popover trigger={['click']} placement="topRight" open={selectionMenuOpen} onOpenChange={setSelectionMenuOpen} destroyOnHidden content={<div className="studio-control-menu" role="menu" aria-label="选中对象"><div role="menuitem" aria-label="聚焦选中" tabIndex={0} className="studio-menu-item" onClick={()=>{viewportRef.current?.fitToSelection(selection);setSelectionMenuOpen(false)}}>聚焦选中</div>{doc.nodes.find(n=>n.id===selection[0])?.assemblyId&&<div role="menuitem" aria-label="选择整台设备" tabIndex={0} className="studio-menu-item" onClick={()=>{select(wholeObjectIds(doc,[selection[0]]));setSelectionMenuOpen(false)}}>选择整台设备</div>}</div>}><Button type="text" className="selection-action-trigger" disabled={viewportStatus!=='ready'} aria-label="选中对象操作" onKeyDown={event=>openMenu(event,setSelectionMenuOpen)}>已选 {selection.length}<ChevronDownIcon/></Button></Popover>}
       </div>);

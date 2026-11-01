@@ -166,7 +166,7 @@ export function deletionNodeIds(doc:SceneDocument,op:DeleteCommand):string[]{
   return [...ids];
 }
 
-export type AppearancePatch=Partial<Pick<Material,'baseColor'|'roughness'|'metalness'|'opacity'>>;
+export type AppearancePatch=Partial<Pick<Material,'baseColor'|'roughness'|'metalness'|'opacity'|'clearcoat'|'clearcoatRoughness'|'transmission'|'thickness'|'ior'>>;
 export type Command =
   // Manual inspector-only aggregate. Intentionally absent from the AI parser/whitelist.
   | {op:'editSelection';targetIds:string[];change:SelectionChange}
@@ -321,6 +321,7 @@ function cloneNode(n: SceneNode): SceneNode {
 
 // 克隆 Geometry 保持判别联合完整（直接对象字面量会把 type 推断成宽联合）
 export function cloneGeometry(g: Geometry): Geometry {
+  if(g.type==='profileSweep')return structuredClone(g);
   return { type: g.type, params: { ...g.params } } as Geometry;
 }
 
@@ -574,7 +575,7 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
       if(op.sourceMaterialIds!==undefined&&(!Array.isArray(op.sourceMaterialIds)||!op.sourceMaterialIds.length||!op.sourceMaterialIds.every(id=>typeof id==='string')))return {doc,error:new Error('原材质筛选无效')};
       const ids=new Set(affectedNodeIds(op,doc));if(!ids.size)return {doc,error:new Error('没有匹配的选中零件')};
       if(op.materialId&&!materials.some(m=>m.id===op.materialId))return {doc,error:new Error('目标材质不存在')};
-      const patch:AppearancePatch={};for(const key of ['baseColor','roughness','metalness','opacity'] as const)if(op[key]!==undefined)(patch as Record<string,unknown>)[key]=op[key];
+      const patch:AppearancePatch={};for(const key of ['baseColor','roughness','metalness','opacity','clearcoat','clearcoatRoughness','transmission','thickness','ior'] as const)if(op[key]!==undefined)(patch as Record<string,unknown>)[key]=op[key];
       if(!op.materialId&&!Object.keys(patch).length)return {doc,error:new Error('请指定颜色或材质属性')};
       for(const n of nodes)if(ids.has(n.id)){
         const source=materials.find(m=>m.id===(op.materialId??n.materialId))??materials[0];if(!source)return {doc,error:new Error('当前材质不存在')};

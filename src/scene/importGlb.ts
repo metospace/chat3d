@@ -1,10 +1,11 @@
 import {prepareGlbTextures,packGlb} from './glbTextures';
 import {GLTFLoader} from 'three/examples/jsm/loaders/GLTFLoader.js';
-import {LoadingManager,Mesh,MeshStandardMaterial,Color,Vector3,Quaternion,Matrix4,SkinnedMesh,InstancedMesh,BufferGeometry} from 'three';
+import {LoadingManager,Mesh,MeshStandardMaterial,MeshPhysicalMaterial,Color,Vector3,Quaternion,Matrix4,SkinnedMesh,InstancedMesh,BufferGeometry} from 'three';
 import type {SceneDocument,Material,Vec3,Quaternion as Q} from '../domain/types';
 import {validateDocument} from '../domain/types';
 import {makeId} from '../util/ids';
 import {withStockMaterials} from '../domain/materials';
+import {PHYSICAL_MATERIAL_KEYS} from '../domain/physicalMaterial';
 
 export function inspectGlbBytes(data:ArrayBuffer){
  if(data.byteLength<20||data.byteLength>20*1024*1024)throw Error('GLB文件需小于20MB');const view=new DataView(data);
@@ -15,13 +16,13 @@ export function inspectGlbBytes(data:ArrayBuffer){
  if((json.buffers??[]).some((b:any)=>b.uri)||json.buffers?.length>1)throw Error('模型必须自包含，不能引用外部缓冲文件');
 
  if(json.skins?.length)throw Error('当前不导入骨骼角色，请先烘焙为静态可分部件模型');
- if((json.extensionsRequired??[]).some((n:string)=>!['KHR_materials_unlit','KHR_materials_ior','KHR_materials_specular','KHR_texture_transform'].includes(n)))throw Error('模型包含当前不支持的必需扩展或压缩，请导出普通GLB');
+ if((json.extensionsRequired??[]).some((n:string)=>!['KHR_materials_unlit','KHR_materials_ior','KHR_materials_specular','KHR_texture_transform','KHR_materials_clearcoat','KHR_materials_transmission','KHR_materials_volume'].includes(n)))throw Error('模型包含当前不支持的必需扩展或压缩，请导出普通GLB');
  const prepared=prepareGlbTextures(json,bin);return {hasAnimation:!!json.animations?.length,hasTextures:!!json.images?.length,json:prepared.clean,materialMaps:prepared.materials,bin};
 }
 export async function importGlb(data:ArrayBuffer,name:string):Promise<{doc:SceneDocument;warnings:string[]}>{
  const info=inspectGlbBytes(data);const manager=new LoadingManager();manager.setURLModifier(()=>{throw Error('导入不允许请求外部资源');});const loader=new GLTFLoader(manager);const gltf=await loader.parseAsync(info.hasTextures?packGlb(info.json,info.bin):data,'');
  const doc:SceneDocument={schemaVersion:1,projectId:makeId(),revision:0,unit:'m',upAxis:'Y',nodes:[],materials:[],assets:[]};const materials=new Map<string,string>(),assemblies=new Map<string,string>();let vertices=0;
- const materialId=(m:MeshStandardMaterial)=>{if(materials.has(m.uuid))return materials.get(m.uuid)!;const id=makeId();const material:Material={id,baseColor:'#'+(m.color??new Color('#a5abb4')).getHexString(),roughness:m.roughness??.55,metalness:m.metalness??0,opacity:m.opacity??1,transparent:m.transparent,doubleSided:m.side===2,alphaTest:m.alphaTest};const association=gltf.parser.associations.get(m) as {materials?:number}|undefined;const imported=association?.materials!==undefined?info.materialMaps[association.materials]:undefined;if(imported&&Object.keys(imported.maps).length){material.maps=imported.maps;material.normalScale=imported.normalScale;}if(m.emissive){material.emissive='#'+m.emissive.getHexString();material.emissiveIntensity=m.emissiveIntensity??1;}doc.materials.push(material);materials.set(m.uuid,id);return id;};
+ const materialId=(m:MeshStandardMaterial)=>{if(materials.has(m.uuid))return materials.get(m.uuid)!;const id=makeId();const material:Material={id,baseColor:'#'+(m.color??new Color('#a5abb4')).getHexString(),roughness:m.roughness??.55,metalness:m.metalness??0,opacity:m.opacity??1,transparent:m.transparent,doubleSided:m.side===2,alphaTest:m.alphaTest};if(m instanceof MeshPhysicalMaterial)for(const key of PHYSICAL_MATERIAL_KEYS)material[key]=m[key];const association=gltf.parser.associations.get(m) as {materials?:number}|undefined;const imported=association?.materials!==undefined?info.materialMaps[association.materials]:undefined;if(imported&&Object.keys(imported.maps).length){material.maps=imported.maps;material.normalScale=imported.normalScale;}if(m.emissive){material.emissive='#'+m.emissive.getHexString();material.emissiveIntensity=m.emissiveIntensity??1;}doc.materials.push(material);materials.set(m.uuid,id);return id;};
  try{gltf.scene.updateMatrixWorld(true);gltf.scene.traverseVisible(o=>{
   if(!(o instanceof Mesh))return;if(o instanceof SkinnedMesh||o instanceof InstancedMesh||Object.keys(o.geometry.morphAttributes).length)throw Error('当前只接受普通静态网格，不接受骨骼、实例或形变网格');
   const g=o.geometry as BufferGeometry;const position=g.getAttribute('position');if(!position)return;vertices+=position.count;if(vertices>500000)throw Error('模型超过50万顶点导入预算');

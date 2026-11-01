@@ -1,3 +1,5 @@
+import {validateProfileSweep,type ProfileSweepParams} from './profileSweep';
+import {physicalMaterialErrors} from './physicalMaterial';
 import {poseRigSchema,type PoseRig} from './poseRig';
 import {validateBlueprints,type ObjectBlueprint} from './objectBlueprint';
 import {validateProfile,profileCornerLimit} from './profileValidation';
@@ -24,7 +26,7 @@ export interface Transform {
 }
 
 // 类型白名单（方案 MVP：box、sphere、cylinder、cone、plane）
-export type GeometryType = 'loft' | 'sweepTube' | 'mesh' | 'lathe' | 'profile' | 'box' | 'sphere' | 'cylinder' | 'cone' | 'plane' | 'roundedPlate' | 'capsule' | 'frame' | 'tube' | 'trapezoid';
+export type GeometryType = 'profileSweep' | 'loft' | 'sweepTube' | 'mesh' | 'lathe' | 'profile' | 'box' | 'sphere' | 'cylinder' | 'cone' | 'plane' | 'roundedPlate' | 'capsule' | 'frame' | 'tube' | 'trapezoid';
 
 export interface BoxParams {
   bevelRadius?: number;
@@ -56,6 +58,7 @@ export interface PlaneParams {
 }
 
 export type Geometry =
+  | {type:'profileSweep';params:ProfileSweepParams}
   | {type:'loft';params:{rings:{center:Vec3;radiusX:number;radiusZ:number}[];segments:number}}
   | {type:'sweepTube';params:{points:Vec3[];radius:number;segments:number;radialSegments:number}}
   | {type:'mesh';params:{positions:number[];indices:number[];normals?:number[];uvs?:number[]}}
@@ -72,7 +75,7 @@ export type Geometry =
   | { type: 'cone'; params: ConeParams }
   | { type: 'plane'; params: PlaneParams };
 
-// 材质：MVP 限定标准 PBR 子集
+// Portable PBR factors shared by the viewport, project JSON and GLB export.
 export interface Material {
   maps?:TextureMaps;
   alphaTest?:number;
@@ -80,6 +83,11 @@ export interface Material {
   doubleSided?:boolean;
   surface?:SurfaceDetail;
   normalScale?:number;
+  clearcoat?:number;
+  clearcoatRoughness?:number;
+  transmission?:number;
+  thickness?:number;
+  ior?:number;
   id: string;
   baseColor: string; // hex, e.g. #9099A4
   roughness: number; // [0,1]
@@ -181,6 +189,7 @@ export function validateQuaternion(q: Quaternion, field: string): Error[] {
 // 几何参数校验：有限、非负、超预算细分拒绝
 export function validateGeometry(g: Geometry): Error[] {
   const errs: Error[] = [];
+  if(g?.type==='profileSweep')return validateProfileSweep(g.params);
   if(g?.type==='loft'){
     const p=g.params;if(!p||!Array.isArray(p.rings)||p.rings.length<2||p.rings.length>32||!Number.isInteger(p.segments)||p.segments<8||p.segments>64)return [new Error('放样需要2–32个截面及8–64环向分段')];
     if(p.rings.some((r,i)=>!r||validateVec3(r.center,'截面中心').length||r.center.some(v=>Math.abs(v)>100)||!Number.isFinite(r.radiusX)||!Number.isFinite(r.radiusZ)||r.radiusX<=0||r.radiusZ<=0||r.radiusX>100||r.radiusZ>100||i>0&&r.center[1]<=p.rings[i-1].center[1]))return [new Error('截面中心需有限米制坐标，Y严格递增，半径0–100米')];return [];
@@ -221,7 +230,7 @@ export function validateGeometry(g: Geometry): Error[] {
     return errs;
   }
   const required: Record<GeometryType, string[]> = {
-    loft:[],sweepTube:[],mesh:[],lathe:[],profile:[],capsule:['radius','length'],frame:['width','height','depth','thickness'],tube:['outerRadius','innerRadius','height'],trapezoid:['widthTop','widthBottom','height','depth'],
+    profileSweep:[],loft:[],sweepTube:[],mesh:[],lathe:[],profile:[],capsule:['radius','length'],frame:['width','height','depth','thickness'],tube:['outerRadius','innerRadius','height'],trapezoid:['widthTop','widthBottom','height','depth'],
     roundedPlate: ['width','height','depth','cornerRadius'], box: ['width', 'height', 'depth'], sphere: ['radius'],
     cylinder: ['radiusTop', 'radiusBottom', 'height'], cone: ['radius', 'height'], plane: ['width', 'depth'],
   };
@@ -274,6 +283,7 @@ export function validateMaterial(m: Material): Error[] {
   if(m.maps)errs.push(...validateTextureMaps(m.maps).map(x=>new Error(x)));
   if(m.surface&&!validateSurface(m.surface))errs.push(new Error('程序化表面参数无效'));
   if(m.normalScale!==undefined&&(!Number.isFinite(m.normalScale)||m.normalScale<0||m.normalScale>10))errs.push(new Error('法线强度需为0–10'));
+  errs.push(...physicalMaterialErrors(m).map(message=>new Error(message)));
   if (m.opacity !== undefined && (!isFiniteNumber(m.opacity) || m.opacity < 0 || m.opacity > 1)) {
     errs.push(new Error(`材质 ${m.id} opacity 超出 [0,1]`));
   }

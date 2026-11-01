@@ -1,3 +1,5 @@
+import {generationStylePrompt, normalizeGenerationStyle, type GenerationStyle} from './generationStyle';
+import {PHYSICAL_MATERIAL_KEYS, PHYSICAL_MATERIAL_LIMITS} from '../domain/physicalMaterial';
 import {generationQualityPrompt, normalizeGenerationQuality, type GenerationQuality} from './generationPolicy';
 import type {TaskBudget} from './taskBudget';
 import type {EditScope} from '../domain/editScope';
@@ -21,6 +23,7 @@ export interface ModelConfig {
   rememberApiKey?: boolean; // Explicit opt-in; otherwise the key stays in memory.
   model: string; // 如 gpt-4o-mini
   agentMode?: 'pi' | 'single';
+  generationStyle?: GenerationStyle;
   generationQuality?: GenerationQuality; // 缺省为精细；独立于模型、代理模式和预算
   taskBudget?: Partial<TaskBudget>;
   parallelDrafts?: boolean; // 实验：最多两个隔离子草稿，默认关闭
@@ -61,7 +64,7 @@ const IMPLEMENTED_OPS = new Set([
   'setMaterial','setAppearance','setAssemblyMetadata',
 ]);
 
-const GEOMETRY_TYPES = new Set(['loft','sweepTube','lathe','profile','box', 'sphere', 'cylinder', 'cone', 'plane', 'roundedPlate','capsule','frame','tube','trapezoid']);
+const GEOMETRY_TYPES = new Set(['profileSweep','loft','sweepTube','lathe','profile','box', 'sphere', 'cylinder', 'cone', 'plane', 'roundedPlate','capsule','frame','tube','trapezoid']);
 
 const KNOWN_MATERIALS = new Set([...EXTRA_MATERIALS.map(m=>m.id),'mat_gray', 'mat_blue', 'mat_dark', 'mat_metal', 'mat_white', 'mat_rubber', 'mat_yellow', 'mat_red', 'mat_cyan', 'mat_black','mat_glass','mat_screen','mat_pcb','mat_green']);
 
@@ -71,7 +74,7 @@ const DEFAULT_TRANSFORM = {
   scale: [1, 1, 1] as [number, number, number],
 };
 
-export function buildSystemPrompt(ctx: SceneContext, generationQuality: GenerationQuality = 'fine', workflow: 'single' | 'geometry' = 'single'): string {
+export function buildSystemPrompt(ctx: SceneContext, generationQuality: GenerationQuality = 'fine', workflow: 'single' | 'geometry' = 'single', generationStyle: GenerationStyle = 'realistic'): string {
   const nodeLines = ctx.nodes.length
     ? ctx.nodes.map((n) => `  - id:${n.id} name:${n.name} (${n.desc}) pos:[${n.position.join(',')}] rotation:${JSON.stringify(n.rotationQuaternion)} scale:${JSON.stringify(n.scale)} material:${n.materialId} visible:${n.visible} parent:${n.parentId}`).join('\n')
     : '  （空场景，还没有任何对象）';
@@ -193,6 +196,7 @@ duplicateAssembly：{"op":"duplicateAssembly","targetId":"组件任意零件id�
      tube: outerRadius,innerRadius,height。沿Y中空管件，0<innerRadius<outerRadius，可用于管道/套筒/轮毂。
      trapezoid: widthTop,widthBottom,height,depth。XY梯形沿Z拉伸；上窄下宽或上宽下窄，适合斜面机罩、底座、人体躯干。组合局部旋转可改变斜面方向。
      loft: rings=[{center:[x,y,z],radiusX, radiusZ},...]，2–32个椭圆截面，Y严格递增、半径>0，segments=8–64。连续封闭放样，支持偏心和宽深独立变化，用于收腰躯干、曲面外壳、软垫、渐变形体；不要再用箱体冒充曲面。
+     profileSweep: profile=[[横向偏移,高度],...]为3–64个闭合截面轮廓点（不重复首点、暂不含孔），path=[[X,Z],...]为2–64个水平折线路径点，closed可选默认false；闭合路径至少3点且不重复首点，正偏移朝外，开放路径正偏移沿XZ平面左法线。米制坐标±100；沿路径保持连续斜接，开放端封口并带米制UV。用于导轨、收边、折角型材和连续线脚，能用现有profile/lathe完成的形体仍沿用原工具。拐角过尖、截面过宽、路径自交会拒绝，请按诊断调整，不得强行降级成盒子。
      sweepTube: points=[[x,y,z],...]为2–32个连续曲线控制点，radius为圆管半径，segments=8–128，radialSegments=8–32；沿真实路径生成连续曲线管，用于软管、线缆、弯曲扶手/枝条。两端开放，按用途加接头，不等于流体仿真。
      lathe: smooth=true可将径向控制剖面做保形三次平滑插值，适合陶瓷、圆滑壳体和有机收分；保留直线/台阶设计时不启用。points=[[半径,高度],...]为Y轴旋转剖面，2–32点，高度严格递增，半径非负；segments=8–64。用于连续旋转曲面，非均匀缩放可形成椭圆截面。默认两端不封口；实心底座必须明确capStart:true,capEnd:true，避免中心意外开洞。薄壁灯罩/漏斗用wallThickness（正且小于所有半径）生成真实内外壁与端缘，保持两端开口，不能与端盖同用。禁止用多层tube环堆成锥形罩；连续收分用一个lathe。轮廓不是自动居中。示例实心底座points:[[.14,0],[.15,.01],[.14,.035],[.02,.045]],segments:64,capStart:true,capEnd:true；薄壳points:[[.08,0],[.07,.035],[.045,.08],[.018,.11]],segments:64,wallThickness:.002。
      profile: points=[[x,y],...]为3–64点有序简单凹或凸多边形，depth沿Z对称挤出；holes可选，为最多8个内部多边形孔（每孔3–64点），孔严格位于外轮廓内且不接触、相交或嵌套。cornerRadius可选为二维轮廓圆角控制距离（非恒定半径/非厚度方向倒角），需不超过最短边或轮廓间距的24%；窄缝避免大圆角。edgeRadius可选，为厚度边缘的内收倒圆，严格小于depth一半，且edgeRadius+cornerRadius不超过上述安全间距；保持整体外边界与总厚度，不封闭内部孔。无需重复首点。用于任意连续板件、支撑剪影、建筑轮廓与贯通开口；禁止自交。圆孔用适量圆周采样点描述；不以深色贴片冒充开孔。
@@ -209,7 +213,7 @@ duplicateAssembly：{"op":"duplicateAssembly","targetId":"组件任意零件id�
 5. 重命名：{"op":"rename","targetId":"t1","name":"新名字"}
 6. 显隐：{"op":"setVisibility","targetId":"t1","visible":false}
 6a. 真正删除场景零件及其子节点：{"op":"delete","targetId":"t1"}；整组模型：{"op":"delete","targetId":"组件内任一真实节点ID","scope":"assembly"}；多个选中对象：{"op":"delete","targetIds":["t1","t2"]}。targetId 与 targetIds 二选一。删除会清理相关连接和动画引用，预览应用后可撤销恢复，永不删除资产库原件。用户要求删除时不要用隐藏代替；只删除明确目标，歧义时先澄清。
-7. 外观局部修改：{"op":"setAppearance","targetId":"真实零件ID","baseColor":"#3979AA"}；可选roughness/metalness/opacity(0–1)。整机用scope:"assembly"，仅外壳可加sourceMaterialIds:["原外壳材质ID"]，先read_scene读取材质与零件，不要把玻璃、屏幕、人物一起改色。未给出的材质属性保持原值。
+7. 外观局部修改：{"op":"setAppearance","targetId":"真实零件ID","baseColor":"#3979AA"}；可选roughness/metalness/opacity(0–1)、clearcoat/clearcoatRoughness/transmission(0–1)、ior(1–2.333)、thickness(0–100米)。使用transmission时opacity保持1。整机用scope:"assembly"，仅外壳可加sourceMaterialIds:["原外壳材质ID"]，先read_scene读取材质与零件，不要把玻璃、屏幕、人物一起改色。未给出的材质属性保持原值。
 8. 补齐已有组件的设计关联：{"op":"setAssemblyMetadata","targetId":"组件零件ID","sceneRole":"equipment","planKey":"设计清单名称","zone":"区域名"}，不改变几何。
 9. 材质：{"op":"setMaterial","targetId":"t1","materialId":"mat_metal"}
 
@@ -224,7 +228,7 @@ duplicateAssembly：{"op":"duplicateAssembly","targetId":"组件任意零件id�
 ${nodeLines}
 ${sel}
 
-${workflow === 'single' ? generationQualityPrompt(generationQuality, 'single') : ''}`;
+${workflow === 'single' ? generationQualityPrompt(generationQuality, 'single') + '\n' + generationStylePrompt(generationStyle) : ''}`;
   // The detailed furniture example is not the fast mode's minimum part count.
   return normalizeGenerationQuality(generationQuality) === 'fast'
     ? prompt.replace(/# 参考范例[\s\S]*?# 图片/, '# 图片')
@@ -233,7 +237,7 @@ ${workflow === 'single' ? generationQualityPrompt(generationQuality, 'single') :
 
 export interface ConversationTurn { role: 'user' | 'assistant'; text: string }
 
-export function buildMessages(text: string, ctx: SceneContext, images: string[] = [], history: ConversationTurn[] = [], generationQuality: GenerationQuality = 'fine'): ChatMessage[] {
+export function buildMessages(text: string, ctx: SceneContext, images: string[] = [], history: ConversationTurn[] = [], generationQuality: GenerationQuality = 'fine', generationStyle: GenerationStyle = 'realistic'): ChatMessage[] {
   const reminder = '\n\n（请只输出一个 JSON 命令批对象，不要 markdown 代码块或任何解释文字）';
   // 有图时 user 消息走多模态数组（OpenAI 兼容协议）；无图保持纯文本（兼容所有模型）
   const userContent: string | ContentPart[] = images.length
@@ -243,7 +247,7 @@ export function buildMessages(text: string, ctx: SceneContext, images: string[] 
       ]
     : text + reminder;
   return [
-    { role: 'system', content: buildSystemPrompt(ctx, generationQuality) },
+    { role: 'system', content: buildSystemPrompt(ctx, generationQuality, 'single', generationStyle) },
     ...history.slice(-8).map((turn): ChatMessage => ({ role: turn.role, content: turn.text.slice(0, 1500) })),
     { role: 'user', content: userContent },
   ];
@@ -318,7 +322,7 @@ function cleanGeometry(raw: unknown): Geometry | null {
   const g = raw as Record<string, unknown>;
   const type = typeof g.type === 'string' ? g.type : '';
   if (!GEOMETRY_TYPES.has(type)) return null;
-  if(type==='loft'||type==='sweepTube'||type==='lathe'||type==='profile'){const candidate=structuredClone(g) as unknown as Geometry;return validateGeometry(candidate).length?null:candidate;}
+  if(type==='profileSweep'||type==='loft'||type==='sweepTube'||type==='lathe'||type==='profile'){const candidate=structuredClone(g) as unknown as Geometry;return validateGeometry(candidate).length?null:candidate;}
   const paramsRaw = (g.params ?? {}) as Record<string, unknown>;
   const params: Record<string, number> = {};
   let ok = true;
@@ -490,9 +494,9 @@ function cleanCommand(opType: string, op: Record<string, unknown>,diagnostics:st
       if(op.scope!==undefined){if(op.scope!=='assembly')return null;result.scope='assembly';}
       if(op.sourceMaterialIds!==undefined){if(!Array.isArray(op.sourceMaterialIds)||!op.sourceMaterialIds.length||!op.sourceMaterialIds.every(v=>typeof v==='string'))return null;result.sourceMaterialIds=op.sourceMaterialIds;}
       if(op.baseColor!==undefined){if(typeof op.baseColor!=='string'||!/^#[0-9a-f]{6}$/i.test(op.baseColor))return null;result.baseColor=op.baseColor;}
-      for(const key of ['roughness','metalness','opacity'] as const)if(op[key]!==undefined){const v=toNum(op[key]);if(v===null||v<0||v>1)return null;result[key]=v;}
+      for(const key of ['roughness','metalness','opacity',...PHYSICAL_MATERIAL_KEYS] as const)if(op[key]!==undefined){const v=toNum(op[key]);const [min,max]=key in PHYSICAL_MATERIAL_LIMITS?PHYSICAL_MATERIAL_LIMITS[key as keyof typeof PHYSICAL_MATERIAL_LIMITS]:[0,1];if(v===null||v<min||v>max)return null;result[key]=v;}
       if(op.materialId!==undefined){if(typeof op.materialId!=='string'||!op.materialId.trim())return null;result.materialId=op.materialId;}
-      return ['baseColor','roughness','metalness','opacity','materialId'].some(k=>k in result)?result:null;
+      return ['baseColor','roughness','metalness','opacity','materialId',...PHYSICAL_MATERIAL_KEYS].some(k=>k in result)?result:null;
     }
     case 'setMaterial': {
       const targetId = cleanTargetId(op);
@@ -533,14 +537,14 @@ export async function generateBatch(
   history: ConversationTurn[] = [],
   onProgress?: (event: GenerationProgress) => void,
 ): Promise<GeneratedBatch> {
-  cfg = {...cfg, generationQuality: normalizeGenerationQuality(cfg.generationQuality), taskBudget: cfg.taskBudget ? {...cfg.taskBudget} : undefined};
+  cfg = {...cfg, generationStyle: normalizeGenerationStyle(cfg.generationStyle), generationQuality: normalizeGenerationQuality(cfg.generationQuality), taskBudget: cfg.taskBudget ? {...cfg.taskBudget} : undefined};
   const base = (cfg.baseURL || '').trim().replace(/\/+$/, '');
   if (!base) throw new Error('未配置 API 地址（baseURL）');
   if (!cfg.apiKey.trim()) throw new Error('未配置 API Key');
   if (!cfg.model.trim()) throw new Error('未配置模型名');
 
   const url = `${base}/chat/completions`;
-  const messages = buildMessages(text, ctx, images, history, cfg.generationQuality);
+  const messages = buildMessages(text, ctx, images, history, cfg.generationQuality, cfg.generationStyle);
 
   // 解析失败自动纠偏重试一次：把模型的错误回复顶回去，再强调格式
   let lastErr: Error | null = null;
@@ -711,7 +715,7 @@ export function buildSceneContext(doc: Pick<SceneDocument, 'nodes'|'animation'>,
     animation:doc.animation,
     nodes: doc.nodes.map((n) => {
       const g = n.geometry;
-      const desc = g?.type==='mesh'?`导入网格，${g.params.positions.length/3}顶点，${g.params.indices.length/3}三角形；可变换/改材质，不要重新输出顶点` : g
+      const desc = g?.type==='profileSweep'?`profileSweep ${g.params.profile.length}点截面，${g.params.path.length}点${g.params.closed?'闭合':'开放'}路径；局部编辑时再读取轮廓参数`:g?.type==='mesh'?`导入网格，${g.params.positions.length/3}顶点，${g.params.indices.length/3}三角形；可变换/改材质，不要重新输出顶点` : g
         ? `${g.type} ${Object.entries(g.params)
             .map(([k, v]) => `${k}=${v}`)
             .join(' ')}`
