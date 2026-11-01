@@ -20,7 +20,7 @@ export function detailTargets(base:SceneDocument,draft:SceneDocument){
  const visibleGroups=new Map<string,SceneDocument['nodes'][number]>();for(const n of draft.nodes)if(n.visible&&!visibleGroups.has(n.assemblyId??n.id))visibleGroups.set(n.assemblyId??n.id,n);
  const mark=(n:SceneDocument['nodes'][number])=>{const id=n.assemblyId??n.id;const visible=visibleGroups.get(id);if(visible)groups.set(id,{id,name:visible.assemblyName??visible.name});};
  // Embedded maps can be large and shared by hundreds of parts; serialize each material once.
- const surfaceSignature=(m:SceneDocument['materials'][number])=>JSON.stringify({surface:m.surface,maps:m.maps});
+ const surfaceSignature=(m:SceneDocument['materials'][number])=>JSON.stringify({surface:m.surface,maps:m.maps,normalScale:m.normalScale,clearcoat:m.clearcoat,clearcoatRoughness:m.clearcoatRoughness,transmission:m.transmission,thickness:m.thickness,ior:m.ior});
  const oldMaterials=new Map(base.materials.map(m=>[m.id,surfaceSignature(m)])),newMaterials=new Map(draft.materials.map(m=>[m.id,surfaceSignature(m)]));
  for(const n of draft.nodes){if(!n.visible)continue;const old=before.get(n.id);
   const previous=oldMaterials.get(old?.materialId??''),current=newMaterials.get(n.materialId??'');

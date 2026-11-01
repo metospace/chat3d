@@ -1,3 +1,5 @@
+import roomEnvironment from '../../node_modules/three/examples/jsm/environments/RoomEnvironment.js?raw';
+import {loadRenderPreset,RENDER_PRESETS} from './renderPreset';
 import threeCore from '../../node_modules/three/build/three.core.js?raw';
 import threeModule from '../../node_modules/three/build/three.module.js?raw';
 import threeLicense from '../../node_modules/three/LICENSE?raw';
@@ -43,7 +45,10 @@ export async function exportHtml(doc:SceneDocument,title:string):Promise<string>
     // Do not carry project IDs, connections, editing metadata or document state into a shareable file.
     scene.userData={};
     scene.traverse(object=>{object.userData={};});
-    const data=scene.toJSON() as THREE.Object3DJSON & {images?:{url:unknown}[]};
+    const data=scene.toJSON() as THREE.Object3DJSON & {images?:{url:unknown}[];materials?:{attenuationDistance?:number}[]};
+    // JSON turns Infinity into null. Omitting the physical material's default
+    // restores Infinity in MaterialLoader instead of dividing by zero in glass.
+    for(const material of data.materials??[])if(material.attenuationDistance!==undefined&&!Number.isFinite(material.attenuationDistance))delete material.attenuationDistance;
     for(const image of data.images??[]) requireEmbeddedImages(image.url);
     const heading=textForHtml(title);
     return `<!doctype html>
@@ -62,7 +67,7 @@ export async function exportHtml(doc:SceneDocument,title:string):Promise<string>
 <main id="viewport"><canvas id="view" tabindex="0" aria-label="三维模型查看器"></canvas><div id="status" role="status">正在载入离线模型…</div></main>
 <footer><span>左键拖动旋转 · 右键或 Shift 拖动平移 · 滚轮缩放 · 双击重置</span><details><summary>Three.js · MIT</summary><pre>${textForHtml(threeLicense)}</pre></details></footer>
 <script id="scene-data" type="application/json">${jsonForHtml(data)}</script>
-<script id="three-runtime" type="application/json">${jsonForHtml({core:threeCore,module:threeModule})}</script>
+<script id="three-runtime" type="application/json">${jsonForHtml({core:threeCore,module:threeModule,roomEnvironment,lighting:RENDER_PRESETS[loadRenderPreset()]})}</script>
 <script>${viewerSource}</script>
 </body>
 </html>`;

@@ -70,7 +70,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   };
   const save = () => {
     if (!valid) return;
-    const cfg: ModelConfig = {rememberApiKey,generationQuality:useEditorStore.getState().aiConfig?.generationQuality==='fast'?'fast':'fine',taskBudget:normalizeTaskBudget(taskBudget),baseURL:baseURL.trim(),apiKey:apiKey.trim(),model:model.trim(),useMock:false,stream,agentMode,parallelDrafts:agentMode==='pi'&&parallelDrafts};
+    const cfg: ModelConfig = {rememberApiKey,generationStyle:useEditorStore.getState().aiConfig?.generationStyle??'realistic',generationQuality:useEditorStore.getState().aiConfig?.generationQuality==='fast'?'fast':'fine',taskBudget:normalizeTaskBudget(taskBudget),baseURL:baseURL.trim(),apiKey:apiKey.trim(),model:model.trim(),useMock:false,stream,agentMode,parallelDrafts:agentMode==='pi'&&parallelDrafts};
     useEditorStore.getState().setAiConfig(cfg);
     const storageFailure=modelConfigStorageError();
     if(storageFailure){setError(storageFailure);return;}

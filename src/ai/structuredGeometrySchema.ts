@@ -5,9 +5,10 @@ const vec3=()=>Type.Tuple([number(),number(),number()]);
 const point=()=>Type.Tuple([number(),number()]);
 const segments=(min:number,max:number)=>Type.Integer({minimum:min,maximum:max});
 const optionalSegments=()=>Type.Optional(segments(1,256));
-const shape=(type:string,params:Record<string,TSchema>)=>Type.Object({type:Type.Literal(type),params:Type.Object(params,type==='sweepTube'?{additionalProperties:false}:{})});
+const shape=(type:string,params:Record<string,TSchema>)=>Type.Object({type:Type.Literal(type),params:Type.Object(params,type==='sweepTube'||type==='profileSweep'?{additionalProperties:false}:{})});
 // Discoverable parameter contract; relational geometry checks remain in validateGeometry.
 export const structuredGeometrySchema=Type.Unsafe<Geometry>(Type.Union([
+ shape('profileSweep',{profile:Type.Array(point(),{minItems:3,maxItems:64}),path:Type.Array(point(),{minItems:2,maxItems:64}),closed:Type.Optional(Type.Boolean())}),
  shape('box',{width:positive(),height:positive(),depth:positive(),bevelRadius:Type.Optional(Type.Number({minimum:0}))}),
  shape('sphere',{radius:positive(),widthSegments:optionalSegments(),heightSegments:optionalSegments()}),
  shape('cylinder',{radiusTop:Type.Number({minimum:0}),radiusBottom:Type.Number({minimum:0}),height:positive(),radialSegments:optionalSegments()}),

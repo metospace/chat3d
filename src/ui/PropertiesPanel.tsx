@@ -118,7 +118,7 @@ export function PropertiesPanel() {
           </div>
         )}
 
-        {g&&(g.type==='loft'||g.type==='sweepTube')&&<p className="prop-hint">连续曲面模型；可通过对话调整截面或路径，位置、缩放和材质仍可编辑。</p>}
+        {g&&(g.type==='profileSweep'||g.type==='loft'||g.type==='sweepTube')&&<p className="prop-hint">连续曲面模型；可通过对话调整截面或路径，位置、缩放和材质仍可编辑。</p>}
         {g&&(g.type==='profile'||g.type==='lathe')&&<p className="prop-hint">轮廓包含 {g.params.points.length} 个控制点；可通过对话修改轮廓，位置、缩放和材质仍可直接编辑。</p>}
         {g?.type==='mesh'&&<p className="prop-hint">导入网格：{g.params.positions.length/3} 顶点，{g.params.indices.length/3} 三角形。支持部件移动、旋转、缩放和材质修改；不支持通过尺寸字段重建拓扑。</p>}
         {/* 实际包围尺寸 */}
@@ -183,7 +183,7 @@ function AppearanceEditor({doc,nodes}:{doc:SceneDocument;nodes:SceneNode[]}){
 // 各几何类型的局部包围盒（米）
 function geomBbox(g: Geometry): [number, number, number] {
   switch (g.type) {
-    case 'loft':case 'sweepTube':case 'mesh':case 'lathe':case 'profile': {const b=boundsFor(g);return [b.max.x-b.min.x,b.max.y-b.min.y,b.max.z-b.min.z];}
+    case 'profileSweep':case 'loft':case 'sweepTube':case 'mesh':case 'lathe':case 'profile': {const b=boundsFor(g);return [b.max.x-b.min.x,b.max.y-b.min.y,b.max.z-b.min.z];}
     case 'capsule': return [g.params.radius*2,g.params.length+g.params.radius*2,g.params.radius*2];
     case 'tube': return [g.params.outerRadius*2,g.params.height,g.params.outerRadius*2];
     case 'trapezoid': return [Math.max(g.params.widthTop,g.params.widthBottom),g.params.height,g.params.depth];

@@ -1,3 +1,4 @@
+import {buildProfileSweep} from './profileSweepGeometry';
 import {smoothRadialProfile} from '../domain/radialProfile';
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
@@ -7,6 +8,7 @@ import { Geometry } from '../domain/types';
 // 视口与导出共享几何构建，避免下载模型与画面不一致。
 export function buildPrimitiveGeometry(g: Geometry): THREE.BufferGeometry {
   switch (g.type) {
+    case 'profileSweep':return buildProfileSweep(g.params);
     case 'loft': {
       const {rings,segments:N}=g.params;const positions:number[]=[],indices:number[]=[],uvs:number[]=[];const stride=N+1;
       // Duplicate the UV seam: shared U=0 vertices formerly stretched the final strip.

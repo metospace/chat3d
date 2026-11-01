@@ -1,3 +1,4 @@
+import {normalizeGenerationStyle} from './generationStyle';
 import type {ModelConfig} from './provider';
 import {normalizeTaskBudget} from './taskBudget';
 
@@ -40,6 +41,7 @@ export function loadModelConfig(): ModelConfig | null {
       return null;
     }
     const config: ModelConfig = {
+      generationStyle: normalizeGenerationStyle(c.generationStyle),
       generationQuality: c.generationQuality === 'fast' ? 'fast' : 'fine',
       taskBudget: normalizeTaskBudget(c.taskBudget), baseURL: c.baseURL, model: c.model,
       apiKey: typeof c.apiKey === 'string' ? c.apiKey : '', rememberApiKey: c.rememberApiKey === true,

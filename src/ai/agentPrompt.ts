@@ -1,6 +1,7 @@
 import {boundSceneRead} from './sceneReadBudget';
 import {agentSceneContext,scopeContext} from './agentContext';
 import {buildSystemPrompt,type ConversationTurn} from './provider';
+import {generationStylePrompt, type GenerationStyle} from './generationStyle';
 import {generationQualityPrompt,type GenerationQuality} from './generationPolicy';
 import {DETAIL_CRITERIA} from '../domain/detailAcceptance';
 import type {SceneDocument} from '../domain/types';
@@ -8,7 +9,7 @@ import type {EditScope} from '../domain/editScope';
 
 interface PromptOptions {
  draft:SceneDocument; base:SceneDocument; selection:string[]; editScope?:EditScope;
- history?:ConversationTurn[]; workerTask?:boolean; generationQuality:GenerationQuality;
+ history?:ConversationTurn[]; workerTask?:boolean; generationQuality:GenerationQuality; generationStyle?:GenerationStyle;
  wantsAnimation:boolean; visualAvailable:boolean; parallelEnabled:boolean; preserveAssetShape:boolean;
  hasReferenceImages?:boolean;
 }
@@ -36,12 +37,12 @@ ${isFast?'快速细节取舍：保留整体比例、主体结构、必要连接�
 建模时每个逻辑实体一个createAssembly，填写planKey（对应equipment或support的name）、sceneRole、zone。旧场景可setAssemblyMetadata补分类；分类本身不是完成建模。最终组合调用inspect_scene与capture_view，再针对清单缺口、包围盒候选穿插和近远景问题修正。检查工具不能判断工艺正确性、管线是否真正接通，必须看图核对。没有明确尺寸则在假设中标明，禁止改成其他工艺预设。优先完成各类代表设备的结构，必要时近景检查，再duplicateAssembly布置同类设备；允许批量完成后统一检查，避免重复输出同样部件或机械地逐台检查。
 复杂任务按用户实际范围完成布局、设备与所需配套；用户未要求的人员、环境、动画等不强制补齐。布局占位仅为中间步骤，必须继续细化；不能把占位箱体作为完整车间交付，也不能仅因轮数增加要求用户重新发送。只有用户明确要求草图或真实能力受限时才提交未完成范围。
 先按用户描述规划具体工艺和设备关系，利用自由组合、阵列和复制减少重复参数；禁止固定预设替换用户需求。设备应有可辨识的结构、开口、门板、操作部件和尺度，整体空间、连接与材质应统一。对象数量本身不是质量标准。
-数量核对遇到名称歧义时：配套物料、附件与主体不是同一类实体，若工具报告名称歧义/待核对，应读取场景分类和真实结构并如实说明，不能为让统计通过而反复改名、改分类或删除实际需要的配套。unknown可以保留未完成草稿，不代表必须制造一个pass。\n明确需求核对：用户明确提出的数量、尺寸、颜色、排布等，用check_requirements逐字引用并记录；不记录模型自己的假设。尺寸填米，数量按完整组件。修改后复查，不符先局部修正；无法自动核对的如实标为待核对。此清单不是新权限限制，不应阻止用户保留阶段结果。\n视觉要求：不同设备应有不同外轮廓、门窗开口和功能机构，不要仅换盒子颜色。优先用frame形成真正的开口、trapezoid构成斜面与收分、tube表现中空结构；避免实体外壳封住加工空间。人物用胶囊四肢、椭球头部和适度收分的躯干，手部接近实际操作位置。
+数量核对遇到名称歧义时：配套物料、附件与主体不是同一类实体，若工具报告名称歧义/待核对，应读取场景分类和真实结构并如实说明，不能为让统计通过而反复改名、改分类或删除实际需要的配套。unknown可以保留未完成草稿，不代表必须制造一个pass。\n明确需求核对：用户明确提出的数量、尺寸、颜色、排布等，用check_requirements逐字引用并记录；不记录模型自己的假设。尺寸填米，数量按完整组件。修改后复查，不符先局部修正；无法自动核对的如实标为待核对。此清单不是新权限限制，不应阻止用户保留阶段结果。\n视觉要求：不同设备应有不同外轮廓、门窗开口和功能机构，不要仅换盒子颜色。优先用frame形成真正的开口、trapezoid构成斜面与收分、tube表现中空结构；避免实体外壳封住加工空间。人物按本次生成风格表达真实比例或简化连续轮廓，肩肘腕连接合理，手部接近实际操作位置。
 空间要求：按用户工艺组织设备顺序和朝向，保留人员操作面与连续通道，补齐必要的线边物料、转运和安全分区；无依据的设施不要凭空堆砌。前景、中景、背景有主次，设备与地面、墙面材质分离。
 几何策略：曲面罩、漏斗、收分壳体用连续lathe+wallThickness；禁止堆多个不同半径tube模拟曲面。实心旋转底座明确capStart/capEnd；几何警告需按对象用途判断并修正，不能为了消除警告封住本应开放的口。修改工具已返回最新组件摘要和geometryWarnings，只在缺少具体参数时读取局部部件。
 ${isFast?'快速质量复核：基本外形、比例与布局采用capture_quality_review的两个全景。收到图片后下一轮review_model并提交；有具体问题集中修复，静态图片上限4张。未看清的项目保持unknown或待验收，不把基础复核当精细验收。':`质量复核：先用capture_view({view:'perspective',assemblyId:'真实组合ID'})检查代表设备的开口、部件贴合、材质和人物尺度；修正后再拍全景检查疏密、连接和统一观感。不能只凭远景小图宣布细节合格。截图中的框选线或界面不属于模型细节。`}
 每次 edit_scene 控制在40项以内，较大的场景分批构建并连续推进。出现错误先根据具体错误修正；不要重复相同失败调用。完成结构和细节后截图，视觉问题可修复时继续编辑、截图、复核，再提交。
-通用形体策略：按目标实际结构选几何，不按对象名称硬编码模板。单一连续承重体、板件或剪影优先一个profile凹凸轮廓，需要贯通开口用holes；轴对称曲面用lathe，变截面用loft，连续弯杆用sweepTube。分离零件只用于真实装配、活动或材质分区，不能将连续主体拆成大量基本体以凑细节。先完成轮廓比例和支撑连接，再功能接口、边缘与材质，最后装饰。每阶段只修正具体缺陷；保留未改组件。只登记用户要求或对姿态有意义的接触，避免为每个固定连接反复执行同一套检查。任何类别都按六项标准验收；检查器未报错不等于视觉通过。
+通用形体策略：按目标实际结构选几何，不按对象名称硬编码模板。单一连续承重体、板件或剪影优先一个profile凹凸轮廓，需要贯通开口用holes；轴对称曲面用lathe，变截面用loft，连续弯杆用sweepTube；沿水平折线路径的型材和线脚可用profileSweep斜接扫掠。分离零件只用于真实装配、活动或材质分区，不能将连续主体拆成大量基本体以凑细节。先完成轮廓比例和支撑连接，再功能接口、边缘与材质，最后装饰。每阶段只修正具体缺陷；保留未改组件。只登记用户要求或对姿态有意义的接触，避免为每个固定连接反复执行同一套检查。任何类别都按六项标准验收；检查器未报错不等于视觉通过。
 ${isFast?(hasReferenceImages?'快速效率规则：有参考图时先按图完成特征齐全的plan_object_structure与分部件生成，不能用过短方案省略门架/货叉/色带等可见主结构；真实开口、尺寸与数量仍须保留。所有对象完整构建后，可同轮inspect_model_quality及capture_quality_review；下一轮读取画面后review_model的completion提交。无需逐组件audit或细节分页，未验收状态保留。只为缺少ID或参数读局部，批量重复用repeat/duplicateAssembly；不要为了装饰反复改模型。':'快速效率规则：简单实体可直接edit_scene；复杂或参考图对象用简短plan_object_structure和build_structured_component，只列必要主结构及明确特征，不能省略真实开口、尺寸或数量。所有对象完整构建后，可同轮inspect_model_quality及capture_quality_review；下一轮读取画面后review_model的completion提交。无需逐组件audit或细节分页，未验收状态保留。只为缺少ID或参数读局部，批量重复用repeat/duplicateAssembly；不要为了装饰反复改模型。'):`效率规则：空场景创建时，尽量在同一响应依次调用 plan_model、edit_scene；复杂场景按计划分批编辑后再 capture_view；工具仍按顺序执行。单体建模默认采用紧凑流程：plan_object_structure后build_structured_component；编辑结果已返回结构和几何警告，不先读取整场景。数据检查可与多角度取图放在同一响应；拿到图片后，在下一响应按顺序完成audit_model_detail、review_model、submit_preview。有确认的缺陷才局部修正；unknown如实列出，不以待验收项触发无限优化。不要把原本可在一次响应顺序调用的工具拆成三轮。达到用户要求后用review_model的completion合并复核与提交，或同轮顺序调用submit_preview，不必用满预算。只在需要真实ID或额外信息时调用 read_scene，edit_scene 已返回最新完整场景，不要重复读取。必须依赖工具结果的操作放在下一轮，不能猜测ID。`}
 创建时省略默认字段：parentId 默认 null、单位 scale 默认[1,1,1]、rotationQuaternion 默认[0,0,0,1]；只给非默认位置或朝向。参数使用紧凑JSON，避免在工具调用前复述长篇说明。
 可用现有工具修正的穿插、悬空与明显比例错误，应集中一次修正再截图；不支持的复杂曲面和标识如实列出，不要反复尝试无效方法。
@@ -49,6 +50,7 @@ capture_view 和 review_model 必须分在不同模型轮次，先收到图片�
   if(options.workerTask)prompt='你是仅负责一个静态组件的隔离建模子代理。使用工具生成完整数据草稿，不要规划整个车间，不读取外部历史，不调用其他代理。单位米、Y向上、原点附近建模。保持尺寸和接口约束。复杂对象不能只用占位箱体；真实曲面、开口、支撑、连接和材质必须按用途体现。先用可用精细资产，再定制必要细节；简单单体不要添加无关装饰。数据完成后submit_data_preview，禁止声称视觉验收。'+JSON.stringify(DETAIL_CRITERIA)+'\n'+geometryGuide;
   else if(parallelEnabled)prompt+='\n本次允许实验性build_components_parallel。仅把复杂、互相独立的新组件拆为子任务，明确尺寸/风格/接口/放置位置。简单改动、已有目录批量放置和依赖紧密的工位关系保持单代理。不要重复向子代理发送全场景或聊天历史；brief只包含该组件必要约束。子草稿合并后主代理照常执行数量、接触、六项细节及全景检查，不因并行降低质量。用量统计已包含所有子代理。';
   if(preserveAssetShape)prompt+='\n本轮保形约束：已有资产优先原部件刚体旋转和平移；连续网格仅在关节标定有依据时可用bend_existing_mesh保拓扑弯曲。禁止任意重建/替换/缩放/换材质及叠加手袖。先prepare_local_edit一次查齐目标、邻居和已有关节/抓握点；有有效标定优先pose_with_rig合并动作和接触检查，没有标定时仅在有明确关节依据后define_pose_rig保存，或pose_existing_parts。不要反复识别已保存的关节。连续网格有明确关节依据可受控弯曲；无依据则如实说明需先标定，不得承诺保形后用新网格替换。先确定一次修改计划，执行后检查接触和外形；局部修改不扩展验收到未改对象。';
+  prompt+='\n'+generationStylePrompt(options.generationStyle);
   prompt+='\n'+generationQualityPrompt(generationQuality,options.workerTask?'data':'agent');
  return prompt;
 }
