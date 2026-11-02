@@ -1,8 +1,9 @@
+import {installBrowserGlobals} from './jsdom-env.mjs';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import React from 'react';
 import { createServer } from 'vite';
-const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'https://example.test'});
+const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'https://example.test'});installBrowserGlobals(dom);
 for(const name of ['window','document','HTMLElement','HTMLInputElement','Element','CustomEvent','Node','NodeFilter','MutationObserver','Event','MouseEvent','localStorage','location']) Object.defineProperty(globalThis,name,{value:dom.window[name],configurable:true});
 Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});
 globalThis.getComputedStyle=dom.window.getComputedStyle;globalThis.requestAnimationFrame=fn=>setTimeout(fn,0);globalThis.cancelAnimationFrame=clearTimeout;window.requestAnimationFrame=globalThis.requestAnimationFrame;window.cancelAnimationFrame=globalThis.cancelAnimationFrame;

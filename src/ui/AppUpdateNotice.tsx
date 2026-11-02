@@ -1,7 +1,8 @@
 import {useId} from 'react';
 import {isTauri} from '@tauri-apps/api/core';
-import {Button, Dialog} from '@radix-ui/themes';
+import {Button,Tag} from 'antd';
 import {InfoCircledIcon} from '@radix-ui/react-icons';
+import {PortalDialog} from './kit/PortalDialog';
 import {APP_VERSION, formatInstallingProgress, type UpdateView} from '../domain/appUpdate';
 import {
   applyAppUpdate,
@@ -45,12 +46,10 @@ export function AppUpdateBanner({view, onLater, onRemind, onApply, onBackup, onR
   const version = view.kind === 'hidden' ? '' : view.version;
   const notes = view.kind === 'busy' || view.kind === 'ready' ? view.notes : '';
   const dirty = view.kind === 'busy' || view.kind === 'ready' ? view.dirty : false;
-  return <Dialog.Root open={!hidden} onOpenChange={open => { if (!open && view.kind !== 'installing') onLater(); }}>
-    <Dialog.Content className="app-update-notice" maxWidth="560px" aria-label="应用更新" aria-describedby={descriptionId}
-      onEscapeKeyDown={event => { if (view.kind === 'installing') event.preventDefault(); }}
-      onInteractOutside={event => { if (view.kind === 'installing') event.preventDefault(); }}>
-      <Dialog.Title>应用更新</Dialog.Title>
-      <div id={descriptionId} className="app-update-copy" aria-live="polite">
+  if (hidden) return null;
+  return <PortalDialog label="应用更新" onClose={onLater} closable={view.kind !== 'installing'} width={560} className="app-update-notice" describedBy={descriptionId}>
+    <h2 className="app-modal-title">应用更新</h2>
+    <div id={descriptionId} className="app-update-copy" aria-live="polite">
         {(view.kind === 'ready' || view.kind === 'busy' || view.kind === 'failed') && <div className="app-update-version-highlight"><span>{view.kind === 'ready' && view.ended ? '任务已结束，可以更新到' : '发现新版本'}</span><strong>{version}</strong></div>}
         {view.kind === 'installing' && <><p><strong>{view.progress}</strong></p><AppUpdateProgressBar label={view.progress} percent={view.percent} indeterminate={view.indeterminate}/></>}
         {view.kind === 'installed' && <p><strong>版本 {version} 已安装。</strong> {view.progress}</p>}
@@ -61,14 +60,13 @@ export function AppUpdateBanner({view, onLater, onRemind, onApply, onBackup, onR
         </div>}
         {notes && <div className="app-update-notes"><span className="app-update-notes-label">更新说明</span><p>{notes}</p></div>}
       </div>
-      {!hidden && view.kind !== 'installing' && <div className="app-update-actions">
-        {view.kind === 'busy' && <><Button variant="soft" color="gray" onClick={onLater}>稍后提醒</Button><Button variant="solid" onClick={onRemind}>结束后提醒我</Button></>}
-        {view.kind === 'ready' && <><Button variant="soft" color="gray" onClick={onLater}>稍后</Button><Button variant="soft" color="gray" onClick={onBackup}>下载备份</Button><Button variant="solid" className="app-update-primary-action" onClick={onApply}>{applyUpdateLabel(version)}</Button></>}
-        {view.kind === 'failed' && <><Button variant="soft" color="gray" onClick={onLater}>稍后</Button><Button variant="solid" className="app-update-primary-action" onClick={onApply}>重试更新</Button></>}
-        {view.kind === 'installed' && <Button variant="solid" className="app-update-primary-action" disabled={view.busy} onClick={onRestart}>立即重启</Button>}
+      {view.kind !== 'installing' && <div className="app-update-actions">
+        {view.kind === 'busy' && <><Button onClick={onLater}>稍后提醒</Button><Button type="primary" onClick={onRemind}>结束后提醒我</Button></>}
+        {view.kind === 'ready' && <><Button onClick={onLater}>稍后</Button><Button onClick={onBackup}>下载备份</Button><Button type="primary" className="app-update-primary-action" onClick={onApply}>{applyUpdateLabel(version)}</Button></>}
+        {view.kind === 'failed' && <><Button onClick={onLater}>稍后</Button><Button type="primary" className="app-update-primary-action" onClick={onApply}>重试更新</Button></>}
+        {view.kind === 'installed' && <Button type="primary" className="app-update-primary-action" disabled={view.busy} onClick={onRestart}>立即重启</Button>}
       </div>}
-    </Dialog.Content>
-  </Dialog.Root>;
+  </PortalDialog>;
 }
 
 export function AppUpdateNotice({onBackup}: {onBackup: () => void}) {
@@ -94,9 +92,9 @@ export function AppUpdatePanel({layout = 'settings'}: {layout?: 'settings' | 'di
   const showInstalled = view.kind === 'installed';
   const showInstalling = view.kind === 'installing';
 
-  return <div className={`app-update-panel ${layout === 'dialog' ? 'app-update-panel-dialog' : ''}`}>
-    <div className="app-update-brand-card">
-      <div className="app-update-brand"><strong>Scenivo</strong><p className="app-update-panel-lead">{desktop ? '桌面版只安装已签名的发布包。生成进行中可以稍后更新，不会打断当前任务。' : '网页版刷新即可使用站点上的最新功能。'}</p></div>
+  return <div className={`app-update-panel ${layout === 'dialog' ? 'app-update-panel-dialog' : 'app-update-panel-settings'}`}>
+    <div className={layout==='settings'?'app-update-summary':'app-update-brand-card'}>
+      <div className="app-update-brand"><div className="app-update-product-name"><strong>Scenivo</strong>{layout==='settings'&&<Tag>{desktop?'桌面版':'网页版'}</Tag>}</div><p className="app-update-panel-lead">{desktop ? '桌面版只安装已签名的发布包。生成进行中可以稍后更新，不会打断当前任务。' : '网页版刷新即可使用站点上的最新功能。'}</p></div>
       <div className="app-update-version-compare" aria-label="版本信息">
         <div className="app-update-version-chip"><span className="app-update-version-label">当前版本</span><strong>{APP_VERSION}</strong></div>
         {hasUpdate && <span className="app-update-version-arrow" aria-hidden="true">→</span>}
@@ -113,41 +111,40 @@ export function AppUpdatePanel({layout = 'settings'}: {layout?: 'settings' | 'di
     {installDisplay && !showInstalling && <AppUpdateProgressBar label={installDisplay.label} percent={installDisplay.percent} indeterminate={installDisplay.indeterminate}/>}
     <div className="app-update-panel-actions">
       {showReadyActions && <>
-        <Button size="3" variant="solid" className="app-update-primary-action" disabled={checking || updating} onClick={() => void applyAppUpdate()}>{applyUpdateLabel(version)}</Button>
-        <Button size="2" variant="soft" color="gray" onClick={dismissUpdate}>稍后</Button>
+        <Button type="primary" className="app-update-primary-action" disabled={checking || updating} onClick={() => void applyAppUpdate()}>{applyUpdateLabel(version)}</Button>
+        <Button onClick={dismissUpdate}>稍后</Button>
       </>}
       {showBusyActions && <>
-        <Button size="3" variant="solid" onClick={remindUpdateAfterTask}>结束后提醒我</Button>
-        <Button size="2" variant="soft" color="gray" onClick={dismissUpdate}>稍后提醒</Button>
+        <Button type="primary" onClick={remindUpdateAfterTask}>结束后提醒我</Button>
+        <Button onClick={dismissUpdate}>稍后提醒</Button>
       </>}
-      {showFailed && <Button size="3" variant="solid" className="app-update-primary-action" onClick={() => void applyAppUpdate()}>重试更新到 {version}</Button>}
-      {showInstalled && <Button size="3" variant="solid" className="app-update-primary-action" disabled={view.busy} onClick={() => void relaunchInstalledUpdate()}>立即重启</Button>}
-      {!hasUpdate && !showInstalling && !showInstalled && <Button size="3" variant="solid" className="app-update-primary-action" disabled={checking || updating} onClick={() => void checkForAppUpdate({manual: true})}>{checking ? '正在检查…' : '检查更新'}</Button>}
-      {hasUpdate && !showReadyActions && !showBusyActions && !showFailed && !showInstalled && !showInstalling && <Button size="3" variant="solid" className="app-update-primary-action" disabled={checking || updating} onClick={() => void applyAppUpdate()}>{applyUpdateLabel(version)}</Button>}
+      {showFailed && <Button type="primary" className="app-update-primary-action" onClick={() => void applyAppUpdate()}>重试更新到 {version}</Button>}
+      {showInstalled && <Button type="primary" className="app-update-primary-action" disabled={view.busy} onClick={() => void relaunchInstalledUpdate()}>立即重启</Button>}
+      {!hasUpdate && !showInstalling && !showInstalled && <Button type="primary" className="app-update-primary-action" disabled={checking || updating} onClick={() => void checkForAppUpdate({manual: true})}>{checking ? '正在检查…' : '检查更新'}</Button>}
+      {hasUpdate && !showReadyActions && !showBusyActions && !showFailed && !showInstalled && !showInstalling && <Button type="primary" className="app-update-primary-action" disabled={checking || updating} onClick={() => void applyAppUpdate()}>{applyUpdateLabel(version)}</Button>}
     </div>
   </div>;
 }
 
 export function AppUpdateDialog() {
   const open = useAppUpdate(s => s.panelOpen);
-  return <Dialog.Root open={open} onOpenChange={next => { if (!next) closeAppUpdatePanel(); else openAppUpdatePanel(); }}>
-    <Dialog.Content className="settings-module app-update-dialog" maxWidth="520px">
+  if (!open) return null;
+  return <PortalDialog label="关于与更新" onClose={closeAppUpdatePanel} width={520} className="app-update-dialog">
       <header className="app-update-dialog-header">
         <InfoCircledIcon aria-hidden="true"/>
         <div className="app-update-dialog-heading">
-          <Dialog.Title>关于与更新</Dialog.Title>
-          <Dialog.Description>查看当前版本、检查更新，并在新版本可用时一键安装。</Dialog.Description>
+          <h2 className="app-modal-title">关于与更新</h2>
+          <p className="app-modal-description">查看当前版本、检查更新，并在新版本可用时一键安装。</p>
         </div>
       </header>
       <div className="app-update-dialog-body"><AppUpdatePanel layout="dialog"/></div>
-      <div className="app-update-dialog-footer"><Button variant="soft" color="gray" onClick={closeAppUpdatePanel}>关闭</Button></div>
-    </Dialog.Content>
-  </Dialog.Root>;
+      <div className="app-update-dialog-footer"><Button onClick={closeAppUpdatePanel}>关闭</Button></div>
+  </PortalDialog>;
 }
 
 export function AppUpdateNavEntry({disabled,layout='icon'}: {disabled?: boolean;layout?:'icon'|'sidebar'}) {
   const pending = useAppUpdate(s => hasPendingAppUpdate(s));
-  return <Button variant="ghost" color="gray" className="app-update-nav-entry" title="关于 Scenivo 与检查更新" aria-label={pending ? '关于与更新，有新版本可用' : '关于与更新'} disabled={disabled} onClick={openAppUpdatePanel}>
+  return <Button type="text" className="app-update-nav-entry" title="关于 Scenivo 与检查更新" aria-label={pending ? '关于与更新，有新版本可用' : '关于与更新'} disabled={disabled} onClick={openAppUpdatePanel}>
     <InfoCircledIcon aria-hidden="true"/>
     {layout==='sidebar'?<span className="app-update-sidebar-label">Scenivo · v{APP_VERSION}</span>:<span className="app-update-nav-label">关于与更新</span>}
     {pending && <span className="app-update-nav-badge" aria-hidden="true">{layout==='sidebar'?'有更新':'新'}</span>}
@@ -156,7 +153,7 @@ export function AppUpdateNavEntry({disabled,layout='icon'}: {disabled?: boolean;
 
 export function AppUpdateSettings() {
   return <section className="settings-group app-update-settings-group" id="app-update-section">
-    <header><h2>关于与更新</h2><p>查看版本、检查更新，并在新版本可用时安装</p></header>
+    <header><h2>关于与更新</h2></header>
     <div className="settings-row app-update-settings-row"><AppUpdatePanel layout="settings"/></div>
   </section>;
 }

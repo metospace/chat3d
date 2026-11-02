@@ -1,0 +1,47 @@
+.canvas-studio.frosted-studio .settings-page.settings-overview {
+  display:block;
+  width:100%;
+  max-width:1080px;
+  margin:0 auto;
+  padding:32px 36px 48px;
+}
+.settings-overview .studio-page-header {margin-bottom:20px}
+.settings-overview .studio-page-header h1 {margin:0;font-size:24px}
+.settings-overview .studio-page-header p {margin:6px 0 0;color:var(--sc-ink-muted);font-size:14px}
+.settings-overview .settings-category-tabs > .ant-tabs-nav {margin-bottom:24px}
+.settings-about-tab {display:inline-flex;align-items:center;gap:8px}
+.settings-overview .settings-section,
+.settings-overview .app-update-settings-group {
+  padding:0 24px;
+  border:1px solid var(--sc-border-subtle);
+  border-radius:10px;
+  background:var(--sc-surface-elevated);
+  box-shadow:none;
+}
+.settings-overview .settings-section > h2,
+.settings-overview .app-update-settings-group > header {
+  margin:0;
+  padding:20px 0 14px;
+  border-bottom:1px solid var(--sc-border-subtle);
+}
+.settings-overview .settings-section > h2,
+.settings-overview .app-update-settings-group h2 {font-size:15px;font-weight:600;line-height:1.5;color:var(--sc-ink)}
+.settings-overview .app-update-settings-group h2 {margin:0}
+.settings-option {display:flex;align-items:center;gap:14px;min-height:88px;padding:18px 0}
+.settings-option + .settings-option {border-top:1px solid var(--sc-border-subtle)}
+.settings-option > div {flex:1;min-width:0}
+.settings-option h3 {margin:0 0 4px;font-size:14px;font-weight:500;color:var(--sc-ink)}
+.settings-overview .settings-option p {margin:0;font-size:13px;color:var(--sc-ink-muted);line-height:1.6}
+.settings-option > .ant-btn,.settings-option > .ant-select {flex:none;min-width:132px}
+.settings-option-icon {display:grid;place-items:center;flex:none;width:34px;height:34px;border-radius:8px;background:var(--sc-surface-muted);color:var(--sc-ink-muted)}
+.settings-option-icon svg {width:17px;height:17px}
+.settings-overview .settings-data-note {margin:16px 4px 0;color:var(--sc-ink-muted);font-size:12px;line-height:1.8;max-width:760px}
+.settings-overview .app-update-settings-row {padding:20px 0 24px;min-height:0;border:0}
+@media(max-width:720px) {
+  .canvas-studio.frosted-studio .settings-page.settings-overview {padding:24px 18px 32px}
+  .settings-overview .settings-section,.settings-overview .app-update-settings-group {padding:0 16px}
+  .settings-overview .settings-category-tabs > .ant-tabs-nav {margin-bottom:18px}
+  .settings-option {flex-wrap:wrap;gap:10px;padding:16px 0}
+  .settings-option > div {flex-basis:calc(100% - 44px)}
+  .settings-option > .ant-btn,.settings-option > .ant-select {margin-left:44px;min-width:132px;max-width:calc(100% - 44px)}
+}

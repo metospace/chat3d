@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import {JSDOM} from 'jsdom';
 import {createServer} from 'vite';
+import {installBrowserGlobals} from './jsdom-env.mjs';
 
-const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'https://example.test'});
+const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'https://example.test'});installBrowserGlobals(dom);
 for(const name of ['window','document','HTMLElement','HTMLInputElement','HTMLButtonElement','Element','CustomEvent','Node','NodeFilter','MutationObserver','Event','MouseEvent','localStorage','DocumentFragment','SVGElement'])Object.defineProperty(globalThis,name,{value:dom.window[name],configurable:true});
 Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
@@ -14,8 +15,9 @@ window.requestAnimationFrame=globalThis.requestAnimationFrame;window.cancelAnima
 globalThis.ResizeObserver=class{observe(){}unobserve(){}disconnect(){}};
 HTMLElement.prototype.scrollIntoView=()=>{};
 const {render,fireEvent,waitFor,cleanup,act}=await import('@testing-library/react');
-const {Theme}=await import('@radix-ui/themes');
-const server=await createServer({server:{middlewareMode:true,hmr:false},appType:'custom'});
+const {ConfigProvider}=await import('antd');
+const Theme=({children})=>React.createElement(ConfigProvider,{theme:{token:{motion:false}}},children);
+const server=await createServer({server:{middlewareMode:true,hmr:false},optimizeDeps:{noDiscovery:true,include:[]},appType:'custom'});
 const originalFetch=globalThis.fetch;const requests=[];let rejectLogin=false,failLogout=false,itemStatus=200,itemResponse,restoreResponse;
 globalThis.fetch=async(url,options={})=>{
  requests.push(String(url));
@@ -34,7 +36,9 @@ try{
  const visited=[];
  const ui=render(React.createElement(Theme,null,React.createElement(StudioShell,{activePage:'home',disabled:false,taskQueueRequest:0,onNavigate:page=>visited.push(page),onTaskOpen:()=>{},onTaskHistory:()=>{}})));
  assert.ok(ui.getByRole('button',{name:'登录账户',exact:true}));
- for(const name of ['资产库','场景库'])fireEvent.click(ui.getByRole('button',{name,exact:true}));
+ fireEvent.click(ui.getByRole('button',{name:'资产库',exact:true}));
+ ui.rerender(React.createElement(Theme,null,React.createElement(StudioShell,{activePage:'asset',disabled:false,taskQueueRequest:0,onNavigate:page=>visited.push(page),onTaskOpen:()=>{},onTaskHistory:()=>{}})));
+ fireEvent.click(ui.getByRole('button',{name:'场景库',exact:true}));
  assert.deepEqual(visited,['asset','scene']);assert.equal(requests.length,0);
  fireEvent.click(ui.getByRole('button',{name:'团队库',exact:true}));
  assert.ok(ui.getByRole('dialog',{name:'登录，连接你的团队'}));assert.ok(ui.getByRole('button',{name:'登录授权'}));

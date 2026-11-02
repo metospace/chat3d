@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {createServer} from 'vite';
-const dom=new JSDOM('<html><body></body></html>');
+import {installBrowserGlobals} from './jsdom-env.mjs';
+const dom=new JSDOM('<html><body></body></html>');installBrowserGlobals(dom);
 globalThis.window=dom.window;globalThis.document=dom.window.document;
 const server=await createServer({server:{middlewareMode:true},appType:'custom'});
 try{

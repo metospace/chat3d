@@ -3,7 +3,11 @@ import * as THREE from 'three';
 import type {Material} from '../domain/types';
 // Shared by viewport and GLB export, including the same local canvas labels.
 export function createSceneMaterial(m?:Material,label?:string):THREE.MeshStandardMaterial{
- const material=new THREE.MeshStandardMaterial({color:m?.baseColor??'#A5ABB4',roughness:m?.roughness??.5,metalness:m?.metalness??.35,opacity:m?.opacity??1,transparent:!!m?.transparent||(m?.opacity??1)<1,alphaTest:m?.alphaTest??0,side:m?.doubleSided?THREE.DoubleSide:THREE.FrontSide,depthWrite:!m?.transparent&&(m?.opacity??1)>=1,emissive:m?.emissive??'#000000',emissiveIntensity:m?.emissiveIntensity??0});
+ const parameters={color:m?.baseColor??'#A5ABB4',roughness:m?.roughness??.5,metalness:m?.metalness??0,opacity:m?.opacity??1,transparent:!!m?.transparent||(m?.opacity??1)<1,alphaTest:m?.alphaTest??0,side:m?.doubleSided?THREE.DoubleSide:THREE.FrontSide,depthWrite:!m?.transparent&&(m?.opacity??1)>=1,emissive:m?.emissive??'#000000',emissiveIntensity:m?.emissiveIntensity??0};
+ // Use the more expensive shader only for surfaces that request it. Legacy
+ // materials retain their authored factors, including alpha transparency.
+ const physical=!label&&m&&((m.clearcoat??0)>0||(m.transmission??0)>0||m.ior!==undefined);
+ const material=physical?new THREE.MeshPhysicalMaterial({...parameters,clearcoat:m.clearcoat??0,clearcoatRoughness:m.clearcoatRoughness??.2,transmission:m.transmission??0,thickness:m.thickness??0,ior:m.ior??1.5}):new THREE.MeshStandardMaterial(parameters);
  const pending:Promise<void>[]=[];
  if(m?.surface){const maps=proceduralMaps(m.surface);material.normalMap=maps.normal;material.roughnessMap=maps.rough;material.normalScale.setScalar(m.surface.strength);}
  const keys={baseColor:'map',normal:'normalMap',roughness:'roughnessMap',metalness:'metalnessMap',emissive:'emissiveMap',occlusion:'aoMap'} as const;
@@ -15,4 +19,7 @@ export function createSceneMaterial(m?:Material,label?:string):THREE.MeshStandar
   if(ctx){ctx.fillStyle='#ffffff';ctx.font='600 105px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(label,512,128,1000);const texture=new THREE.CanvasTexture(canvas);texture.colorSpace=THREE.SRGBColorSpace;material.map=texture;material.transparent=true;material.alphaTest=.04;material.depthWrite=false;material.side=THREE.DoubleSide;}
  }
  return material;
+}
+export function materialCastsShadow(material:THREE.MeshStandardMaterial):boolean{
+ return material.opacity>=.95&&(!(material instanceof THREE.MeshPhysicalMaterial)||material.transmission<.05);
 }

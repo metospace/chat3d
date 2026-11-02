@@ -1,4 +1,6 @@
-import {ManualInteraction,type CompositionInteraction} from './manualInteraction';
+import {ManualInteraction,groundPointAt,type CompositionInteraction} from './manualInteraction';
+import {ContactShading} from './contactShading';
+import {AdaptiveRenderQuality,loadRenderQuality,normalizeRenderQuality,RENDER_TIERS,type RenderQuality} from './renderQuality';
 import {InstancedRender} from './instancedRender';
 import {rectangleObjectIds} from './rectangleSelection';
 import {materialReady,disposeMaterialTextures} from './surfaceTextures';
@@ -10,7 +12,8 @@ import {AnimationClock,type PlaybackState} from './animationPlayback';
 // - 严格资源生命周期：geometry/material/texture 引用计数，dispose 不自动释放共享纹理
 // - 渲染质感：PMREM 环境贴图 + ACES 色调映射 + 阴影地面 + 雾 + 渐变背景 + 盒子倒角 + 自动取景
 import {fitDistance} from './framing';
-import {createSceneMaterial} from './material';
+import {createSceneMaterial,materialCastsShadow} from './material';
+import {loadRenderPreset,RENDER_PRESETS,type RenderPreset} from './renderPreset';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { buildPrimitiveGeometry } from './geometry';
@@ -25,6 +28,15 @@ interface NodeResources {
 export class Viewport {
   private instancedRender:InstancedRender|null=null;
   private composition:ManualInteraction|null=null;
+  private assetDropPreview:ManualInteraction|null=null;
+  private assetDropNodes:SceneNode[]|null=null;
+  assetDropPoint(x:number,y:number,step:number){return groundPointAt(this.renderer.domElement,this.camera,x,y,step);}
+  previewAssetDrop(nodes:SceneNode[],x:number,y:number,step:number){
+    if(!this.assetDropPreview)this.assetDropPreview=new ManualInteraction(this.renderer.domElement,this.scene,this.camera,()=>this.nodeMap,()=>this.markDirty());
+    if(this.assetDropNodes!==nodes){this.assetDropNodes=nodes;this.assetDropPreview.set({mode:'orbit',nodes:[],placement:nodes,snapStep:step,onPlace:()=>{},onTransform:()=>{},onCancel:()=>this.clearAssetDropPreview()});}
+    return this.assetDropPreview.previewPlacementAt(x,y);
+  }
+  clearAssetDropPreview(){this.assetDropPreview?.dispose();this.assetDropPreview=null;this.assetDropNodes=null;this.renderer.domElement.style.cursor=this.composition?.placing||this.boxSelection?'crosshair':'';this.markDirty();}
   setComposition(config:CompositionInteraction|null){if(!this.composition)this.composition=new ManualInteraction(this.renderer.domElement,this.scene,this.camera,()=>this.nodeMap,()=>{this.selectionHelpers.forEach(h=>h.update());this.markDirty();});this.composition.set(config);}
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
@@ -41,6 +53,16 @@ export class Viewport {
   private selectionHelpers: THREE.BoxHelper[] = [];
   private rafHandle: number | null = null;
   private dirty = true;
+  private quality:AdaptiveRenderQuality;
+  private contactShading:ContactShading|null=null;
+  private contactFailed=false;
+  private postprocessingError='';
+  private previousDraw=false;
+  private capturing=false;
+  private cpuRenderMs=0;
+  private gpu='unknown';
+  private sceneScale=1;
+  private softwareRenderer=false;
   private animationClock=new AnimationClock();
   private animationEvaluator:ReturnType<typeof createAnimationEvaluator>|null=null;
   private onPlayback:((state:PlaybackState)=>void)|null=null;
@@ -56,6 +78,10 @@ export class Viewport {
   private floorGeometry: THREE.PlaneGeometry | null = null;
   private floorMaterial: THREE.MeshStandardMaterial | null = null;
   private keyLight: THREE.DirectionalLight | null = null;
+  private hemisphereLight: THREE.HemisphereLight | null = null;
+  private rimLight: THREE.DirectionalLight | null = null;
+  private renderPreset: RenderPreset = loadRenderPreset();
+  private backdrop: 'light'|'slate' = 'slate';
 
   // 世界单位：米。相机近远裁剪面按工业设备场景尺度设定。
   constructor(host: HTMLElement, onPick: (nodeId: string | null, additive?:boolean) => void) {
@@ -63,9 +89,12 @@ export class Viewport {
     this.onPick = onPick;
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    try{const gl=this.renderer.getContext(),extension=gl.getExtension('WEBGL_debug_renderer_info');if(extension)this.gpu=String(gl.getParameter(extension.UNMASKED_RENDERER_WEBGL));}catch{/* Diagnostics are optional. */}
+    this.softwareRenderer=/swiftshader|llvmpipe|software/i.test(this.gpu);
+    this.quality=new AdaptiveRenderQuality(loadRenderQuality(),this.softwareRenderer||window.innerWidth<768||(navigator.hardwareConcurrency>0&&navigator.hardwareConcurrency<=4));
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 方案 11 节：限制高 DPI 像素比
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     // ACES 电影级色调映射：高光不截断、中间调更扎实，告别「塑料玩具」感
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.02;
@@ -88,12 +117,14 @@ export class Viewport {
     this.defaultMaterial = new THREE.MeshStandardMaterial({
       color: '#A9AEB6',
       roughness: 0.45,
-      metalness: 0.35,
+      metalness: 0,
     });
 
     this.setupEnvironment();
     this.setupLights();
     this.setupGround();
+    this.applyRenderQuality();
+    this.setRenderPreset(this.renderPreset);
     this.setBackdrop('slate');
     this.setupPicking();
 
@@ -137,6 +168,7 @@ export class Viewport {
   // 半球补光 + 主方向光（带阴影）+ 冷色轮廓光
   private setupLights(): void {
     const hemi = new THREE.HemisphereLight('#f5fcff', '#789095', 1.10);
+    this.hemisphereLight=hemi;
     this.scene.add(hemi);
 
     // 暖白主光：模拟厂房高侧窗，投影方向稳定、边缘柔和
@@ -153,12 +185,13 @@ export class Viewport {
     dir.shadow.camera.top = 14;
     dir.shadow.camera.bottom = -14;
     dir.shadow.bias = -0.0002;
-    dir.shadow.normalBias = 0.003;
+    dir.shadow.normalBias = 0.0015;
     dir.shadow.radius = 3;
     this.scene.add(dir);
 
     // 冷色逆光：把物体轮廓从暗背景里剌出来
     const rim = new THREE.DirectionalLight('#b7d5ee', 1.0);
+    this.rimLight=rim;
     rim.position.set(15, 13, -10);
     this.scene.add(rim);
   }
@@ -240,7 +273,7 @@ export class Viewport {
       (e: WheelEvent) => {
         e.preventDefault();
         if(down?.box)return;
-        this.orbitRadius = Math.min(Math.max(this.orbitRadius * (1 + e.deltaY * 0.001), 0.3), 800);
+        this.orbitRadius = Math.min(Math.max(this.orbitRadius * Math.exp(e.deltaY * 0.001), Math.max(this.sceneScale*.001,.0001)), Math.max(this.sceneScale*100,800));
         this.updateOrbitCamera();
       },
       { passive: false },
@@ -269,6 +302,9 @@ export class Viewport {
       this.orbitTarget.y + this.orbitRadius * Math.cos(this.orbitPhi),
       this.orbitTarget.z + this.orbitRadius * sinPhi * Math.cos(this.orbitTheta),
     );
+    this.camera.near=Math.max(.00001,Math.min(this.orbitRadius*.01,this.sceneScale*.01));
+    this.camera.far=Math.max(this.orbitRadius+this.sceneScale*10,100);
+    this.camera.updateProjectionMatrix();
     this.camera.lookAt(this.orbitTarget);
     this.markDirty();
   }
@@ -297,17 +333,18 @@ export class Viewport {
       box.expandByObject(res.mesh);
     }
     if (box.isEmpty()) return;
-    if(!selected?.size){const floor=this.scene.getObjectByName('__floor');if(floor)floor.position.y=box.min.y-.02;}
+    if(!selected?.size){const floor=this.scene.getObjectByName('__floor');if(floor)floor.position.y=box.min.y-.001;}
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z, 0.4);
+    const maxDim = Math.max(size.x, size.y, size.z, 0.4);this.sceneScale=Math.max(size.x,size.y,size.z,.001);
     this.orbitTarget.copy(center);
 
+    this.camera.fov=this.viewportFov();
     const fov = (this.camera.fov * Math.PI) / 180;
     // 让最长边约占视野 55%，留出周边呼吸空间
     const aspect=Math.max(this.host.clientWidth,1)/Math.max(this.host.clientHeight,1);
     const radius = fitDistance(size.toArray() as [number,number,number],this.orbitTheta,this.orbitPhi,fov,aspect);
-    this.orbitRadius = Math.min(Math.max(radius, 0.8), 1000);
+    this.orbitRadius = Math.max(radius, this.sceneScale*.1, .001);
 
     // 仰角太低（贴地看）时抬到默认观察角
     // Preserve explicit overhead or user-selected angles during fitting.
@@ -315,14 +352,14 @@ export class Viewport {
 
     // 阴影相机随包络缩放
     if (this.keyLight) {
-      const s = Math.max(maxDim * 0.9, 6);
+      const s = Math.max(maxDim * 0.9, .5);
       const cam = this.keyLight.shadow.camera;
       cam.left = -s;
       cam.right = s;
       cam.top = s;
       cam.bottom = -s;
       cam.far = Math.max(s * 4 + 20, 60);
-      this.keyLight.position.copy(center).add(new THREE.Vector3(-12,24,14));
+      this.keyLight.position.copy(center).add(new THREE.Vector3(-12,24,14).multiplyScalar(Math.max(1,maxDim/12)));
       this.keyLight.target.position.copy(center);this.keyLight.target.updateMatrixWorld();
       cam.updateProjectionMatrix();
     }
@@ -339,7 +376,7 @@ export class Viewport {
     this.animationClock.configure(doc.animation?.duration,doc.animation?.loop);
     this.animationEvaluator=doc.animation?createAnimationEvaluator(doc):null;
     const animatedIds=new Set(doc.animation?.tracks.flatMap(t=>t.targetIds)??[]);
-    const firstContent=this.nodeMap.size===0;this.clearSelectionHelpers();
+    const firstContent=this.nodeMap.size===0||this.lastSyncedDoc?.projectId!==doc.projectId;this.clearSelectionHelpers();
     const visible=new Set(doc.nodes.filter(n=>(n.visible||animatedIds.has(n.id))&&n.kind==='primitive'&&n.geometry).map(n=>n.id));
     for(const [id,res] of this.nodeMap)if(!visible.has(id)){this.scene.remove(res.mesh);this.nodeMap.delete(id);}
     for(const node of doc.nodes){
@@ -349,7 +386,7 @@ export class Viewport {
       const geometry=this.buildGeometry(node.geometry!),material=this.buildMaterial(node.materialId,node.label);
       existing.geometry=geometry;existing.material=material;existing.mesh.geometry=geometry;existing.mesh.material=material;
       existing.mesh.position.fromArray(node.transform.position);existing.mesh.quaternion.fromArray(node.transform.rotationQuaternion);existing.mesh.scale.fromArray(node.transform.scale);
-      existing.mesh.visible=node.visible;existing.mesh.name=node.name;existing.mesh.castShadow=material.opacity>=.95&&!node.label;
+      existing.mesh.visible=node.visible;existing.mesh.name=node.name;existing.mesh.userData.noAO=!!node.label;existing.mesh.castShadow=materialCastsShadow(material)&&!node.label;
     }
     const geometries=new Set([...this.nodeMap.values()].map(v=>v.geometry)),materials=new Set([...this.nodeMap.values()].map(v=>v.material));
     for(const [key,g] of this.sharedGeometryCache)if(!geometries.has(g)){g.dispose();this.sharedGeometryCache.delete(key);}
@@ -366,8 +403,9 @@ export class Viewport {
     const geometry = this.buildGeometry(node.geometry!);
     const material = this.buildMaterial(node.materialId, node.label);
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.castShadow = material.opacity >= 0.95 && !node.label;
+    mesh.castShadow = materialCastsShadow(material) && !node.label;
     mesh.receiveShadow = true;
+    mesh.userData.noAO=!!node.label;
     mesh.userData.nodeId = node.id; // 视口只映射稳定 ID，不用数组下标或临时数字 ID
     mesh.name = node.name;mesh.visible=node.visible;
 
@@ -437,9 +475,10 @@ export class Viewport {
     if(this.host.clientWidth<=0 || this.host.clientHeight<=0)throw new Error('视口不可见，无法截图');
     this.composition?.cancel();
     this.sync(doc);await Promise.all([...this.materialCache.values()].map(m=>materialReady.get(m)??Promise.resolve()));if(this.lastSyncedDoc!==doc)throw Error('贴图加载期间场景已变化，请重新截图');
+    this.capturing=true;this.previousDraw=false;this.quality.resetSamples();
     const savedPlayback={...this.animationClock.state};this.animationClock.pause();
-    const saved = {target:this.orbitTarget.clone(),radius:this.orbitRadius,theta:this.orbitTheta,phi:this.orbitPhi};
-    const helpers = [...this.scene.children].filter(o => o.type === 'BoxHelper'||o.name==='__manualPlacementPreview');
+    const saved = {target:this.orbitTarget.clone(),radius:this.orbitRadius,theta:this.orbitTheta,phi:this.orbitPhi,sceneScale:this.sceneScale,light:this.keyLight?{position:this.keyLight.position.clone(),target:this.keyLight.target.position.clone(),left:this.keyLight.shadow.camera.left,right:this.keyLight.shadow.camera.right,top:this.keyLight.shadow.camera.top,bottom:this.keyLight.shadow.camera.bottom,far:this.keyLight.shadow.camera.far}:null};
+    const helpers = [...this.scene.children].filter(o => o.type === 'BoxHelper'||o.name==='__manualPlacementPreview'||o.name==='__manualTransformHandle');
     const helperVisibility=new Map(helpers.map(h=>[h,h.visible]));
     try {
       if(time!==undefined)this.applyAnimation(time);else this.restoreBasePose();
@@ -457,6 +496,8 @@ export class Viewport {
       if(!data.startsWith('data:image/jpeg;base64,')) throw new Error('截图无效');
       return data;
     } finally {
+      this.capturing=false;this.previousDraw=false;this.quality.resetSamples();
+      this.sceneScale=saved.sceneScale;if(this.keyLight&&saved.light){this.keyLight.position.copy(saved.light.position);this.keyLight.target.position.copy(saved.light.target);this.keyLight.target.updateMatrixWorld();Object.assign(this.keyLight.shadow.camera,{left:saved.light.left,right:saved.light.right,top:saved.light.top,bottom:saved.light.bottom,far:saved.light.far});this.keyLight.shadow.camera.updateProjectionMatrix();}
       helpers.forEach(h=>h.visible=helperVisibility.get(h)??false);
       this.animationClock.state=savedPlayback;
       if(savedPlayback.time>0||savedPlayback.playing)this.applyAnimation(savedPlayback.time);else this.restoreBasePose();
@@ -475,7 +516,16 @@ export class Viewport {
   seekAnimation(time:number){this.animationClock.pause();this.animationClock.seek(time);try{this.applyAnimation(this.animationClock.state.time);}catch(e){this.animationClock.fail(e instanceof Error?e.message:'动画计算失败');this.restoreBasePose();}this.notifyPlayback();}
   setAnimationSpeed(speed:number){this.animationClock.setSpeed(speed);this.notifyPlayback();}
 
-  setBackdrop(mode:'light'|'slate'):void {this.scene.background=new THREE.Color(mode==='slate'?'#22252b':'#f1f2f4');this.floorMaterial?.color.set(mode==='slate'?'#2c3037':'#e6e8ec');this.markDirty();}
+  setRenderPreset(preset:RenderPreset):void {
+    if(this.renderPreset!==preset){this.contactShading?.dispose();this.contactShading=null;this.contactFailed=false;}
+    this.renderPreset=preset;const settings=RENDER_PRESETS[preset];
+    this.renderer.toneMappingExposure=settings.exposure;this.scene.environmentIntensity=settings.environment;
+    if(this.hemisphereLight){this.hemisphereLight.intensity=settings.hemisphere;this.hemisphereLight.color.set(settings.sky);this.hemisphereLight.groundColor.set(settings.ground);}
+    if(this.keyLight){this.keyLight.intensity=settings.key;this.keyLight.color.set(settings.keyColor);}
+    if(this.rimLight){this.rimLight.intensity=settings.rim;this.rimLight.color.set(settings.rimColor);}
+    this.setBackdrop(this.backdrop);
+  }
+  setBackdrop(mode:'light'|'slate'):void {this.backdrop=mode;const studio=this.renderPreset==='studio';this.scene.background=new THREE.Color(mode==='slate'?'#22252b':studio?'#e3e5e7':'#f1f2f4');this.floorMaterial?.color.set(mode==='slate'?'#2c3037':studio?'#c8cbce':'#e6e8ec');this.markDirty();}
 
   setGridVisible(visible:boolean):void {const grid=this.scene.getObjectByName('__grid');if(grid)grid.visible=visible;this.markDirty();}
   topView():void {this.orbitPhi=.02;this.orbitTheta=0;this.frameScene();this.updateOrbitCamera();this.markDirty();}
@@ -498,18 +548,37 @@ export class Viewport {
     this.materialCache.clear();
   }
 
-  private render(): void {
-    if (!this.dirty) return;
+  private viewportFov():number {return THREE.MathUtils.radToDeg(2*Math.atan(Math.tan(THREE.MathUtils.degToRad(38)/2)*Math.max(1,this.host.clientHeight/Math.max(1,this.host.clientWidth))));}
+  setRenderQuality(value:RenderQuality):void {const mode=normalizeRenderQuality(value);if(mode===this.quality.mode)return;this.quality.setMode(mode);this.contactFailed=false;this.postprocessingError='';this.applyRenderQuality();}
+  private applyRenderQuality():void {
+    const tier=RENDER_TIERS[this.quality.tier];this.renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,tier.pixelRatio));
+    if(this.keyLight&&this.keyLight.shadow.mapSize.width!==tier.shadowSize){this.keyLight.shadow.map?.dispose();this.keyLight.shadow.map=null;this.keyLight.shadow.mapSize.set(tier.shadowSize,tier.shadowSize);this.renderer.shadowMap.needsUpdate=true;}
+    if(!tier.contactShadows){this.contactShading?.dispose();this.contactShading=null;}this.markDirty();
+  }
+  getRenderStats(){
+    const info=this.renderer.info;
+    return {quality:this.quality.mode,tier:this.quality.tier,contactShadows:!!this.contactShading,postprocessingError:this.postprocessingError,drawCalls:info.render.calls,triangles:info.render.triangles,cpuRenderMs:this.cpuRenderMs,geometries:info.memory.geometries,textures:info.memory.textures,programs:info.programs?.length??0,pixelRatio:this.renderer.getPixelRatio(),gpu:this.gpu,softwareRenderer:this.softwareRenderer};
+  }
+  private render(): boolean {
+    if (!this.dirty) return false;
     this.dirty = false;
     const w = this.host.clientWidth;
     const h = this.host.clientHeight;
     if (w > 0 && h > 0) {
-      this.camera.aspect = w / h;
+      this.camera.aspect = w / h;this.camera.fov=this.viewportFov();
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(w, h, false);
     }
-    const draw=()=>this.renderer.render(this.scene, this.camera);
-    if(this.instancedRender)this.instancedRender.render(draw);else draw();
+    const started=performance.now(),autoReset=this.renderer.info.autoReset;
+    this.renderer.info.autoReset=false;this.renderer.info.reset();
+    const useContacts=this.quality.tier==='high'&&this.renderPreset==='studio'&&this.nodeMap.size>0&&!this.contactFailed;
+    const draw=()=>{
+      if(useContacts){try{this.contactShading??=new ContactShading(this.renderer,this.scene,this.camera);this.contactShading.setSize(Math.max(w,1),Math.max(h,1),this.renderer.getPixelRatio());this.contactShading.setSceneScale(this.sceneScale);this.contactShading.render();return;}catch(error){this.postprocessingError=error instanceof Error?error.message:'接触阴影不可用';this.contactFailed=true;this.contactShading?.dispose();this.contactShading=null;this.renderer.setRenderTarget(null);this.renderer.autoClear=true;}}
+      else if(this.contactShading){this.contactShading.dispose();this.contactShading=null;}
+      this.renderer.render(this.scene,this.camera);
+    };
+    try{if(this.instancedRender)this.instancedRender.render(draw);else draw();}finally{this.renderer.info.autoReset=autoReset;this.cpuRenderMs=performance.now()-started;}
+    return true;
   }
 
   // 按需渲染循环：静态场景不持续刷新
@@ -517,17 +586,20 @@ export class Viewport {
     const loop = (now:number) => {
       const delta=this.lastFrame?(now-this.lastFrame)/1000:0;this.lastFrame=now;
       if(this.animationClock.tick(delta)){try{this.applyAnimation(this.animationClock.state.time);}catch(e){this.animationClock.fail(e instanceof Error?e.message:'动画计算失败');this.restoreBasePose();}if(now-this.playbackNotified>100||!this.animationClock.state.playing){this.notifyPlayback();this.playbackNotified=now;}}
-      this.render();
+      const drew=this.render();
+      if(drew&&this.previousDraw&&!this.capturing){if(this.quality.sample(delta*1000))this.applyRenderQuality();}else this.quality.resetSamples();
+      this.previousDraw=drew&&!this.capturing;
       this.rafHandle = requestAnimationFrame(loop);
     };
     this.rafHandle = requestAnimationFrame(loop);
   }
 
   dispose(): void {
-    this.composition?.dispose();this.composition=null;
+    this.clearAssetDropPreview();this.composition?.dispose();this.composition=null;
     this.cancelPointerGesture?.();window.removeEventListener('keydown',this.escapeSelection);
     if (this.rafHandle !== null) cancelAnimationFrame(this.rafHandle);
     this.resizeObserver?.disconnect();
+    this.contactShading?.dispose();this.contactShading=null;
     this.disposeAllNodes();
     this.defaultMaterial.dispose();
     this.envTexture?.dispose();

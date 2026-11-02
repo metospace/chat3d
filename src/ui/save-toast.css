@@ -1,7 +1,7 @@
-.canvas-studio .library-save-toast{position:absolute;z-index:40;left:50%;bottom:86px;transform:translateX(-50%);display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;border:1px solid var(--green-6);background:var(--color-panel-solid);color:var(--gray-12);box-shadow:0 5px 22px #162e4220;font-size:14px;max-width:calc(100% - 32px);white-space:nowrap}
+.canvas-studio .library-save-toast{position:absolute;z-index:40;left:50%;bottom:86px;transform:translateX(-50%);display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;border:1px solid var(--sc-accent-soft,#dfefed);background:var(--sc-surface-elevated,#fdfefe);color:var(--sc-ink,#203334);box-shadow:0 5px 22px #162e4220;font-size:14px;max-width:calc(100% - 32px);white-space:nowrap}
 .canvas-studio.editor-mode .library-save-toast{left:calc((100% - var(--chat-space))/2)}
-.library-save-toast>svg{width:18px;height:18px;color:var(--green-11)}
-.library-save-toast .rt-Button{width:24px;height:24px;padding:0;margin-left:6px}
+.library-save-toast>svg{width:18px;height:18px;color:var(--sc-accent,#176c6b)}
+.library-save-toast .ant-btn{width:24px;height:24px;min-width:24px;padding:0;margin-left:6px;border:0;color:var(--sc-ink-muted,#526869);border-radius:7px}
 .library-save-toast>span{min-width:0;white-space:normal;overflow-wrap:anywhere}
-.library-save-toast .rt-Button{flex-shrink:0}
+.library-save-toast .ant-btn{flex-shrink:0}
 @media(max-width:720px){.canvas-studio.editor-mode .library-save-toast{left:50%;bottom:calc(58% + 72px)}}

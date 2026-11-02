@@ -1,8 +1,9 @@
 import 'fake-indexeddb/auto';
 import assert from 'node:assert/strict';
 import {createServer} from 'vite';
+import {installBrowserGlobals} from './jsdom-env.mjs';
 import {JSDOM} from 'jsdom';
-const dom=new JSDOM('<html><body></body></html>',{url:'https://example.test'});
+const dom=new JSDOM('<html><body></body></html>',{url:'https://example.test'});installBrowserGlobals(dom);
 Object.defineProperty(globalThis,'localStorage',{value:dom.window.localStorage,configurable:true});
 const vite=await createServer({server:{middlewareMode:true,hmr:false},appType:'custom'}),originalFetch=globalThis.fetch;
 let requests=[],publications=new Map(),nextId=0,lostName='',lostOnce=false,remoteHeads=[],readOverride;

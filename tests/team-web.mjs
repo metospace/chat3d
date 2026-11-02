@@ -26,6 +26,7 @@ assert.match(teamCopyFilename(sceneItem),/\.chat3d\.json$/);
 const {buildPlatformAuthorizeUrl,DEFAULT_OAUTH_CLIENT_ID,DEFAULT_SSO_UI_BASE,SSO_CALLBACK_PATH,configuredTeamServiceBase,showTeamPasswordLogin}=await server.ssrLoadModule('/src/domain/platformOAuth.ts');
 const authUrlRaw=buildPlatformAuthorizeUrl(configuredTeamServiceBase(),'state-test');
 assert.ok(authUrlRaw.startsWith(DEFAULT_SSO_UI_BASE+'/#/sso?'),authUrlRaw);
+assert.equal(new URL(authUrlRaw).origin,'http://pm.jiezi365.com:48001','account authorization opens the configured domain instead of the legacy IP');
 const authHash=authUrlRaw.slice(authUrlRaw.indexOf('#')+1); // /sso?...
 const authUrl=new URL(authHash,'http://local.invalid');
 assert.equal(authUrl.pathname,'/sso');

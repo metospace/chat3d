@@ -1,0 +1,217 @@
+/*
+ * Ant Design X chat surface.
+ * Scoped under .adx-chat so the legacy .chat-* rules of the frosted studio theme keep working
+ * everywhere else while this panel owns its own type scale, spacing and elevation.
+ */
+.adx-chat{
+  --adx-bg:var(--sc-surface-page,#f3f6f6);
+  --adx-panel:var(--sc-surface-elevated,#fdfefe);
+  --adx-panel-soft:var(--sc-surface-muted,#eaf0f0);
+  --adx-line:var(--sc-border-subtle,#e3eded);
+  --adx-line-strong:var(--sc-border,#d3e1e1);
+  --adx-ink:var(--sc-ink,#1b2e2f);
+  --adx-muted:var(--sc-ink-muted,#526a6a);
+  --adx-accent:var(--sc-accent,#0f6b69);
+  --adx-accent-soft:var(--sc-accent-soft,#dfefed);
+  --adx-shadow:0 10px 28px rgba(18,42,44,.08);
+  --adx-radius:16px;
+  display:flex;flex-direction:column;height:100%;min-width:0;min-height:0;
+  background:var(--adx-bg);color:var(--adx-ink);
+  font-family:var(--sc-font,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif);
+}
+.adx-chat[data-adx-appearance="dark"]{
+  --adx-bg:var(--sc-surface-page,#101d1e);
+  --adx-panel:var(--sc-surface-elevated,#1a2c2e);
+  --adx-panel-soft:var(--sc-surface-muted,#243b3d);
+  --adx-line:var(--sc-border-subtle,#294343);
+  --adx-line-strong:var(--sc-border,#33504f);
+  --adx-ink:var(--sc-ink,#e8f3f2);
+  --adx-muted:var(--sc-ink-muted,#a9c2c2);
+  --adx-accent:var(--sc-accent,#6cc9bd);
+  --adx-accent-soft:var(--sc-accent-soft,#2b4b49);
+  --adx-shadow:0 12px 30px rgba(0,0,0,.34);
+}
+
+/* ---------- top line ---------- */
+.adx-chat-topline{display:flex;align-items:center;gap:8px;justify-content:space-between;padding:8px 16px 0;font-size:11px;color:var(--adx-muted)}
+.adx-chat-context{letter-spacing:.02em}
+.adx-chat-status{display:inline-flex;align-items:center;gap:6px;font-variant-numeric:tabular-nums}
+.adx-live-dot{width:6px;height:6px;border-radius:50%;background:var(--adx-accent);box-shadow:0 0 0 0 color-mix(in srgb,var(--adx-accent) 55%,transparent);animation:adx-pulse 1.6s ease-out infinite}
+@keyframes adx-pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--adx-accent) 45%,transparent)}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}
+
+/* ---------- transcript ---------- */
+/* !important: the frosted-studio theme styles .chat-transcript with its own gap/padding. */
+.adx-chat .chat-transcript{padding:14px 18px 18px!important;overflow:auto;min-height:0;flex:1;scrollbar-color:color-mix(in srgb,var(--adx-ink) 18%,transparent) transparent}
+.adx-messages{flex:1;min-height:0;overflow:hidden}
+/* Bubble.List autoScroll uses negative scrollTop with zero at the visual bottom. */
+.adx-chat .adx-messages .ant-bubble-list-scroll-box.ant-bubble-list-autoscroll{flex-direction:column-reverse!important;gap:0!important}
+.adx-messages .ant-bubble.adx-process-message{padding-inline:0}
+.adx-process-message .ant-bubble-body{width:100%}
+.adx-chat .adx-bubble.is-assistant .ant-bubble-content{padding:0;border:0;background:transparent;box-shadow:none;font-size:14px;line-height:1.8}
+.adx-turn{display:flex;flex-direction:column;gap:8px;min-width:0}
+
+/* ---------- bubbles ---------- */
+.adx-bubble{max-width:100%}
+.adx-bubble .ant-bubble-content{padding:11px 14px;border-radius:var(--adx-radius);font-size:13px;line-height:1.75;border:1px solid transparent}
+.adx-bubble.is-assistant .ant-bubble-content{background:var(--adx-panel);border-color:var(--adx-line);border-top-left-radius:6px;box-shadow:0 1px 2px rgba(18,42,44,.04)}
+.adx-bubble.is-user .ant-bubble-content{background:var(--adx-accent-soft);border-color:transparent;color:var(--adx-ink);border-top-right-radius:6px}
+.adx-bubble.is-error .ant-bubble-content{background:color-mix(in srgb,#c2402f 8%,var(--adx-panel));border-color:color-mix(in srgb,#c2402f 34%,transparent)}
+.adx-bubble .ant-bubble-header,.adx-bubble .ant-bubble-footer{padding:0}
+.adx-bubble-body{display:flex;flex-direction:column;gap:8px;min-width:0}
+.adx-bubble-body .select-text{user-select:text}
+.adx-bubble-images{display:flex;flex-wrap:wrap;gap:8px}
+.adx-bubble-images img{width:76px;height:58px;object-fit:cover;border-radius:9px;border:1px solid var(--adx-line)}
+.adx-file-chip{display:inline-flex;align-items:center;max-width:100%;padding:4px 9px;border:1px dashed var(--adx-line-strong);border-radius:8px;font-size:11px;color:var(--adx-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.adx-bubble-note{margin:2px 4px 0;font-size:11px;color:var(--adx-muted)}
+.adx-bubble-error{margin-top:6px;font-size:11px;color:var(--adx-muted)}
+.adx-bubble-error summary{cursor:pointer}
+.adx-link{padding:0;border:0;background:none;color:var(--adx-accent);font:inherit;font-size:11px;cursor:pointer;text-underline-offset:3px;text-decoration:underline}
+.adx-link:hover{opacity:.75}
+
+/* Think keeps its native icon, disclosure and single content rule. */
+.conversation-region .conversation-process.adx-run,.adx-run{margin:12px 0;border:0;background:transparent;min-width:0;color:var(--adx-ink);font-size:14px}
+.adx-run-think{min-width:0;flex:1}
+.adx-run-think [role="button"]:focus-visible{outline:2px solid var(--adx-accent);outline-offset:3px}
+.adx-run-elapsed{margin-left:8px;font-size:11px;font-variant-numeric:tabular-nums;color:var(--adx-muted)}
+.adx-run-text{margin:0 0 10px;font:inherit;white-space:pre-wrap;overflow-wrap:anywhere}
+.adx-run-text:last-child{margin-bottom:0}
+.adx-run-actions{justify-content:flex-end;margin-top:4px}
+
+/* ---------- welcome ---------- */
+.adx-welcome{margin:auto 0;padding:8px 2px 0;display:flex;flex-direction:column;gap:16px}
+.adx-welcome .ant-welcome{padding:0}
+.adx-welcome .ant-welcome-title{font-size:20px;font-weight:600;letter-spacing:-.01em}
+.adx-welcome .ant-welcome-description{max-width:46ch;font-size:12.5px;line-height:1.7}
+.adx-orb{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:13px;background:var(--adx-accent);color:#fff;box-shadow:0 6px 18px color-mix(in srgb,var(--adx-accent) 30%,transparent)}
+.adx-starters{display:flex;flex-direction:column;gap:7px}
+.adx-starters-label{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--adx-muted)}
+.adx-starters .ant-prompts-title{margin:0;font:inherit;line-height:inherit}
+.adx-starters .ant-prompts-list{gap:7px}
+.adx-starters .ant-prompts-item.adx-starter{width:100%;padding:11px 13px;border-color:var(--adx-line);border-radius:12px;background:var(--adx-panel);color:var(--adx-ink);font:inherit;font-size:12.5px;text-align:left}
+.adx-starters .ant-prompts-content{width:100%}
+.adx-starters .ant-prompts-label{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0;font:inherit}
+.adx-starters .ant-prompts-item.adx-starter:hover{background:var(--adx-panel);border-color:color-mix(in srgb,var(--adx-accent) 42%,var(--adx-line))}
+.adx-starters .ant-prompts-item.adx-starter:focus-visible{outline:2px solid var(--adx-accent);outline-offset:2px}
+.adx-starter{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 13px;border:1px solid var(--adx-line);border-radius:12px;background:var(--adx-panel);color:var(--adx-ink);font:inherit;font-size:12.5px;text-align:left;cursor:pointer;transition:border-color .16s,transform .16s,box-shadow .16s}
+.adx-starter strong{font-weight:500}
+.adx-starter span{color:var(--adx-muted)}
+.adx-starter:hover{border-color:color-mix(in srgb,var(--adx-accent) 42%,var(--adx-line));transform:translateY(-1px);box-shadow:var(--adx-shadow)}
+.adx-welcome-note{margin:0;font-size:11px;color:var(--adx-muted);opacity:.85}
+
+/* ---------- connect notice ---------- */
+.adx-connect{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px dashed var(--adx-line-strong);border-radius:13px;background:color-mix(in srgb,var(--adx-panel) 80%,transparent)}
+.adx-connect strong{display:block;font-size:13px;font-weight:600}
+.adx-connect small{display:block;margin-top:2px;font-size:11px;color:var(--adx-muted)}
+
+/* ---------- notices ---------- */
+.adx-notice{margin:0 18px 6px;padding:7px 10px;border-radius:9px;background:color-mix(in srgb,#b4761c 12%,var(--adx-panel));font-size:11.5px;color:#8a5a12}
+.adx-chat[data-adx-appearance="dark"] .adx-notice{color:#e6c07a}
+.adx-chat-alert{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:9px 11px;border-radius:11px;border:1px solid var(--adx-line);background:var(--adx-panel);font-size:11.5px;color:var(--adx-muted)}
+.adx-selectable{user-select:text;white-space:pre-wrap;word-break:break-word;margin:4px 0 0}
+.adx-scroll-latest{align-self:center;padding:4px 12px;border:1px solid var(--adx-line);border-radius:999px;background:var(--adx-panel);color:var(--adx-accent);font:inherit;font-size:11px;cursor:pointer;box-shadow:var(--adx-shadow)}
+
+/* ---------- preview card ---------- */
+.adx-preview{margin:2px 4px;padding:13px 14px 10px;border:1px solid color-mix(in srgb,#2a8a63 34%,var(--adx-line));border-radius:15px;background:color-mix(in srgb,#2a8a63 7%,var(--adx-panel));display:flex;flex-direction:column;gap:8px}
+.adx-preview-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.adx-preview-kicker{font-size:12.5px;font-weight:600;color:var(--adx-ink)}
+.adx-preview-note{margin:0;font-size:11.5px;line-height:1.6;color:var(--adx-muted)}
+.adx-preview-actions{display:flex;gap:8px}
+.adx-preview-actions .adx-preview-apply{flex:1}
+.adx-preview-details{font-size:11.5px;color:var(--adx-muted)}
+.adx-preview-details>summary{cursor:pointer;color:var(--adx-ink);opacity:.85}
+.adx-preview-details p{margin:6px 0 0}
+.adx-preview-objects{max-height:150px;overflow:auto;margin:6px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:3px}
+.adx-preview-objects button{padding:0;border:0;background:none;color:var(--adx-accent);font:inherit;font-size:11.5px;text-align:left;cursor:pointer}
+.adx-preview-objects button:disabled{color:var(--adx-muted);cursor:default;opacity:.6}
+.adx-warn{color:#b4761c}
+.adx-chat[data-adx-appearance="dark"] .adx-warn{color:#e6c07a}
+.adx-preview-continue{align-self:flex-start;padding:0!important}
+
+/* ---------- composer ---------- */
+.adx-composer{padding:8px;display:flex;flex-direction:column;gap:6px}
+.adx-sender.ant-sender{border:1px solid var(--adx-line-strong);border-radius:18px;background:var(--adx-panel);box-shadow:var(--adx-shadow);padding:6px 8px;transition:border-color .16s,box-shadow .16s}
+.adx-sender.ant-sender:focus-within{border-color:color-mix(in srgb,var(--adx-accent) 55%,var(--adx-line-strong));box-shadow:0 0 0 3px color-mix(in srgb,var(--adx-accent) 12%,transparent),var(--adx-shadow)}
+.adx-chat .adx-sender .ant-sender-content{padding:4px}
+.adx-sender .ant-sender-header{padding:0 0 6px}
+.adx-sender .ant-sender-prefix{margin:0 4px 0 0;align-self:flex-end;flex:0 0 auto;min-width:28px}
+.adx-chat .adx-sender .ant-sender-prefix{width:max-content}
+.adx-sender .ant-sender-footer{padding:4px 2px 0;border-top:1px solid var(--adx-line);margin-top:7px}
+.adx-composer-tools{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.adx-composer-hint{width:100%;margin-left:auto;font-size:11px;color:var(--adx-muted);opacity:.75}
+.adx-tool-divider{width:1px;height:14px;background:var(--adx-line)}
+.adx-tool-spacer{flex:1}
+.adx-send-cluster{display:inline-flex;align-items:center;gap:6px}
+.adx-send-cluster .ant-btn{width:32px;min-width:32px;height:32px}
+.adx-send-cluster .ant-btn-primary.is-running{background:var(--adx-accent)}
+.adx-scope{margin:2px 2px 6px;font-size:11px;color:var(--adx-muted)}
+.adx-scope>summary{cursor:pointer;font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;opacity:.8}
+.adx-scope-body{display:flex;flex-direction:column;gap:5px;margin-top:5px;border:0;padding:0;min-width:0}
+.adx-scope-row{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--adx-ink)}
+.adx-scope-row select{padding:3px 7px;border:1px solid var(--adx-line-strong);border-radius:8px;background:var(--adx-panel);color:var(--adx-ink);font:inherit;font-size:11.5px}
+.adx-scope-body p{margin:0;line-height:1.55;font-size:11px}
+.adx-scope-body details>summary{cursor:pointer;font-size:11px;margin-top:2px}
+.adx-lock{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:11px}
+
+/* ---------- queue ---------- */
+.adx-queue{border:1px solid var(--adx-line);border-radius:13px;background:var(--adx-panel);overflow:hidden}
+.adx-queue-head{padding:6px 10px;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--adx-muted);border-bottom:1px solid var(--adx-line)}
+.adx-queue-list{display:flex;flex-direction:column}
+.adx-queue-row{display:flex;align-items:center;gap:4px;padding:5px 8px;font-size:11.5px;border-top:1px solid color-mix(in srgb,var(--adx-line) 60%,transparent)}
+.adx-queue-row:first-child{border-top:0}
+.adx-queue-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--adx-ink)}
+.adx-queue-more.ant-btn{width:24px;height:24px;min-width:24px;padding:0;border-radius:7px}
+.adx-queue-undo{padding:4px 2px;font-size:11px;color:var(--adx-muted)}
+.adx-composer-surface{min-width:0}
+.adx-composer-surface.has-queue{border:1px solid var(--sc-border,var(--adx-line));border-radius:16px;overflow:hidden;background:var(--sc-surface-elevated,var(--adx-panel))}
+.adx-composer-surface.has-queue:focus-within{border-color:var(--sc-accent);box-shadow:0 0 0 2px var(--sc-focus-ring)}
+.adx-chat .adx-composer-surface .adx-queue{border:0;border-radius:0;background:transparent;max-height:148px;overflow:auto}
+.adx-chat .adx-composer-surface .adx-queue-row{padding:7px 10px;gap:8px;font-size:13px;min-height:38px}
+.adx-queue-marker{flex:none;width:14px;height:14px;color:var(--adx-muted)}
+.adx-queue-actions{display:flex;align-items:center;gap:2px;flex:none}
+.adx-queue-actions .ant-btn{color:var(--adx-muted);height:26px;padding:3px 5px;font-size:12px;gap:4px}
+.adx-queue-actions .ant-btn:not(.adx-queue-guide){width:26px;padding:4px}
+.adx-queue-actions .ant-btn:hover:not(:disabled){color:var(--sc-accent)}
+.canvas-studio.frosted-studio.editor-mode .adx-chat .adx-composer-surface.has-queue .adx-sender.ant-sender,
+.adx-chat .adx-composer-surface.has-queue .adx-sender.ant-sender{border:0;border-top:1px solid var(--sc-border-subtle,var(--adx-line));border-radius:0;box-shadow:none}
+
+/* ---------- compact canvas strips + lightbox ---------- */
+.adx-compact-strip{display:flex;align-items:center;gap:6px;padding:6px 14px;border-top:1px solid var(--adx-line);background:var(--adx-panel);font-size:11px;color:var(--adx-muted);flex-wrap:wrap}
+
+@media (max-width:720px){
+  .adx-chat .chat-transcript{padding:10px 12px 12px!important;gap:11px!important}
+  .adx-composer{padding:0 9px 9px}
+  .adx-sender.ant-sender{border-radius:15px;padding:6px 7px 5px}
+  .adx-welcome .ant-welcome-title{font-size:18px}
+  .adx-composer-hint{display:none}
+}
+
+
+/* X components retain their native structure and controls; only container layout is customized. */
+.reference-attachments{min-width:0;max-width:100%}
+.message-attachments{max-width:100%;min-width:0}
+.adx-chat .ant-sender-header-content,.home-x-sender .ant-sender-header-content{min-width:0;max-width:100%}
+.adx-chat .ant-actions{flex-wrap:wrap;gap:4px}
+.adx-reuse-reference{font-size:11px;margin:2px 0 6px}
+
+/* Sender follows the official input + single bottom toolbar arrangement. */
+.canvas-studio.frosted-studio.editor-mode .adx-sender.ant-sender,
+.adx-chat .adx-sender.ant-sender{padding:0;border-radius:16px;background:var(--sc-surface-elevated);border:1px solid var(--sc-border);box-shadow:var(--sc-shadow-panel)}
+.canvas-studio.frosted-studio.editor-mode .adx-sender.ant-sender:focus-within,
+.adx-chat .adx-sender.ant-sender:focus-within{border-color:var(--sc-accent);box-shadow:0 0 0 3px var(--sc-focus-ring)}
+.adx-chat .adx-sender .ant-sender-content{padding:14px 14px 8px}
+.adx-chat .adx-sender .ant-sender-input{font-size:14px;line-height:1.7}
+.adx-chat .adx-sender .ant-sender-footer{padding:0 10px 10px;margin:0;border:0}
+.adx-composer-toolbar{display:flex;align-items:center;gap:8px;min-width:0}
+.adx-composer-controls{display:flex;align-items:center;gap:2px;min-width:0;flex:1}
+.adx-composer-controls>.ant-btn{flex:none}
+.adx-composer-controls .quality-picker-trigger{max-width:110px;padding-inline:5px;gap:4px;font-size:12px}
+.adx-composer-controls .model-picker-trigger{min-width:0;max-width:140px;flex:1;padding-inline:5px;font-size:12px;border:0;background:transparent;box-shadow:none}
+.adx-composer-controls .model-picker-trigger>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.adx-composer-controls .quality-picker-trigger svg,.adx-composer-controls .model-picker-trigger svg{flex:none}
+.adx-chat .adx-send-cluster{flex:none;gap:6px}
+.adx-chat .adx-send-cluster .ant-btn{width:34px;height:34px;min-width:34px;border-radius:50%;padding:0}
+.adx-reference-controls{width:260px;max-width:75vw;margin:0;padding:0;border:0;display:flex;flex-direction:column;gap:10px;font-size:13px}
+.adx-scope-options p{margin:0;color:var(--sc-ink-muted);font-size:12px;line-height:1.65}
+
+.adx-scope-options{width:260px;max-width:75vw;padding:12px 8px 8px;border-top:1px solid var(--sc-border-subtle,#e5e7eb);font-size:13px}
+.adx-scope-options p{margin-top:8px}

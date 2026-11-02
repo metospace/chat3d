@@ -1,4 +1,4 @@
-import {InstancedMesh, Matrix4, Mesh, Scene, type BufferGeometry, type Material} from 'three';
+import {InstancedMesh, Matrix4, Mesh, MeshPhysicalMaterial, Scene, type BufferGeometry, type Material} from 'three';
 
 export const INSTANCE_BATCH_MIN = 16;
 interface Batch {sources: Mesh[]; mesh: InstancedMesh}
@@ -19,7 +19,7 @@ export class InstancedRender {
     for (const source of sources) {
       const material = source.material;
       // Transparent surfaces retain individual depth sorting.
-      if (Array.isArray(material) || material.transparent || material.opacity < 1) continue;
+      if (Array.isArray(material) || material.transparent || material.opacity < 1 || (material instanceof MeshPhysicalMaterial && material.transmission > 0)) continue;
       let materials = geometries.get(source.geometry);
       if (!materials) geometries.set(source.geometry, materials = new Map());
       let settings = materials.get(material);

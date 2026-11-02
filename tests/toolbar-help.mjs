@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import React from 'react';
-import { createServer } from 'vite';
+import {createServer} from 'vite';
+import {installBrowserGlobals} from './jsdom-env.mjs';
 const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'https://example.test'});
 for(const name of ['window','document','HTMLElement','HTMLInputElement','Element','CustomEvent','Node','NodeFilter','MutationObserver','Event','MouseEvent','localStorage','location']) Object.defineProperty(globalThis,name,{value:dom.window[name],configurable:true});
 Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});
@@ -9,6 +10,7 @@ globalThis.getComputedStyle=dom.window.getComputedStyle;globalThis.requestAnimat
 globalThis.ResizeObserver=class{observe(){} unobserve(){} disconnect(){}};
 globalThis.CSS={escape:value=>String(value).replace(/[^a-zA-Z0-9_-]/g,char=>'\\'+char)};globalThis.SVGElement=dom.window.SVGElement;
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+installBrowserGlobals(dom);
 let handler=async()=>new Response(JSON.stringify({data:[{id:'model-b'},{id:'model-a'}]}));
 globalThis.fetch=async(...args)=>{const r=await handler(...args);r.headers.set('x-chat3d-proxy','1');return r;};
 const {render:rtlRender,fireEvent,waitFor,cleanup,act}=await import('@testing-library/react');const {Theme}=await import('@radix-ui/themes');const render=ui=>rtlRender(ui,{wrapper:({children})=>React.createElement(Theme,null,children)});

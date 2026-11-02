@@ -11,6 +11,7 @@
   let scene;
   let disposed = false;
   let observer;
+  let environmentTarget;
   function on(target, type, listener, options) {
     target.addEventListener(type, listener, options);
     removers.push(() => target.removeEventListener(type, listener, options));
@@ -38,6 +39,7 @@
     for (const texture of textures) texture.dispose();
     for (const material of materials) material.dispose();
     for (const geometry of geometries) geometry.dispose();
+    environmentTarget?.dispose();
     renderer?.dispose();
   }
   function fail(message) {
@@ -57,7 +59,10 @@
     runtimeNode.textContent = '';
     urls.push(moduleUrl);
     // The module URL is generated from this file's embedded runtime; no static file import exists offline.
-    const THREE = await import(moduleUrl);
+    const roomUrl=URL.createObjectURL(new Blob([runtime.roomEnvironment.split("'three'").join(JSON.stringify(moduleUrl))],{type:'text/javascript'}));
+    urls.push(roomUrl);
+    const [THREE,{RoomEnvironment}]=await Promise.all([import(moduleUrl),import(roomUrl)]);
+    const lighting=runtime.lighting;
     // Both static core imports are resolved before the module import fulfills.
     releaseUrls();
     runtime.core = '';
@@ -72,7 +77,9 @@
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.15;
+    renderer.toneMappingExposure = lighting.exposure;
+    renderer.shadowMap.enabled=true;
+    renderer.shadowMap.type=THREE.PCFShadowMap;
     const dataNode = document.getElementById('scene-data');
     const data = JSON.parse(dataNode.textContent);
     dataNode.remove();
@@ -90,18 +97,27 @@
       dispose();
       return;
     }
-    scene.background = new THREE.Color('#f4f4f4');
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x787878, 2.5));
-    const key = new THREE.DirectionalLight(0xffffff, 3.2);
+    scene.background = new THREE.Color('#e3e5e7');
+    const environment=new RoomEnvironment(),pmrem=new THREE.PMREMGenerator(renderer);
+    environmentTarget=pmrem.fromScene(environment,.04);scene.environment=environmentTarget.texture;
+    scene.environmentIntensity=lighting.environment;environment.dispose();pmrem.dispose();
+    scene.traverse(object=>{if(object.isMesh){object.receiveShadow=true;object.castShadow=object.material.opacity>=.95&&!(object.material.transmission>0);}});
+    scene.add(new THREE.HemisphereLight(lighting.sky, lighting.ground, lighting.hemisphere));
+    const key = new THREE.DirectionalLight(lighting.keyColor, lighting.key);
     key.position.set(3, 5, 4);
     scene.add(key);
-    const fill = new THREE.DirectionalLight(0xffffff, 1.4);
+    const fill = new THREE.DirectionalLight(lighting.rimColor, lighting.rim);
     fill.position.set(-4, 2, -3);
     scene.add(fill);
     const bounds = new THREE.Box3().setFromObject(scene);
     const sphere = bounds.getBoundingSphere(new THREE.Sphere());
     if (bounds.isEmpty() || !Number.isFinite(sphere.radius)) throw new Error('Empty model');
     const radius = Math.max(sphere.radius, 0.0001);
+    key.position.copy(sphere.center).add(new THREE.Vector3(-12,24,14));key.target.position.copy(sphere.center);scene.add(key.target);
+    key.castShadow=true;key.shadow.mapSize.set(2048,2048);const extent=Math.max(radius*1.5,2);
+    Object.assign(key.shadow.camera,{left:-extent,right:extent,top:extent,bottom:-extent,near:.5,far:Math.max(60,radius*4+30)});key.shadow.camera.updateProjectionMatrix();key.shadow.bias=-.0002;key.shadow.normalBias=.0015;
+    const floor=new THREE.Mesh(new THREE.PlaneGeometry(Math.max(radius*12,10),Math.max(radius*12,10)),new THREE.MeshStandardMaterial({color:'#c8cbce',roughness:.92,metalness:0}));
+    floor.rotation.x=-Math.PI/2;floor.position.set(sphere.center.x,bounds.min.y-.001,sphere.center.z);floor.receiveShadow=true;scene.add(floor);
     const camera = new THREE.PerspectiveCamera(40, 1, radius / 1000, radius * 1000);
     const target = sphere.center.clone();
     const offset = new THREE.Vector3();

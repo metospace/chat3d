@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {indexedDB} from 'fake-indexeddb';
 import {createServer} from 'vite';
+import {installBrowserGlobals} from './jsdom-env.mjs';
 import React from 'react';
-const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'https://example.test'});
+const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'https://example.test'});installBrowserGlobals(dom);
 for(const name of ['window','document','HTMLElement','HTMLInputElement','Element','CustomEvent','Node','NodeFilter','MutationObserver','Event','MouseEvent','localStorage','location','DocumentFragment'])Object.defineProperty(globalThis,name,{value:dom.window[name],configurable:true});
 Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});globalThis.indexedDB=indexedDB;globalThis.getComputedStyle=dom.window.getComputedStyle;globalThis.requestAnimationFrame=fn=>setTimeout(fn,0);globalThis.cancelAnimationFrame=clearTimeout;window.requestAnimationFrame=globalThis.requestAnimationFrame;window.cancelAnimationFrame=globalThis.cancelAnimationFrame;globalThis.ResizeObserver=class{observe(){} unobserve(){} disconnect(){}};
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
@@ -13,7 +14,7 @@ const {Theme}=await import('@radix-ui/themes');
 const calls=[];globalThis.animationUiCalls=calls;
 const server=await createServer({plugins:[{name:'animation-viewport-fixture',enforce:'pre',load(id){if(id.endsWith('/src/scene/Viewport.ts'))return `export class Viewport {
  constructor(){this.s={playing:false,time:0,speed:1,duration:0,error:'',loop:false};}
- setPlaybackListener(fn){this.fn=fn;this.emit();} emit(){this.fn?.({...this.s});} start(){} dispose(){} setSelection(){} setComposition(config){globalThis.animationComposition=config;} setBoxSelection(enabled,callback,wholeModel){globalThis.latestBoxSelection={enabled,callback,wholeModel};} setBackdrop(){} setGridVisible(){}
+ setPlaybackListener(fn){this.fn=fn;this.emit();} emit(){this.fn?.({...this.s});} start(){} dispose(){} setSelection(){} setComposition(config){globalThis.animationComposition=config;} setBoxSelection(enabled,callback,wholeModel){globalThis.latestBoxSelection={enabled,callback,wholeModel};} setRenderQuality(){} setRenderPreset(){} setBackdrop(){} setGridVisible(){}
  sync(doc){this.s={...this.s,playing:false,time:0,duration:doc.animation?.duration??0};this.emit();}
  playAnimation(){globalThis.animationUiCalls.push('play');this.s.playing=true;this.emit();} pauseAnimation(){globalThis.animationUiCalls.push('pause');this.s.playing=false;this.emit();}
  resetAnimation(){globalThis.animationUiCalls.push('reset');this.s.playing=false;this.s.time=0;this.emit();} seekAnimation(t){globalThis.animationUiCalls.push(['seek',t]);this.s.time=t;this.s.playing=false;this.emit();} setAnimationSpeed(s){globalThis.animationUiCalls.push(['speed',s]);this.s.speed=s;this.emit();}

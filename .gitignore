@@ -29,6 +29,7 @@ src-tauri/target
 src-tauri/updater.generated.json
 desktop-update-publish/
 e2e/shots
+dev/shots
 *.tmp.ps1
 
 .env
@@ -41,3 +42,14 @@ team-data
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# Local product acceptance evidence
+/artifacts/product-redesign/
+
+/artifacts/product-redesign-v2/
+/artifacts/scenivo-v2/
+/artifacts/ant-design-x/
+/artifacts/product-structure/
+/artifacts/asset-drag/
+/artifacts/chat-scroll/
+/artifacts/thumbnail-fill/

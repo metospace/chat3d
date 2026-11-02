@@ -1,3 +1,4 @@
+import {installBrowserGlobals} from './jsdom-env.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {mkdtemp, mkdir, rm, writeFile} from 'node:fs/promises';
@@ -88,8 +89,6 @@ const noticeSource = readFileSync('src/ui/AppUpdateNotice.tsx', 'utf8');
 const appSource = readFileSync('src/App.tsx', 'utf8');
 assert.doesNotMatch(appSource, /workbench-app-menu/);
 assert.doesNotMatch(appSource, /aria-label="关于与更新"/);
-const shellSource = readFileSync('src/ui/studio/StudioShell.tsx', 'utf8');
-assert.match(shellSource, /AppUpdateNavEntry/);
 assert.match(noticeSource, /if \(state\.panelOpen\) return null/);
 const updateCss = readFileSync('src/ui/app-update.css', 'utf8');
 assert.match(updateCss, /studio-sidebar-footer \.app-update-nav-badge/);
@@ -160,7 +159,7 @@ console.log('PASS version endpoint, manifest validation and updater config');
 import React from 'react';
 import {JSDOM} from 'jsdom';
 import {createServer as createVite} from 'vite';
-const dom = new JSDOM('<!doctype html><html><body></body></html>', {url: 'https://example.test/'});
+const dom = new JSDOM('<!doctype html><html><body></body></html>', {url: 'https://example.test/'});installBrowserGlobals(dom);
 for (const name of ['window', 'document', 'HTMLElement', 'Node', 'MutationObserver', 'Event', 'MouseEvent', 'localStorage', 'sessionStorage', 'Element', 'CustomEvent', 'DocumentFragment', 'NodeFilter', 'HTMLInputElement']) Object.defineProperty(globalThis, name, {value: dom.window[name], configurable: true});
 Object.defineProperty(globalThis, 'navigator', {value: dom.window.navigator, configurable: true});
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -168,9 +167,9 @@ globalThis.getComputedStyle = dom.window.getComputedStyle;
 globalThis.requestAnimationFrame = fn => setTimeout(fn, 0);
 globalThis.cancelAnimationFrame = clearTimeout;
 const {render, fireEvent, waitFor, cleanup, act, within} = await import('@testing-library/react');
-const {Theme} = await import('@radix-ui/themes');
-const vite = await createVite({server: {middlewareMode: true}, appType: 'custom'});
-const renderInTheme = ui => render(React.createElement(Theme, null, ui));
+const {ConfigProvider} = await import('antd');
+const vite = await createVite({server: {middlewareMode: true,hmr:false}, optimizeDeps:{noDiscovery:true,include:[]}, appType: 'custom'});
+const renderInTheme = ui => render(React.createElement(ConfigProvider, {theme:{token:{motion:false}}}, ui));
 try {
   const {deriveUpdateView, reduceUpdateProgress, updateSignals, classifyUpdaterError, publicUpdateError, APP_VERSION} = await vite.ssrLoadModule('/src/domain/appUpdate.ts');
   assert.equal(APP_VERSION, pkg);
@@ -185,6 +184,9 @@ try {
   assert.equal(deriveUpdateView({...base, busy: true, remind: '99.0.0'}).kind, 'hidden');
   assert.equal(deriveUpdateView({...base, remind: '99.0.0'}).ended, true);
   assert.equal(deriveUpdateView({...base, dismissed: '99.0.0'}).kind, 'hidden');
+  assert.equal(deriveUpdateView({...base, busy: true, dismissed: '99.0.0'}).kind, 'hidden','closing during a live task must not immediately reopen');
+  assert.equal(deriveUpdateView({...base, busy: true, dismissed: '98.0.0'}).kind, 'busy','a newer release may prompt again');
+  assert.equal(deriveUpdateView({...base, dismissed: '99.0.0', remind: '99.0.0'}).ended, true,'explicit task reminder returns after task ends');
   assert.equal(deriveUpdateView({...base, dirty: true}).dirty, true);
   const installing = deriveUpdateView({...base, phase: 'installing', progress: '正在下载更新… 40%', progressMetrics: {loaded: 80, total: 200, label: '正在下载更新… 40%'}});
   assert.equal(installing.progress, '正在下载更新… 40%');
@@ -235,8 +237,8 @@ try {
   assert.equal(client.useAppUpdate.getState().dismissed, release.version);
   await act(async () => client.useAppUpdate.setState({dismissed: null}));
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
-  fireEvent(document.querySelector('.rt-DialogOverlay'), new MouseEvent('pointerdown', {bubbles: true, button: 0, ctrlKey: false}));
-  fireEvent.click(document.querySelector('.rt-DialogOverlay'));
+  fireEvent.mouseDown(document.querySelector('.ant-modal-wrap'), {button: 0});
+  fireEvent.click(document.querySelector('.ant-modal-wrap'), {button: 0});
   await waitFor(() => assert.equal(notice.queryByRole('dialog', {name: '应用更新'}) === null, true));
   assert.equal(client.useAppUpdate.getState().dismissed, release.version);
   await act(async () => client.useAppUpdate.setState({release, dismissed: null, remind: null, phase: 'installing', progress: '正在下载更新… 40%', progressMetrics: {loaded: 80, total: 200, label: '正在下载更新… 40%'}}));
@@ -246,8 +248,8 @@ try {
   assert.ok(noticeDialog.getByText('40%'));
   fireEvent.keyDown(notice.getByRole('dialog', {name: '应用更新'}), {key: 'Escape'});
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
-  fireEvent(document.querySelector('.rt-DialogOverlay'), new MouseEvent('pointerdown', {bubbles: true, button: 0, ctrlKey: false}));
-  fireEvent.click(document.querySelector('.rt-DialogOverlay'));
+  fireEvent.mouseDown(document.querySelector('.ant-modal-wrap'), {button: 0});
+  fireEvent.click(document.querySelector('.ant-modal-wrap'), {button: 0});
   assert.ok(notice.getByRole('dialog', {name: '应用更新'}));
   assert.equal(client.useAppUpdate.getState().phase, 'installing');
   assert.equal(noticeDialog.queryAllByRole('button').length, 0);
@@ -260,8 +262,8 @@ try {
   for (const selector of ['.app-update-dialog-header', '.app-update-dialog-heading', '.app-update-dialog-body', '.app-update-dialog-footer']) assert.ok(aboutDialog.querySelector(selector));
   const aboutHeading = aboutDialog.querySelector('.app-update-dialog-heading');
   assert.ok(aboutHeading);
-  assert.ok(aboutHeading.querySelector('.rt-Heading, .rt-DialogTitle, h1'));
-  assert.ok(aboutHeading.querySelector('.rt-Text, .rt-DialogDescription, p'));
+  assert.ok(aboutHeading.querySelector('.app-modal-title, h1, h2'));
+  assert.ok(aboutHeading.querySelector('.app-modal-description, p'));
   assert.match(aboutHeading.textContent ?? '', /查看当前版本、检查更新/);
   // Title+Description must live in column-2 wrapper (not as direct grid kids of the 24px icon column).
   assert.equal(aboutDialog.querySelector('.app-update-dialog-header')?.children.length, 2);

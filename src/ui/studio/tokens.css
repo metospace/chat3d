@@ -1,21 +1,14 @@
-:root:has(.frosted-studio),.redesigned-studio.canvas-studio.frosted-studio {
+/* Geometry and compatibility aliases. Palette is defined only in designTokens.ts. */
+:root {
  --sc-font:"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
- --sc-text-xs:12px;--sc-text-sm:13px;--sc-text-base:14px;--sc-text-md:14px;--sc-text-lg:16px;--sc-text-xl:22px;--sc-text-2xl:26px;
+ --sc-text-xs:12px;--sc-text-sm:14px;--sc-text-base:14px;--sc-text-md:14px;--sc-text-lg:16px;--sc-text-xl:24px;--sc-text-2xl:24px;
  --sc-leading-tight:1.3;--sc-leading-normal:1.65;
  --sc-space-1:4px;--sc-space-2:8px;--sc-space-3:12px;--sc-space-4:16px;--sc-space-5:24px;--sc-space-6:32px;
- --sc-radius-sm:4px;--sc-radius-md:6px;--sc-radius-lg:9px;--sc-radius-pill:999px;
- --sc-surface-page:#f3f6f6;--sc-surface-elevated:#fdfefe;--sc-surface-muted:#eaf0f0;--sc-surface-subtle:#f6f9f9;
- --sc-border:#c8d5d5;--sc-border-subtle:#dce4e4;--sc-ink:#203334;--sc-ink-muted:#526869;
- --sc-accent:#176c6b;--sc-accent-soft:#dfefed;--sc-accent-ink:#f8ffff;--sc-focus:#237b78;--sc-nav:#1c3032;--sc-nav-ink:#eef7f6;--sc-nav-muted:#aec2c2;--sc-nav-active:#2e4d4e;
- --sc-shadow-panel:0 1px 2px #00000004;--sc-shadow-float:0 18px 60px #0002;--sc-shadow-inset:none;
+ --sc-radius-sm:6px;--sc-radius-md:8px;--sc-radius-lg:12px;--sc-radius-pill:999px;
+ --sc-field-fill:var(--sc-surface-elevated);--sc-field-line:var(--sc-border);
  --sc-gradient-page:var(--sc-surface-page);--sc-gradient-accent:var(--sc-accent);--sc-gradient-panel:var(--sc-surface-elevated);
  --sc-nav-height:0px;--sc-utility-size:32px;
  --studio-page:var(--sc-surface-page);--studio-surface:var(--sc-surface-elevated);--studio-card:var(--sc-surface-elevated);--studio-line:var(--sc-border-subtle);--studio-ink:var(--sc-ink);--studio-muted:var(--sc-ink-muted);--studio-primary:var(--sc-accent);--studio-primary-ink:var(--sc-accent-ink);
  --panel-fill:var(--sc-surface-elevated);--glass:var(--sc-surface-elevated);--glass-soft:var(--sc-surface-muted);--glass-line:var(--sc-border-subtle);--glass-text:var(--sc-ink);--glass-muted:var(--sc-ink-muted);--glass-accent:var(--sc-ink);--glass-shadow:var(--sc-shadow-panel);--input-fill:var(--sc-surface-muted);--user-bubble:var(--sc-surface-muted);--assistant-bubble:var(--sc-surface-elevated);
  font-family:var(--sc-font);
-}
-:root.dark:has(.frosted-studio),.dark .redesigned-studio.canvas-studio.frosted-studio {
- --sc-surface-page:#152325;--sc-surface-elevated:#1e3032;--sc-surface-muted:#2a4042;--sc-surface-subtle:#243739;
- --sc-border:#496163;--sc-border-subtle:#354d4f;--sc-ink:#e9f3f2;--sc-ink-muted:#b0c5c5;
- --sc-accent:#8bd2c8;--sc-accent-soft:#2b4b49;--sc-accent-ink:#173532;--sc-shadow-panel:none;--sc-shadow-float:0 18px 60px #0005;
 }

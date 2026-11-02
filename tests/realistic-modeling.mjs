@@ -1,0 +1,88 @@
+import assert from 'node:assert/strict';
+import {createServer} from 'vite';
+
+const server=await createServer({server:{middlewareMode:true,hmr:false},appType:'custom'});
+let passed=0;
+const test=async(name,fn)=>{await fn();console.log('PASS '+name);passed++;};
+try{
+ const style=await server.ssrLoadModule('/src/ai/generationStyle.ts');
+ const {buildMessages,parseModelResponse}=await server.ssrLoadModule('/src/ai/provider.ts');
+ const {buildModelingPrompt}=await server.ssrLoadModule('/src/ai/agentPrompt.ts');
+ const {saveModelConfig,loadModelConfig}=await server.ssrLoadModule('/src/ai/modelConfigStorage.ts');
+ const {createInitialDoc}=await server.ssrLoadModule('/src/store.ts');
+ const {validateMaterial,validateDocument}=await server.ssrLoadModule('/src/domain/types.ts');
+ const {applyBatch}=await server.ssrLoadModule('/src/domain/commands.ts');
+ const {withStockMaterials}=await server.ssrLoadModule('/src/domain/materials.ts');
+ const {createSceneMaterial,materialCastsShadow}=await server.ssrLoadModule('/src/scene/material.ts');
+ const {buildExportScene,exportGlb,disposeExportScene}=await server.ssrLoadModule('/src/scene/export.ts');
+ const {importGlb}=await server.ssrLoadModule('/src/scene/importGlb.ts');
+ const {exportHtml}=await server.ssrLoadModule('/src/scene/exportHtml.ts');
+ const {proceduralMaps}=await server.ssrLoadModule('/src/scene/surfaceTextures.ts');
+ const {serializeProject,parseProject}=await server.ssrLoadModule('/src/domain/project.ts');
+ const {normalizeRenderPreset,loadRenderPreset,saveRenderPreset}=await server.ssrLoadModule('/src/scene/renderPreset.ts');
+ const config={baseURL:'https://example.invalid/v1',apiKey:'private-test-key',model:'test',generationQuality:'fast',generationStyle:'illustrative'};
+ const base=createInitialDoc();
+
+ await test('style defaults to realism and reaches single, agent and isolated prompts independently of quality',()=>{
+  for(const value of [undefined,null,'bad',{},'realistic'])assert.equal(style.normalizeGenerationStyle(value),'realistic');
+  for(const quality of ['fast','fine'])for(const generationStyle of ['realistic','illustrative']){
+   const label=generationStyle==='realistic'?'写实':'简洁';
+   const messages=buildMessages('用户指定风格优先',{nodes:[],selection:[]},[],[],quality,generationStyle);
+   assert.match(messages[0].content,new RegExp('本次生成风格：'+label));
+   for(const workerTask of [false,true]){
+    const prompt=buildModelingPrompt({draft:base,base,selection:[],generationQuality:quality,generationStyle,workerTask,wantsAnimation:false,visualAvailable:true,parallelEnabled:false,preserveAssetShape:false});
+    assert.match(prompt,new RegExp('本次生成风格：'+label));
+    assert.ok(!prompt.includes('人物用胶囊四肢、椭球头部'));
+    assert.match(prompt,/不能自动替换、重建或改色已有资产/);
+   }
+  }
+ });
+ await test('style persistence preserves detail preference and never persists an unapproved API key',()=>{
+  const values=new Map();globalThis.localStorage={getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,String(v)),removeItem:k=>values.delete(k)};
+  saveModelConfig(config);const loaded=loadModelConfig();assert.equal(loaded.generationStyle,'illustrative');assert.equal(loaded.generationQuality,'fast');assert.equal(loaded.apiKey,'');assert.ok(!JSON.stringify([...values]).includes(config.apiKey));
+  saveModelConfig({...config,generationStyle:undefined});assert.equal(loadModelConfig().generationStyle,'realistic');
+  assert.equal(normalizeRenderPreset('invalid'),'studio');saveRenderPreset('classic');assert.equal(loadRenderPreset(),'classic');
+  globalThis.localStorage={getItem(){throw Error('blocked')},setItem(){throw Error('blocked')}};assert.equal(loadRenderPreset(),'classic');assert.doesNotThrow(()=>saveRenderPreset('studio'));assert.equal(loadRenderPreset(),'studio');delete globalThis.localStorage;
+ });
+ const physical={id:'test-glass',baseColor:'#dce9eb',roughness:.1,metalness:0,opacity:1,transmission:.9,thickness:.008,ior:1.5,clearcoat:.1,clearcoatRoughness:.2};
+ await test('physical factors are validated and partial edits preserve original project materials',()=>{
+  assert.equal(validateMaterial(physical).length,0);
+  for(const patch of [{ior:NaN},{ior:.9},{transmission:1.1},{thickness:-1},{clearcoat:Infinity}])assert.ok(validateMaterial({...physical,...patch}).length);
+  const before=structuredClone(base);
+  const r=applyBatch(base,{operations:[{op:'createPrimitive',name:'玻璃',tempId:'glass',geometry:{type:'box',params:{width:1,height:1,depth:.008,bevelRadius:0}},parentId:null,transform:{position:[0,.5,0],rotationQuaternion:[0,0,0,1],scale:[1,1,1]},materialId:'mat_gray'},{op:'setAppearance',targetId:'glass',transmission:.9,ior:1.5,thickness:.008,opacity:1}]});
+  assert.equal(r.errors.length,0);assert.deepEqual(base,before);assert.equal(validateDocument(r.doc).length,0);
+  assert.equal(r.doc.materials.find(m=>m.id===r.doc.nodes[0].materialId).transmission,.9);
+  const parsed=parseModelResponse(JSON.stringify({summary:'材质',operations:[{op:'setAppearance',targetId:'real-id',...Object.fromEntries(['transmission','thickness','ior','clearcoat','clearcoatRoughness'].map(k=>[k,physical[k]]))}]}));
+  assert.equal(parsed.operations[0].ior,1.5);
+  const legacy={...base,materials:base.materials.map(m=>m.id==='mat_paint'?{...m,metalness:.18,roughness:.32}:m)};
+  assert.deepEqual(withStockMaterials(legacy).materials.find(m=>m.id==='mat_paint'),legacy.materials.find(m=>m.id==='mat_paint'));
+ });
+ await test('only requested physical shaders are used and transmissive glass does not cast an opaque shadow',()=>{
+  const glass=createSceneMaterial(physical),paint=createSceneMaterial({...physical,transmission:0}),plain=createSceneMaterial({id:'plain',baseColor:'#ffffff',roughness:.5,metalness:0});
+  assert.equal(glass.isMeshPhysicalMaterial,true);assert.equal(materialCastsShadow(glass),false);assert.equal(materialCastsShadow(paint),true);assert.ok(!plain.isMeshPhysicalMaterial);
+  assert.equal(createSceneMaterial({...physical,transmission:0,opacity:.4}).opacity,.4);
+  for(const m of [glass,paint,plain])m.dispose();
+ });
+ await test('surface maps retain authored roughness and encode normalized, repeating normal vectors',()=>{
+  for(const preset of ['brushed_metal','powder_coat','rubber','fabric','wood','concrete']){
+   const {normal,rough}=proceduralMaps({preset,repeat:[6,8],strength:.1});assert.deepEqual(normal.repeat.toArray(),[6,8]);
+   assert.ok(Math.min(...rough.image.data)>=235); // roughness pixels include alpha 255
+   for(let i=0;i<normal.image.data.length;i+=1024){const vector=Array.from(normal.image.data.slice(i,i+3),v=>v/127.5-1);assert.ok(Math.abs(Math.hypot(...vector)-1)<.015);}
+   normal.dispose();rough.dispose();
+  }
+ });
+ await test('project and actual GLB roundtrips preserve physical factors, geometry, and labels',async()=>{
+  globalThis.FileReader=class{readAsArrayBuffer(blob){blob.arrayBuffer().then(result=>{this.result=result;this.onloadend?.()})}};
+  const r=applyBatch(base,{operations:[{op:'createPrimitive',name:'透射玻璃',geometry:{type:'box',params:{width:1,height:1,depth:.008,bevelRadius:0}},parentId:null,transform:{position:[0,.5,0],rotationQuaternion:[0,0,0,1],scale:[1,1,1]},materialId:'mat_gray'}]});assert.equal(r.errors.length,0);
+  const doc={...r.doc,materials:[physical],nodes:r.doc.nodes.map(n=>({...n,materialId:physical.id}))};
+  assert.equal(parseProject(serializeProject(doc)).materials[0].transmission,.9);
+  const html=await exportHtml(doc,'glass');
+  const embedded=JSON.parse(html.match(/<script id="scene-data" type="application\/json">([\s\S]*?)<\/script>/)[1]);
+  assert.ok(embedded.materials.every(m=>m.attenuationDistance!==null));
+  const scene=buildExportScene(doc);assert.equal(scene.children[0].material.transmission,.9);disposeExportScene(scene);
+  const round=await importGlb(await exportGlb(doc),'glass.glb');const m=round.doc.materials.find(m=>m.id===round.doc.nodes[0].materialId);
+  for(const key of ['clearcoat','clearcoatRoughness','transmission','thickness','ior'])assert.ok(Math.abs(m[key]-physical[key])<1e-6,key);
+  assert.equal(round.doc.nodes[0].geometry.type,'mesh');
+ });
+ console.log(`${passed} realistic modeling checks passed; no model requests`);
+}finally{await server.close()}

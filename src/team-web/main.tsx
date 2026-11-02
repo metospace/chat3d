@@ -1,16 +1,16 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Theme} from '@radix-ui/themes';
-import '@radix-ui/themes/styles.css';
+import '../ui/theme/legacy-tokens.css';
 import '../ui-system.css';
 import '../ui/team-library.css';
 import './team-web.css';
+import {AppearanceProvider} from '../ui/Appearance';
 import {TeamWebApp} from './TeamWebApp';
 
 createRoot(document.getElementById('root')!).render(
  <StrictMode>
-  <Theme accentColor="blue" grayColor="slate" radius="medium" scaling="100%">
+  <AppearanceProvider>
    <TeamWebApp/>
-  </Theme>
+  </AppearanceProvider>
  </StrictMode>,
 );

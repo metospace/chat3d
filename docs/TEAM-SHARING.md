@@ -96,7 +96,7 @@ node server/team/admin.mjs disable alice
 ## 运维与边界
 
 - 备份：停止服务后复制整个持久目录（含 SQLite、WAL、SHM）；恢复到受限目录，保持相同 Node 版本后启动。在线备份须使用 SQLite 的备份工具，不要仅复制正在写入的主文件。备份含密码哈希与有效会话，应按内部敏感数据保管。
-- 限制：单进程服务，单团队，没有实时协作、外部客户租户、发布撤回或在线用户管理。登录主路径是 **登录授权**：打开协同 SSO 页 `{SSO_UI}/#/sso?client_id=scenivo&redirect_uri=…&response_type=code&state=…`（**hash 路由** `/#/sso`，勿用 path `/sso`；不传 `scope`，避免协同自动授权跳转，等待用户点击同意授权或拒绝）；默认 SSO UI `http://36.133.218.210:48001`，API `http://36.133.218.210:48080`。回调 `/team/sso/callback` 带回 code 后服务端 `/api/team/login/sso/code` 兑换。新账号为 member，已有账号保留角色；停用账号与平台 401 均拒绝。SSO 会话超过 5 分钟或发布时会用同一用户 token 复核 `get-permission-info`，平台 401 删除会话。本地团队密码登录默认隐藏，仅 `VITE_CHAT3D_TEAM_SHOW_PASSWORD_LOGIN=1` 调试展示；服务端可用 `CHAT3D_TEAM_PASSWORD_LOGIN=0` 关闭。单次发布22 MB HTTP上限，现有格式校验20 MB上限。容量规划与磁盘配额由部署方管理。
+- 限制：单进程服务，单团队，没有实时协作、外部客户租户、发布撤回或在线用户管理。登录主路径是 **登录授权**：打开协同 SSO 页 `{SSO_UI}/#/sso?client_id=scenivo&redirect_uri=…&response_type=code&state=…`（**hash 路由** `/#/sso`，勿用 path `/sso`；不传 `scope`，避免协同自动授权跳转，等待用户点击同意授权或拒绝）；默认 SSO UI `http://pm.jiezi365.com:48001`，API `http://36.133.218.210:48080`。回调 `/team/sso/callback` 带回 code 后服务端 `/api/team/login/sso/code` 兑换。新账号为 member，已有账号保留角色；停用账号与平台 401 均拒绝。SSO 会话超过 5 分钟或发布时会用同一用户 token 复核 `get-permission-info`，平台 401 删除会话。本地团队密码登录默认隐藏，仅 `VITE_CHAT3D_TEAM_SHOW_PASSWORD_LOGIN=1` 调试展示；服务端可用 `CHAT3D_TEAM_PASSWORD_LOGIN=0` 关闭。单次发布22 MB HTTP上限，现有格式校验20 MB上限。容量规划与磁盘配额由部署方管理。
 - 防护：服务端认证、数据库事务、不可变版本、逐原件写权限、跨源白名单；登录错误累计8次暂时限流15分钟。生产代理还应限制连接与登录速率。TLS在公司反向代理终止。
 - 测试仅创建临时账号与临时数据库，不触及真实个人数据、不调用真实收费模型。
 
