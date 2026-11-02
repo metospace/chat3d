@@ -23,11 +23,24 @@ try{
  fireEvent.keyDown(separator,{key:'Home'});assert.equal(separator.getAttribute('aria-valuenow'),'360');fireEvent.keyDown(separator,{key:'End'});assert.equal(Number(separator.getAttribute('aria-valuenow')),clampConversationWidth(720));assert.equal(Number(localStorage.getItem(CONVERSATION_WIDTH_KEY)),clampConversationWidth(720));console.log('PASS separator is bounded and width preference is saved');passed++;
  assert.equal(ui.queryByRole('button',{name:'展开输入框'}),null);assert.equal(ui.queryByRole('button',{name:'缩小输入框'}),null);assert.equal(input.rows,2);console.log('PASS composer remains usable without expand control');passed++;
  fireEvent.click(ui.getByRole('button',{name:'收起对话区'}));assert.equal(document.querySelector('.conversation-region').hidden,true);fireEvent.click(ui.getByRole('button',{name:'打开 AI 助手'}));assert.equal(ui.getByRole('textbox',{name:'建模指令'}),input);assert.equal(input.value,'保持其他模型不变\n只调整托盘位置');console.log('PASS collapsing and reopening preserves conversation and draft');passed++;
- fireEvent.click(ui.getByRole('tab',{name:'任务记录',exact:true}));assert.ok(ui.getByRole('heading',{name:'任务与执行记录'}));fireEvent.click(ui.getByRole('tab',{name:'对话',exact:true}));assert.equal(ui.getByRole('textbox',{name:'建模指令'}),input);console.log('PASS task history and conversation remain independently navigable');passed++;
+ fireEvent.click(ui.getByRole('button',{name:'本项目任务记录',exact:true}));assert.ok(ui.getByRole('region',{name:'任务记录',exact:true}));fireEvent.click(document.querySelector('.ant-drawer-close'));assert.equal(ui.getByRole('textbox',{name:'建模指令'}),input);console.log('PASS task history and conversation remain independently navigable');passed++;
  fireEvent.click(ui.getByRole('button',{name:'收起对话区'}));await act(async()=>store.setState({aiStatus:'generating'}));assert.equal(document.querySelector('.conversation-region').hidden,false);assert.equal(store.getState().aiStatus,'generating');console.log('PASS active task reopens process visibility without cancelling');passed++;
  if(ui.getByRole('button',{name:'结构',exact:true}).getAttribute('aria-pressed')==='true')fireEvent.click(ui.getByRole('button',{name:'结构',exact:true}));
  await act(async()=>{window.innerWidth=1024;window.dispatchEvent(new Event('resize'));});
- fireEvent.click(ui.getByRole('button',{name:'结构',exact:true}));assert.equal(document.querySelector('.conversation-region').hidden,true);assert.equal(document.querySelector('.editor-objects').hidden,false);assert.equal(store.getState().aiStatus,'generating');
- fireEvent.click(ui.getByRole('button',{name:'打开 AI 助手'}));assert.equal(document.querySelector('.editor-objects').hidden,true);assert.equal(ui.getByRole('textbox',{name:'建模指令'}),input);assert.equal(input.value,'保持其他模型不变\n只调整托盘位置');console.log('PASS narrow-window editor panels and assistant switch without losing the live task or composer');passed++;
+ fireEvent.click(ui.getByRole('button',{name:'结构',exact:true}));assert.equal(document.querySelector('.conversation-region').hidden,false);assert.equal(document.querySelector('.editor-objects').hidden,false);assert.equal(store.getState().aiStatus,'generating');
+ assert.equal(document.querySelector('.editor-objects').hidden,false);assert.equal(ui.getByRole('textbox',{name:'建模指令'}),input);assert.equal(input.value,'保持其他模型不变\n只调整托盘位置');console.log('PASS narrow-window editor panels and assistant switch without losing the live task or composer');passed++;
+ await act(async()=>{
+  store.setState({aiStatus:'idle'});
+  store.getState().applyCommandBatch([{op:'createPrimitive',name:'属性面板测试',geometry:{type:'box',params:{width:1,height:1,depth:1}},parentId:null,materialId:'mat_white',transform:{position:[0,.5,0],rotationQuaternion:[0,0,0,1],scale:[1,1,1]}}],'panel fixture');
+  store.getState().select([store.getState().doc.nodes[0].id]);
+ });
+ fireEvent.click(ui.getByRole('button',{name:'属性',exact:true}));
+ assert.ok(ui.getByRole('region',{name:'选中对象属性'}));assert.equal(document.querySelector('.conversation-region').hidden,false);assert.equal(ui.queryByRole('radiogroup',{name:'右侧工作区'}),null);
+ const offset=ui.getByRole('spinbutton',{name:'画布位移 X'});fireEvent.change(offset,{target:{value:'2'}});
+ fireEvent.click(ui.getByRole('button',{name:'收起对话区'}));assert.ok(ui.getByRole('region',{name:'选中对象属性'}));assert.equal(Number(offset.value),2);
+ fireEvent.click(ui.getByRole('button',{name:'打开 AI 助手'}));assert.equal(ui.getByRole('spinbutton',{name:'画布位移 X'}),offset);assert.equal(Number(offset.value),2);assert.equal(ui.getByRole('textbox',{name:'建模指令'}),input);assert.equal(input.value,'保持其他模型不变\n只调整托盘位置');
+ await act(async()=>store.setState({aiStatus:'generating'}));assert.ok(ui.getByRole('region',{name:'选中对象属性'}));assert.equal(offset.disabled,true);assert.equal(document.querySelector('.conversation-region').hidden,false);
+ fireEvent.click(ui.getByRole('button',{name:'关闭属性面板'}));assert.equal(document.querySelector('.conversation-region').hidden,false);assert.equal(store.getState().aiStatus,'generating');
+ console.log('PASS independent property and assistant panels retain both drafts and live task state');passed++;
  await act(async()=>store.setState({aiStatus:'idle'}));await w.flushWorkspace();console.log(`${passed} persistent conversation checks passed`);
 }finally{cleanup();await server.close();dom.window.close()}

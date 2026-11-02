@@ -4,8 +4,8 @@
  --sc-text-xs:12px;--sc-text-sm:14px;--sc-text-base:14px;--sc-text-md:14px;--sc-text-lg:16px;--sc-text-xl:24px;--sc-text-2xl:24px;
  --sc-leading-tight:1.3;--sc-leading-normal:1.65;
  --sc-space-1:4px;--sc-space-2:8px;--sc-space-3:12px;--sc-space-4:16px;--sc-space-5:24px;--sc-space-6:32px;
- --sc-radius-sm:4px;--sc-radius-md:6px;--sc-radius-lg:10px;--sc-radius-pill:999px;
- --sc-field-fill:var(--sc-surface-subtle);--sc-field-line:var(--sc-border);
+ --sc-radius-sm:6px;--sc-radius-md:8px;--sc-radius-lg:12px;--sc-radius-pill:999px;
+ --sc-field-fill:var(--sc-surface-elevated);--sc-field-line:var(--sc-border);
  --sc-gradient-page:var(--sc-surface-page);--sc-gradient-accent:var(--sc-accent);--sc-gradient-panel:var(--sc-surface-elevated);
  --sc-nav-height:0px;--sc-utility-size:32px;
  --studio-page:var(--sc-surface-page);--studio-surface:var(--sc-surface-elevated);--studio-card:var(--sc-surface-elevated);--studio-line:var(--sc-border-subtle);--studio-ink:var(--sc-ink);--studio-muted:var(--sc-ink-muted);--studio-primary:var(--sc-accent);--studio-primary-ink:var(--sc-accent-ink);

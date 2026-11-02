@@ -4,8 +4,8 @@ import {DEFAULT_PLATFORM_BASE,DEFAULT_PLATFORM_TENANT} from './platformAuthStora
 export const DEFAULT_TEAM_SERVICE_BASE='https://portal.jiezi-ai.com';
 /** OAuth public client id (secret stays server-only). */
 export const DEFAULT_OAUTH_CLIENT_ID='scenivo';
-/** Collaborative SSO UI root (SPA; /sso needs try_files on the test host). */
-export const DEFAULT_SSO_UI_BASE='http://36.133.218.210:48001';
+/** Collaborative SSO UI domain; authorization uses its /#/sso hash route. */
+export const DEFAULT_SSO_UI_BASE='http://pm.jiezi365.com:48001';
 export const SSO_CALLBACK_PATH='/team/sso/callback';
 
 type ViteEnv={

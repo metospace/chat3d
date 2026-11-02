@@ -1,6 +1,6 @@
 import {useId} from 'react';
 import {isTauri} from '@tauri-apps/api/core';
-import {Button} from 'antd';
+import {Button,Tag} from 'antd';
 import {InfoCircledIcon} from '@radix-ui/react-icons';
 import {PortalDialog} from './kit/PortalDialog';
 import {APP_VERSION, formatInstallingProgress, type UpdateView} from '../domain/appUpdate';
@@ -92,9 +92,9 @@ export function AppUpdatePanel({layout = 'settings'}: {layout?: 'settings' | 'di
   const showInstalled = view.kind === 'installed';
   const showInstalling = view.kind === 'installing';
 
-  return <div className={`app-update-panel ${layout === 'dialog' ? 'app-update-panel-dialog' : ''}`}>
-    <div className="app-update-brand-card">
-      <div className="app-update-brand"><strong>Scenivo</strong><p className="app-update-panel-lead">{desktop ? '桌面版只安装已签名的发布包。生成进行中可以稍后更新，不会打断当前任务。' : '网页版刷新即可使用站点上的最新功能。'}</p></div>
+  return <div className={`app-update-panel ${layout === 'dialog' ? 'app-update-panel-dialog' : 'app-update-panel-settings'}`}>
+    <div className={layout==='settings'?'app-update-summary':'app-update-brand-card'}>
+      <div className="app-update-brand"><div className="app-update-product-name"><strong>Scenivo</strong>{layout==='settings'&&<Tag>{desktop?'桌面版':'网页版'}</Tag>}</div><p className="app-update-panel-lead">{desktop ? '桌面版只安装已签名的发布包。生成进行中可以稍后更新，不会打断当前任务。' : '网页版刷新即可使用站点上的最新功能。'}</p></div>
       <div className="app-update-version-compare" aria-label="版本信息">
         <div className="app-update-version-chip"><span className="app-update-version-label">当前版本</span><strong>{APP_VERSION}</strong></div>
         {hasUpdate && <span className="app-update-version-arrow" aria-hidden="true">→</span>}
@@ -153,7 +153,7 @@ export function AppUpdateNavEntry({disabled,layout='icon'}: {disabled?: boolean;
 
 export function AppUpdateSettings() {
   return <section className="settings-group app-update-settings-group" id="app-update-section">
-    <header><h2>关于与更新</h2><p>查看版本、检查更新，并在新版本可用时安装</p></header>
+    <header><h2>关于与更新</h2></header>
     <div className="settings-row app-update-settings-row"><AppUpdatePanel layout="settings"/></div>
   </section>;
 }

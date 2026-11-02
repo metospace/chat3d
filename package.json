@@ -24,9 +24,11 @@
     "test:realistic-rendering": "node tests/realistic-rendering.mjs",
     "test:runtime": "node tests/docker-runtime.mjs",
     "test:product-ui": "node tests/product-redesign-browser.mjs",
-    "test:glb-interaction": "node tests/glb-interaction-browser.mjs"
+    "test:glb-interaction": "node tests/glb-interaction-browser.mjs",
+    "test:streaming-ui": "node tests/progress-notifications.mjs && node tests/streaming-ui-browser.mjs"
   },
   "dependencies": {
+    "@ant-design/pro-components": "3.1.14-2",
     "@ant-design/x": "^2.10.0",
     "@earendil-works/pi-agent-core": "1.0.0",
     "@earendil-works/pi-ai": "1.0.0",

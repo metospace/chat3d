@@ -4,11 +4,13 @@ import {runDiagnostics} from '../domain/runDiagnostics';
 import {customerText,progressSteps} from '../domain/customerProgress';
 import {RunTrace} from './RunTrace';
 import {useEffect,useState} from 'react';
-import {useEditorStore} from '../store';
+import {useEditorStore,type EditorStore} from '../store';
+import {useStore} from 'zustand';
 import {ActivityLogIcon} from '@radix-ui/react-icons';
 import './task-progress.css';
-export function TaskPanel({onConversation}:{onConversation:()=>void}){
- const {lastRun,aiStatus,aiError,pendingBatch,pendingResult,doc,messages,past,future}=useEditorStore();
+export function TaskPanel({onConversation,editor}:{onConversation:()=>void;editor?:EditorStore}){
+ const targetEditor=editor??useEditorStore;
+ const {lastRun,aiStatus,aiError,pendingBatch,pendingResult,doc,messages,past,future}=useStore(targetEditor);
  const busy=['capturing','context','generating','validating','applying'].includes(aiStatus);
  const [exportNotice,setExportNotice]=useState(''),[exporting,setExporting]=useState(false),[diagnosticText,setDiagnosticText]=useState('');const [now,setNow]=useState(Date.now());useEffect(()=>{if(!busy)return;const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[busy]);
  const runs=messages.filter(m=>m.run).slice().reverse(),latest=runs[0]?.run;
@@ -18,9 +20,9 @@ export function TaskPanel({onConversation}:{onConversation:()=>void}){
  const start=latest?.startedAt??lastRun?.timings[0]?.startedAt;
  const elapsed=start===undefined?'—':`${Math.max(0,Math.floor(((busy?now:latest?.endedAt??lastRun?.lastEventAt??start)-start)/1000))} 秒`;
  const pending=!!pendingBatch||!!pendingResult;
- const title=busy?customerText(lastRun?.title):pending?'模型已生成，请检查预览':aiStatus==='error'||latest?.status==='failed'?'这次处理未完成':aiStatus==='cancelled'||latest?.status==='stopped'?'已停止，已生成的内容保留':outcome?.outcome==='applied'?'修改已应用到场景':outcome?.outcome==='discarded'?'这次预览已放弃':latest?.mode==='demo'?'历史模拟记录已结束 · 当前无运行任务':lastRun||latest?'本次处理已结束':manualHistory.length?(past.some(e=>e.source!=='ai')?'修改记录已更新':'修改已撤销'):'还没有建模任务';
- const next=busy?'正在继续处理，可返回对话补充要求或停止。':pending?'检查模型后选择应用或放弃。应用不等于质量验收通过。':aiStatus==='error'?'回到对话查看提示，确认后再继续。不会自动重试。':'可以继续提出修改要求，或保存当前模型。';
- const exportDiagnostics=async()=>{if(exporting)return;setExporting(true);try{const state=useEditorStore.getState();const text=JSON.stringify(runDiagnostics(state.aiStatus,state.lastRun,state.aiError),null,2);setDiagnosticText(text);setExportNotice(await downloadJson(text,'diagnostics'));}catch(e){setExportNotice('下载失败：'+String(e)+'。可展开下方诊断内容手动复制。');}finally{setExporting(false);}};
+ const title=busy?customerText(lastRun?.title):pending?(pendingBatch?.taskStatus==='partial'?'未完成，已保留阶段草稿':pendingBatch?.incomplete?'预览已生成，仍需核对':'模型已生成，请检查预览'):aiStatus==='error'||latest?.status==='failed'?'这次处理未完成':aiStatus==='cancelled'||latest?.status==='stopped'?'已停止，已生成的内容保留':outcome?.outcome==='applied'?'修改已应用到场景':outcome?.outcome==='discarded'?'这次预览已放弃':latest?.mode==='demo'?'历史模拟记录已结束 · 当前无运行任务':lastRun||latest?'本次处理已结束':manualHistory.length?(past.some(e=>e.source!=='ai')?'修改记录已更新':'修改已撤销'):'还没有建模任务';
+ const next=busy?'正在继续处理，可返回对话补充要求或停止。':pending?(pendingBatch?.taskStatus==='partial'?'当前任务尚未完成，可继续处理剩余问题；也可保留或放弃阶段结果。':'检查模型后选择应用或放弃。应用不等于质量验收通过。'):aiStatus==='error'?'回到对话查看提示，确认后再继续。不会自动重试。':'可以继续提出修改要求，或保存当前模型。';
+ const exportDiagnostics=async()=>{if(exporting)return;setExporting(true);try{const state=targetEditor.getState();const text=JSON.stringify(runDiagnostics(state.aiStatus,state.lastRun,state.aiError),null,2);setDiagnosticText(text);setExportNotice(await downloadJson(text,'diagnostics'));}catch(e){setExportNotice('下载失败：'+String(e)+'。可展开下方诊断内容手动复制。');}finally{setExporting(false);}};
  return <section className="task-panel customer-task-panel" aria-label="任务记录">
  <header className="task-panel-intro"><ActivityLogIcon/><h2>任务与执行记录</h2><p>当前进展、处理结果和接下来要做的事。</p></header>
  <section className={`customer-current ${busy?'is-running':''}`} aria-label="当前任务状态"><span className="customer-status">{busy?'正在处理':pending?'等待应用':'当前状态'}</span><h3>{title}</h3><p>{next}</p><button onClick={onConversation}>{pending?'查看预览':busy?'返回对话':'前往对话'}</button></section>

@@ -5,6 +5,7 @@ import type {TaskBudget} from './taskBudget';
 import type {EditScope} from '../domain/editScope';
 import type {AnimationProgram} from '../domain/animation';
 import {createBrowserProxyFetch} from './transport';
+import {instructionContract,referenceReconstructionContract} from './instructionContract';
 // 真实模型适配器（方案 P2，提前到本轮实现）
 // OpenAI 兼容协议：POST {baseURL}/chat/completions
 // - 系统提示词把 Scene DSL 讲清楚，模型输出结构化 JSON 命令批
@@ -230,9 +231,10 @@ ${sel}
 
 ${workflow === 'single' ? generationQualityPrompt(generationQuality, 'single') + '\n' + generationStylePrompt(generationStyle) : ''}`;
   // The detailed furniture example is not the fast mode's minimum part count.
-  return normalizeGenerationQuality(generationQuality) === 'fast'
+  const geometryPrompt=normalizeGenerationQuality(generationQuality) === 'fast'
     ? prompt.replace(/# 参考范例[\s\S]*?# 图片/, '# 图片')
     : prompt;
+  return workflow==='single'?geometryPrompt+'\n\n'+instructionContract({single:true,selectionOnly:ctx.editingScope?.mode==='explicit-selection',lockPlacement:ctx.editingScope?.lockPlacement}):geometryPrompt;
 }
 
 export interface ConversationTurn { role: 'user' | 'assistant'; text: string }
@@ -247,7 +249,7 @@ export function buildMessages(text: string, ctx: SceneContext, images: string[] 
       ]
     : text + reminder;
   return [
-    { role: 'system', content: buildSystemPrompt(ctx, generationQuality, 'single', generationStyle) },
+    { role: 'system', content: buildSystemPrompt(ctx, generationQuality, 'single', generationStyle)+(images.length?'\n\n'+referenceReconstructionContract():'') },
     ...history.slice(-8).map((turn): ChatMessage => ({ role: turn.role, content: turn.text.slice(0, 1500) })),
     { role: 'user', content: userContent },
   ];

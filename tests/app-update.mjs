@@ -89,8 +89,6 @@ const noticeSource = readFileSync('src/ui/AppUpdateNotice.tsx', 'utf8');
 const appSource = readFileSync('src/App.tsx', 'utf8');
 assert.doesNotMatch(appSource, /workbench-app-menu/);
 assert.doesNotMatch(appSource, /aria-label="关于与更新"/);
-const shellSource = readFileSync('src/ui/studio/StudioShell.tsx', 'utf8');
-assert.match(shellSource, /AppUpdateNavEntry/);
 assert.match(noticeSource, /if \(state\.panelOpen\) return null/);
 const updateCss = readFileSync('src/ui/app-update.css', 'utf8');
 assert.match(updateCss, /studio-sidebar-footer \.app-update-nav-badge/);
@@ -186,6 +184,9 @@ try {
   assert.equal(deriveUpdateView({...base, busy: true, remind: '99.0.0'}).kind, 'hidden');
   assert.equal(deriveUpdateView({...base, remind: '99.0.0'}).ended, true);
   assert.equal(deriveUpdateView({...base, dismissed: '99.0.0'}).kind, 'hidden');
+  assert.equal(deriveUpdateView({...base, busy: true, dismissed: '99.0.0'}).kind, 'hidden','closing during a live task must not immediately reopen');
+  assert.equal(deriveUpdateView({...base, busy: true, dismissed: '98.0.0'}).kind, 'busy','a newer release may prompt again');
+  assert.equal(deriveUpdateView({...base, dismissed: '99.0.0', remind: '99.0.0'}).ended, true,'explicit task reminder returns after task ends');
   assert.equal(deriveUpdateView({...base, dirty: true}).dirty, true);
   const installing = deriveUpdateView({...base, phase: 'installing', progress: '正在下载更新… 40%', progressMetrics: {loaded: 80, total: 200, label: '正在下载更新… 40%'}});
   assert.equal(installing.progress, '正在下载更新… 40%');

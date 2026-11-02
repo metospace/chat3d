@@ -52,7 +52,7 @@ export function deriveUpdateView(input: {
   }
   if (input.phase === 'installed') return {kind: 'installed', version: release.version, progress: input.progress || '更新已安装。', busy: input.busy};
   if (input.phase === 'failed') return {kind: 'failed', version: release.version, message: input.error || '更新没有完成。'};
-  if (input.busy) return input.remind === release.version ? {kind: 'hidden'} : {kind: 'busy', version: release.version, notes: release.notes, dirty: input.dirty};
+  if (input.busy) return input.remind === release.version || input.dismissed === release.version ? {kind: 'hidden'} : {kind: 'busy', version: release.version, notes: release.notes, dirty: input.dirty};
   if (input.dismissed === release.version && input.remind !== release.version) return {kind: 'hidden'};
   return {kind: 'ready', version: release.version, notes: release.notes, dirty: input.dirty, ended: input.remind === release.version};
 }

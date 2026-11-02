@@ -33,7 +33,25 @@ function createConversationController(editor:EditorStore) {
   const store=editor.getState;
   const ui=createStore<RuntimeView>(()=>({removedQueueId:null,notice:'',agentActivity:store().lastRun,runPi:false,canSteer:false,runMessageId:null,started:0,lastRequest:null,running:false}));
   const setNotice=(notice:string)=>ui.setState({notice});
-  const setAgentActivity=(value:AgentActivity|null|((prev:AgentActivity|null)=>AgentActivity|null))=>ui.setState({agentActivity:typeof value==='function'?value(ui.getState().agentActivity):value});
+  // A buffered SSE read can deliver hundreds of deltas in the same microtask chain.
+  // Keep processing every event, but publish the latest complete activity snapshot on
+  // a timer so React's external-store subscribers can finish a render between bursts.
+  let activityTimer:ReturnType<typeof setTimeout>|undefined;
+  let queuedActivity:AgentActivity|undefined;
+  const clearActivityTimer=()=>{if(activityTimer!==undefined)clearTimeout(activityTimer);activityTimer=undefined;};
+  const setAgentActivity=(value:AgentActivity|null|((prev:AgentActivity|null)=>AgentActivity|null))=>{
+    const previous=queuedActivity??ui.getState().agentActivity;
+    clearActivityTimer();queuedActivity=undefined;
+    ui.setState({agentActivity:typeof value==='function'?value(previous):value});
+  };
+  const queueAgentActivity=(activity:AgentActivity)=>{
+    queuedActivity=activity;
+    if(activityTimer!==undefined)return;
+    activityTimer=setTimeout(()=>{
+      const latest=queuedActivity;activityTimer=undefined;queuedActivity=undefined;
+      if(latest)ui.setState({agentActivity:latest});
+    },50);
+  };
   const setInput=(text:string)=>store().setComposerText(text);
   const setAttachments=(images:string[])=>store().setComposerImages(images);
   const setRunPi=(runPi:boolean)=>ui.setState({runPi});
@@ -153,7 +171,7 @@ function createConversationController(editor:EditorStore) {
           onControl:control=>{if(alive()){controlRef.current=control;setCanSteer(!!control);if(!control)clearControl();}},
           onSteeringApplied:id=>{if(alive()){markSteering(id,'received');setNotice('补充要求已送入模型上下文');}},
           onCheckpoint:cp=>{if(alive()){const combined=continueDraft(original,parent,cp.batch,cp.result);checkpointRef.current={...cp,...combined};editor.setState({pendingBatch:combined.batch,pendingResult:combined.result});}},
-          onActivity:event=>{if(alive()){armTimeout();setAgentActivity(event);if(Date.now()-lastActivitySave>=1000||/暂停|中断|工具失败/.test(event.title)){store().setLastRun(event);if(runMessageId.current)store().updateMessageRun(runMessageId.current,{activity:event});lastActivitySave=Date.now();}if(checkpointRef.current)checkpointRef.current.activity=event;}},onPreview:document=>{if(alive())store().setPreviewDoc(document);}});
+          onActivity:event=>{if(alive()){armTimeout();queueAgentActivity(event);if(Date.now()-lastActivitySave>=1000||/暂停|中断|工具失败/.test(event.title)){store().setLastRun(event);if(runMessageId.current)store().updateMessageRun(runMessageId.current,{activity:event});lastActivitySave=Date.now();}if(checkpointRef.current)checkpointRef.current.activity=event;}},onPreview:document=>{if(alive())store().setPreviewDoc(document);}});
         batch=generated.batch;prepared=generated.result;if(alive()){setAgentActivity(generated.activity);store().setLastRun(generated.activity);}
       } else {
         const generated = await generateBatch(modelText+`\n本次编辑范围约束：${JSON.stringify(editScope)}。${editScope.nodeIds?'只允许修改范围内对象；allowAssemblyAdditions=true时可给完整组件追加部件，不能新增其他组件或改范围外对象。':'允许编辑全场景。高亮对象只是指代参考，不是权限边界，不能因此拒绝其他对象的修改。'}${editScope.lockPlacement?'保留所有已有位置与朝向。':'遵守用户描述中的布局和局部修改要求。'}`, cfg, ctx, controller.signal, images, history, event => { if(alive()) setProgress(event); });

@@ -134,7 +134,7 @@ try{
  await test('explicit question mode blocks model edits and preserves the prior checkpoint',async()=>{
    let control,once=false;const f=fake([[edit,capture],[edit],'可以分四层']);const o=opts(f);o.onControl=c=>control=c;o.onPreview=()=>{if(!once){once=true;control.steer('q','应该分几层',[],'question');}};const r=await runModelingAgent(o);assert.equal(r.result.doc.nodes.length,1);assert.match(r.batch.summary,/分四层/);assert.ok(f.contexts[2].messages.some(m=>m.role==='toolResult'&&m.isError&&JSON.stringify(m.content).includes('只提问')));
  });
- await test('measurable unmet user requirements remain visible and make preview incomplete without blocking retention',async()=>{
+ await test('measurable unmet user requirements block normal submission and retain an incomplete draft',async()=>{
    const req={name:'check_requirements',args:{items:[{quote:'六个货架',target:'货架',kind:'count',expected:'6'}]}};
    const f=fake([[req,{name:'edit_scene',args:{summary:'一组货架',operations:[{...create,name:'货架1'}]}},capture],[review,submit]]);const o=opts(f);o.text='六个货架';const r=await runModelingAgent(o);assert.equal(r.result.doc.nodes.length,1);assert.equal(r.activity.requirements.items[0].status,'mismatch');assert.equal(r.batch.incomplete,true);assert.match(r.batch.summary,/需求不符/);
  });
@@ -418,5 +418,19 @@ await test('renderer recovery on the next task restores required capture and lat
   }
  });
  await test('empty scene omits redundant target-detail lookup but restores it after geometry exists',async()=>{const f=fake([ctx=>{assert.ok(!ctx.messages.find(m=>m.role==='system').toolsAdded.some(t=>t.name==='detail_quality_standard'));return [edit];},ctx=>{assert.ok(ctx.messages.find(m=>m.role==='system').toolsAdded.some(t=>t.name==='detail_quality_standard'));return '阶段草稿';}]);await runModelingAgent(opts(f));});
+ await test('known defects reject completion and a plain-text stop receives bounded repair continuation',async()=>{
+  let current;const bad={name:'review_model',args:{observations:'当前配色不符合明确要求',issues:['主体配色不符合要求'],completion:{summary:'局部诊断已完成',remainingIssues:['主体配色不符合要求']}}};
+  const f=fake([[edit,capture],[bad],'暂时提交这个版本',()=>[{name:'edit_scene',args:{summary:'修正配色',operations:[{op:'setAppearance',targetId:current.nodes[0].id,baseColor:'#123456'}]}},capture],[review,submit]]);const o=opts(f);o.onPreview=doc=>current=doc;const r=await runModelingAgent(o);assert.equal(f.calls,5);assert.equal(r.batch.taskStatus,'submitted');assert.ok(r.activity.timings.some(t=>t.failed&&t.detail.includes('不能作为完成预览提交')));assert.equal(r.batch.operations.length,2);assert.equal(o.document.nodes.length,0);
+ });
+ await test('unimplemented workflow cannot be submitted and repeated refusal ends as an incomplete draft',async()=>{
+  const bad={name:'review_model',args:{observations:'当前只有诊断短程运动',issues:[],completion:{summary:'局部诊断完成',remainingIssues:['取货与放货动作尚未恢复','整车同步及穿插尚未完整验证']}}};const f=fake([[edit,capture],[bad],'先交付','先交付','先交付']);const r=await runModelingAgent(opts(f));assert.equal(f.calls,5);assert.equal(r.batch.taskStatus,'partial');assert.equal(r.activity.outcome,'partial');assert.ok(r.batch.qualityIssues.some(issue=>issue.includes('尚未恢复')));assert.match(r.batch.summary,/仍未解决/);assert.ok(!r.activity.events.some(event=>event.includes('预览已提交')));
+ });
+ await test('clearing issue lists without changed model or evidence cannot erase a known defect',async()=>{
+  const bad={name:'review_model',args:{observations:'背面存在明显缺失',issues:['背面未还原']}};const f=fake([[edit,capture],[bad],[review,submit]]);const r=await runModelingAgent(opts(f));assert.equal(r.batch.taskStatus,'partial');assert.ok(r.activity.timings.some(t=>t.failed&&t.detail.includes('不能只清空问题列表')));assert.ok(r.batch.qualityIssues.some(issue=>issue.includes('背面未还原')));
+ });
+ await test('animation review accepts chosen phase times and a less occluded camera view',async()=>{
+  const doc=applyBatch(createInitialDoc(),{operations:[create]}).doc,track={id:'move',name:'phase move',targetIds:[doc.nodes[0].id],channel:'position',keyframes:[{time:0,value:[0,0,0]},{time:10,value:[3,0,0]}]},samples=[];
+  const f=fake([[plan,{name:'configure_animation',args:{summary:'生成往返运动检查',name:'move',duration:10,loop:false,tracks:[track]}},{name:'preview_animation',args:{times:[0,2,4,6,8,10],view:'side'}}],[review,submit]]);const o=opts(f,doc);o.text='创建运动动画';o.capture=async(d,view,ids,time)=>{samples.push({view,time});return picture;};const r=await runModelingAgent(o);assert.equal(r.batch.taskStatus,'submitted');assert.deepEqual(samples.map(s=>s.time),[0,2,4,6,8,10]);assert.ok(samples.every(s=>s.view==='side'));
+ });
  console.log(`${passed} Pi agent loop checks passed; model and rendering mocked`);
 }finally{await server.close()}

@@ -14,6 +14,13 @@ export interface CompositionInteraction {
  onTransform:(change:SelectionChange)=>void;
  onCancel:()=>void;
 }
+export function groundPointAt(canvas:HTMLCanvasElement,camera:THREE.Camera,x:number,y:number,step=0):Vec3|null{
+ const rect=canvas.getBoundingClientRect();if(!rect.width||!rect.height)return null;
+ camera.updateMatrixWorld();const ray=new THREE.Raycaster();ray.setFromCamera(new THREE.Vector2((x-rect.left)/rect.width*2-1,1-(y-rect.top)/rect.height*2),camera);
+ if(Math.abs(ray.ray.direction.y)<1e-5)return null;
+ const point=ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0,1,0),0),new THREE.Vector3());
+ return point&&Math.abs(point.x)<=10000&&Math.abs(point.z)<=10000?[snapCoordinate(point.x,step),0,snapCoordinate(point.z,step)]:null;
+}
 /** Runtime previews never modify the document. Only pointer-up emits one transaction. */
 export class ManualInteraction {
  private config:CompositionInteraction|null=null;
@@ -57,7 +64,8 @@ export class ManualInteraction {
    const start=this.ground(e.clientX,e.clientY);if(c.mode==='move'&&!start)return;this.gesture={id:e.pointerId,x:e.clientX,y:e.clientY,start,change:null,placement:false};
   }this.stop(e);this.canvas.setPointerCapture?.(e.pointerId);
  };
- private updateGhost(e:PointerEvent){if(!this.ghost||!this.config)return;this.point=this.ground(e.clientX,e.clientY);this.ghost.visible=!!this.point;if(this.point){this.point.x=snapCoordinate(this.point.x,this.config.snapStep);this.point.z=snapCoordinate(this.point.z,this.config.snapStep);this.ghost.position.copy(this.point);}this.dirty();}
+ previewPlacementAt(clientX:number,clientY:number){this.updateGhost({clientX,clientY});return this.point?.toArray() as Vec3|undefined;}
+ private updateGhost(e:Pick<PointerEvent,'clientX'|'clientY'>){if(!this.ghost||!this.config)return;this.point=this.ground(e.clientX,e.clientY);this.ghost.visible=!!this.point;if(this.point){this.point.x=snapCoordinate(this.point.x,this.config.snapStep);this.point.z=snapCoordinate(this.point.z,this.config.snapStep);this.ghost.position.copy(this.point);}this.dirty();}
  private move=(e:PointerEvent)=>{
   const c=this.config;if(!c)return;if(c.placement)this.updateGhost(e);
   const g=this.gesture;if(!g||g.id!==e.pointerId)return;this.stop(e);if(g.placement)return;

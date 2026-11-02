@@ -36,7 +36,7 @@ try{
  const visited=[];
  const ui=render(React.createElement(Theme,null,React.createElement(StudioShell,{activePage:'home',disabled:false,taskQueueRequest:0,onNavigate:page=>visited.push(page),onTaskOpen:()=>{},onTaskHistory:()=>{}})));
  assert.ok(ui.getByRole('button',{name:'登录账户',exact:true}));
- fireEvent.click(ui.getByRole('button',{name:'资源库',exact:true}));
+ fireEvent.click(ui.getByRole('button',{name:'资产库',exact:true}));
  ui.rerender(React.createElement(Theme,null,React.createElement(StudioShell,{activePage:'asset',disabled:false,taskQueueRequest:0,onNavigate:page=>visited.push(page),onTaskOpen:()=>{},onTaskHistory:()=>{}})));
  fireEvent.click(ui.getByRole('button',{name:'场景库',exact:true}));
  assert.deepEqual(visited,['asset','scene']);assert.equal(requests.length,0);

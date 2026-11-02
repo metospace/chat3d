@@ -4,13 +4,13 @@ This change is based on `feat/ant-design-x-chat` at `0b280fb37852fd7880c45b31c9b
 
 ## UI architecture
 
-- Navigation: creation space, resource library (assets/scenes), tasks, team; settings and account remain at the bottom.
+- Navigation now uses real ProLayout: creation space, assets, scenes, tasks and team; settings and account remain at the bottom. See [PRO-V6-MIGRATION.md](PRO-V6-MIGRATION.md) for the theme and business-component migration.
 - `src/ui/theme/designTokens.ts` supplies the shared Ant Design, Ant Design X and CSS semantic palette. `src/ui/theme/product.css` consolidates the former layered global styles. `ui-system.css` remains used by the separate team web application.
 - Home provides continue/recent content and one new-project menu: describe, import GLB, or blank project. Enter sends, Shift+Enter inserts a line; IME composition does not submit.
 - Resources retain grid/list, categories, search, sort, fixed asset versions, team publishing, trash and backup flows. Failed reads have a retry state distinct from an empty library.
-- Object and property panel widths are keyboard/pointer adjustable and saved as local UI preferences. Properties and the assistant share the right dock. At 1280px and below the active panel gets priority; mobile copy identifies desktop editing requirements.
+- Object and property panel widths are keyboard/pointer adjustable and saved as local UI preferences. Properties occupy the left panel; the independent assistant stays on the right. Narrow layouts stack the panels while retaining drafts.
 - `AccessibleModal` retains Ant's real modal lifecycle and adds boundary Tab wrapping plus focus restoration when a caller conditionally unmounts the dialog. No production animation or focus behavior is disabled for jsdom.
-- Common fields use Ant InputNumber, Select, ColorPicker, Checkbox and Segmented. Chat retains Bubble, Sender, Welcome, Prompts and ThoughtChain. Conversations handles the session list; FileCard handles nonimage reference metadata. The existing attachment pipeline retains compression, limits and persistence; a second Attachments upload pipeline was not introduced.
+- Common fields use Ant InputNumber, Select, ColorPicker, Checkbox and Segmented. AI surfaces use Bubble, default Sender inputs/actions, Welcome, Prompts, Think, ThoughtChain, Actions, Attachments and FileCard.List. Conversations handles the session list. Attachments is controlled by existing local references; its beforeUpload hook preprocesses locally and prevents HTTP uploading. Compression, size limits and project persistence retain their existing behavior. See ANT-DESIGN-X-COMPONENTS.md for the component map.
 - HeroUI runtime dependencies and global styles were removed after verifying no source imports. Radix icons remain; Radix Themes remains a development dependency for existing test fixtures.
 
 ## Canvas controls

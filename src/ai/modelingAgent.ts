@@ -5,6 +5,7 @@ export {agentSceneContext,targetedSceneContext,compactAgentContext} from './agen
 export {structuredPartSchema} from './agentSchemas';
 import {STRUCTURED_PART_LIMIT} from '../domain/structureLimits';
 import {boundSceneRead} from './sceneReadBudget';
+import {confirmedCompletionIssues} from '../domain/completionIssues';
 import {editReceipt} from '../domain/editReceipt';
 import {normalizedUsage,providerHasUsage,executionMetadata,type UsageState} from './executionTelemetry';
 import {bendExistingMesh} from '../domain/meshBend';
@@ -161,6 +162,10 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
   const recordReadProgress=(ids:string[])=>{const visual=visualFingerprint(draft);if(visual!==readProgressVisual){readProgressVisual=visual;knownReadIds.clear();preparationReads=0;}const fresh=ids.filter(id=>!knownReadIds.has(id));ids.forEach(id=>knownReadIds.add(id));if(fresh.length&&preparationReads<24){preparationReads++;progress();}};
   let reviewIssues:string[]=[];
   let submittedQualityIssues:string[]=[];
+  let completionBlockers:string[]=[];
+  let completionRecoveryTurns=0;
+  let completionFingerprint='',completionEvidence='';
+  const recordCompletionBlockers=(issues:string[])=>{completionBlockers=issues;completionFingerprint=issues.length?visualFingerprint(draft):'';completionEvidence=issues.length?latestCaptureKey.split(':').slice(1).join(':'):'';};
   let inspectionKey='';
   const reviewedStates=new Set<string>();const markReviewProgress=(reviews:DetailReview[])=>{let changed=false;for(const r of reviews){const key=JSON.stringify([r.componentId,r.revision,r.visualEvidence,r.interactionEvidence,r.isolatedEvidence,r.checks.map(c=>[c.criterion,c.status,[...c.nodeIds].sort()]).sort()]);if(!reviewedStates.has(key)){reviewedStates.add(key);changed=true;}}if(changed)progress();};
   let detailReviews:DetailReview[]=[];const repairAttempts=new RepairAttempts(),componentVersions=new Map<string,number>();
@@ -192,7 +197,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
   const checkpoint=(reason='任务尚未完成') : AgentResult => ({
     batch:{requestId:makeId(),projectId:base.projectId,baseRevision:base.revision,selectedIds:[...options.selection],editScope:options.editScope,
       taskStatus:'partial',incomplete:true,continuation:`继续完成原任务：${executionTexts.join('；补充：') || '根据参考图建模'}。当前场景是已保留的阶段成果，先检查现有对象，保留有效部分，不要重复创建；优先完成下一阶段。${visualAvailable()?'三维可用时截图复核。':'三维不可用，先保留数据修改；恢复视图后再做视觉验收，不要反复请求截图。'}`,
-      qualityIssues:[...new Set([...reviewIssues,...(activity.detailAcceptance?.issues??[]),...(activity.blueprintCoverage?.issues??[]),...(activity.requirements?.items.filter(r=>r.status!=='pass').map(r=>`需求${r.status==='mismatch'?'不符':'待核对'}：${r.quote}；${r.actual}`)??[])])],
+      qualityIssues:[...new Set([...reviewIssues,...completionBlockers,...(activity.detailAcceptance?.issues??[]),...(activity.blueprintCoverage?.issues??[]),...(activity.requirements?.items.filter(r=>r.status!=='pass').map(r=>`需求${r.status==='mismatch'?'不符':'待核对'}：${r.quote}；${r.actual}`)??[])])],
       summary:`${isFast?'快速模式 · ':''}阶段草稿已保留（未完成最终复核）\n${reason}\n已执行 ${operations.length} 项操作，当前 ${draft.nodes.length} 个对象。请人工检查后保留此阶段，或放弃。`+(reviewIssues.length?'\n已知问题：'+reviewIssues.join('；'):''),operations:structuredClone(operations)},
     result:{doc:structuredClone(draft),applied:structuredClone(applied),errors:[]},activity:structuredClone({...activity,outcome:stageReason?'budget-exhausted' as const:'partial' as const})
   });
@@ -407,22 +412,25 @@ return invalid.slice(0,8).join('；');};
       const result=await editor.execute(id,{summary:description,operations:[{op:'setAnimation',animation:{version:1,...program}}]},signal,()=>{});
       return {...result,content:[...result.content,{type:'text',text:'动画配置已写入草稿。现在必须调用preview_animation检查动态样本，下一轮review_model，然后submit_preview；无需让用户手工编写动画或建立动作库。'}]};
     }),
-    tool('preview_animation','检查动态预览','对当前动画在三个不同时间点实际求值并渲染，检查运动对象与场景关系。不能代替真实碰撞/生产仿真。动画变更后提交前必须调用，下一轮review_model复核图片。',Type.Object({}),async()=>{
+    tool('preview_animation','检查动态预览','对当前动画实际求值并渲染。默认检查三个时间点；完整搬运等多阶段任务可指定包含0的3–6个不同时间点times及view，覆盖取货、转向、运输、放货等阶段，遮挡时换侧面检查。不能代替完整碰撞或生产仿真。下一轮review_model复核图片。',Type.Object({times:Type.Optional(Type.Array(Type.Number({minimum:0}),{minItems:3,maxItems:6})),view:Type.Optional(Type.Union(['perspective','front','side','back','left','top','bottom','underside'].map(view=>Type.Literal(view))))}),async(_id,args)=>{
       check();if(!draft.animation)throw new Error('尚无动画，请先通过edit_scene的setAnimation配置运动轨道');
       const evaluate=createAnimationEvaluator(draft),candidates=new Set<number>([draft.animation.duration*.381966,draft.animation.duration*.618034,draft.animation.duration]);
       for(const track of draft.animation.tracks){const keys=track.keyframes??[];for(let i=1;i<keys.length;i++)if(JSON.stringify(keys[i].value)!==JSON.stringify(keys[i-1].value)){candidates.add((keys[i].time+keys[i-1].time)/2);candidates.add(keys[i].time);break;}if(track.channel==='follow')candidates.add((track.start!+track.end!)/2);}
       const first=evaluate(0),times=[0];let previous=JSON.stringify([...first]);for(const time of candidates){const current=JSON.stringify([...evaluate(time)]);if(current!==previous){times.push(time);previous=current;if(times.length===3)break;}}if(times.length<3)times.push(draft.animation.duration);
+      if(args.times){if(!args.times.includes(0)||new Set(args.times).size!==args.times.length||args.times.some(time=>time>draft.animation!.duration))throw Error('动态样本时间必须包含0、不重复，并处于动画时长以内');times.splice(0,times.length,...[...args.times].sort((a,b)=>a-b));}
       const content:({type:'text';text:string}|ImageContent)[]=[];let moving=false;
-      for(const time of times){const poses=evaluate(time);if([...poses].some(([id,p])=>JSON.stringify(p)!==JSON.stringify(first.get(id))))moving=true;const picture=await captureDraft('perspective',undefined,time);check();content.push({type:'text',text:`动态样本 time=${time.toFixed(2)}s revision=${draft.revision} scope=whole；不是完整碰撞或动画验收`},asImage(picture));}
-      if(!moving)throw new Error('三个动画样本没有可见变化，请检查目标、关键帧/表达式和时长，不要声称已让场景动起来');
-      const key=`${draft.revision}:animation:whole`;if(!capturedViews.has(key)){capturedViews.add(key);progress();}latestCaptureKey=key;capturedRevision=draft.revision;capturedTurn=calls;captureScope='whole';animationCheckedRevision=draft.revision;
-      emit(`动态预览：${draft.animation.tracks.length}条轨道，已检查三个时间样本，等待视觉复核`,true);return {content,details:{revision:draft.revision,times}};
+      for(const time of times){const poses=evaluate(time);if([...poses].some(([id,p])=>JSON.stringify(p)!==JSON.stringify(first.get(id))))moving=true;const picture=await captureDraft(args.view??'perspective',undefined,time);check();content.push({type:'text',text:`动态样本 time=${time.toFixed(2)}s revision=${draft.revision} scope=whole；不是完整碰撞或动画验收`},asImage(picture));}
+      if(!moving)throw new Error('动画样本没有可见变化，请检查目标、关键帧/表达式和时长，不要声称已让场景动起来');
+      const key=`${draft.revision}:animation:${args.view??'perspective'}:${times.join(',')}:whole`;if(!capturedViews.has(key)){capturedViews.add(key);progress();}latestCaptureKey=key;capturedRevision=draft.revision;capturedTurn=calls;captureScope='whole';animationCheckedRevision=draft.revision;
+      emit(`动态预览：${draft.animation.tracks.length}条轨道，已检查${times.length}个时间样本，等待视觉复核`,true);return {content,details:{revision:draft.revision,times}};
     }),
     tool('review_model','记录视觉检查','看过最新截图后记录外轮廓、比例、悬空/穿插、颜色和参考图差异。存在差距必须如实记录。若本轮修改已完成，传completion合并提交待确认预览，减少再为提交单独请求一轮；仍执行submit_preview的全部检查，未验收项必须保留。',Type.Object({observations:Type.String({minLength:5,maxLength:1200}),issues:Type.Array(Type.String({maxLength:200}),{maxItems:8}),completion:Type.Optional(Type.Object({summary:Type.String({minLength:1,maxLength:1200}),remainingIssues:Type.Array(Type.String({maxLength:200}),{maxItems:8})}))}),async(_id,args)=>{
       check();if(calls<=capturedTurn)throw new Error('截图刚刚返回，请在下一轮读取图片后再调用 review_model，不能提前编造视觉检查');
       if(capturedRevision!==draft.revision)throw new Error('请先获取当前版本截图，再做视觉检查');
       if(!reviewedViews.has(latestCaptureKey)){reviewedViews.add(latestCaptureKey);progress();}
-      reviewedRevision=draft.revision;if(captureScope==='whole')reviewedWholeRevision=draft.revision;reviewIssues=[...args.issues];
+      const nextBlockers=confirmedCompletionIssues(args.issues,true);
+      if(completionBlockers.length&&!nextBlockers.length&&completionFingerprint===visualFingerprint(draft)&&completionEvidence===latestCaptureKey.split(':').slice(1).join(':'))throw Error('此前已确认的问题尚未修复或补充新证据，不能只清空问题列表。请实际修改模型，或换视角/动态时间点取证后再复核。');
+      reviewedRevision=draft.revision;if(captureScope==='whole')reviewedWholeRevision=draft.revision;reviewIssues=[...args.issues];recordCompletionBlockers(nextBlockers);
       emit(`视觉检查（${captureScope==='whole'?'全场景':'设备近景'} / 版本 ${draft.revision}）：${args.observations}${args.issues.length?'；待改进：'+args.issues.join('；'):''}`,true);
       if(args.completion)return await tools.find(t=>t.name==='submit_preview')!.execute(_id+':submit',args.completion,signal);
       return textResult((args.issues.length?'差异已记录，未解决问题必须在submit_preview明确列出。':'已记录模型自检，不代表人工验收通过。')+(reviewedWholeRevision===draft.revision||(reviewRequirement(base,draft).kind==='local'&&reviewRequirement(base,draft).assemblyId===captureScope)?' 当前所需范围复核已完成，达到本轮要求即可submit_preview；其他限制如实列出，不要反复截图空转。':' 此次修改涉及更广范围，提交前还需capture_view({view:"perspective",scope:"scene"})，下一轮review_model。'));
@@ -440,6 +448,11 @@ return invalid.slice(0,8).join('；');};
       const unchecked=activity.requirements.items.filter(r=>r.status!=='pass');
       if(requirementsNeedRefresh)remaining.push('最新补充要求尚未重新整理核对');
       remaining.push(...unchecked.map(r=>`需求${r.status==='mismatch'?'不符':'待核对'}：${r.quote}；${r.actual}`));
+      const detailFailures=detail.reviews.flatMap(review=>review.checks.filter(item=>item.status==='fail').map(item=>`${review.componentId}：${item.evidence}`));
+      const blockers=[...new Set([...confirmedCompletionIssues(reviewIssues,true),...confirmedCompletionIssues(args.remainingIssues),...detailFailures,...unchecked.filter(item=>item.status==='mismatch').map(item=>`需求不符：${item.quote}；${item.actual}`)])];
+      if(completionBlockers.length&&!blockers.length)throw Error('仍有上次提交记录的未解决问题，请先实际修复并重新复核，不能通过清空剩余问题结束任务。');
+      recordCompletionBlockers(blockers);
+      if(completionBlockers.length)throw Error('仍有已确认缺陷或未完成的功能，不能作为完成预览提交：'+completionBlockers.join('；')+'。请保留有效草稿，局部修复或补足对应动态样本，再获取最新证据复核。不要把原任务缩成局部诊断；若达到预算或无法继续，系统会保留未完成草稿。');
       submittedQualityIssues=[...new Set([...remaining,...detail.issues])];
       if(activity.generationReview)activity.generationReview={...activity.generationReview,basicReviewCompleted:requirement.kind==='none'||reviewed};
       summary=(isFast?'快速模式草稿\n':'')+args.summary+(remaining.length?'\n仍需改进：'+remaining.join('；'):requirement.kind==='none'?'\n已完成数据校验；本次非视觉修改无需重新截图。':'\n已完成模型自检，仍请人工核对参考图。');
@@ -508,7 +521,8 @@ return invalid.slice(0,8).join('；');};
       transportFailure='';budgetState.rounds++;calls++;turnActions=[];turnErrors=[];activity.turn=calls;activity.timings=[...activity.timings,{id:`model-${calls}`,kind:'model',label:`模型第 ${calls} 轮`,startedAt:Date.now()}];emit(`第 ${calls} 轮：等待模型决定下一步`);
       const recoveryNote=stagnantTurns>=2?'\n已连续无有效进展：不要重复read_scene或plan_model。若有校验错误，先修正失败参数；若计划已记录，执行一个最小有效edit_scene；若模型已完成，按review要求检查并提交；非视觉修改可直接提交。无法继续应明确说明阻碍。':'';
       const animationNext=wantsAnimation?(!activity.plan.length?'本轮用户要求实际动画：先plan_model，然后configure_animation。':JSON.stringify(draft.animation)===JSON.stringify(base.animation)?'本轮动画尚未创建或修改：下一步应configure_animation，不要只反复read_scene/capture_view。':animationCheckedRevision!==draft.revision?'动画已配置：下一步preview_animation。':reviewedWholeRevision!==draft.revision?'动态样本已返回：下一轮review_model。':'动态复核已完成：若需求已满足，下一步submit_preview。'):'';
-      const budgetNote=`\n${continuation?'本轮继续此前用户需求：'+resolvedIntent.slice(0,500)+'。':''}当前第${calls}轮，连续${stagnantTurns}轮没有有效进展。继续完成计划与细节；本次上限${budget.maxRounds}轮、${budget.maxMinutes}分钟、${budget.maxReportedTokens}已报告Token，到限应保留未完成草稿。当前输入${activity.inputTokens}、输出${activity.outputTokens} Token；避免无效重复。${animationNext}${recoveryNote}`;
+      const completionNote=completionBlockers.length?'\n上次提交被拦截，仍须处理：'+completionBlockers.join('；')+'。先修正并重新取证，不要直接结束文字回复或把未完成任务说成完成。':'';
+      const budgetNote=`\n${continuation?'本轮继续此前用户需求：'+resolvedIntent.slice(0,500)+'。':''}当前第${calls}轮，连续${stagnantTurns}轮没有有效进展。继续完成计划与细节；本次上限${budget.maxRounds}轮、${budget.maxMinutes}分钟、${budget.maxReportedTokens}已报告Token，到限应保留未完成草稿。当前输入${activity.inputTokens}、输出${activity.outputTokens} Token；避免无效重复。${animationNext}${recoveryNote}${completionNote}`;
       context={...context,messages:context.messages.map((message,index)=>index===0 && message.role==='system'?{...message,content:typeof message.content==='string'?message.content+budgetNote:[...message.content,{type:'text' as const,text:budgetNote}]}:message)};
       if(!visualAvailable()){
         const unavailable=new Set(['capture_view','capture_multiview','capture_quality_review','capture_detail_diagnostic','capture_component_intrinsic','preview_animation','review_model','audit_model_detail','audit_model_details_batch','submit_preview']);
@@ -541,7 +555,12 @@ return invalid.slice(0,8).join('；');};
       if(submitted)return {action:'end'};
       const answeredSteering=(respondingToSteering||questionOnly)&&message.stopReason==='stop'&&!message.content.some(c=>c.type==='toolCall');respondingToSteering=false;
       if(answeredSteering)return {action:'end'};
-      if(message.stopReason==='stop'&&!message.content.some(c=>c.type==='toolCall')){emit('模型已结束文字回复，本轮不再自动续问；已有修改仅保留为待确认草稿',true);return {action:'end'};}
+      if(message.stopReason==='stop'&&!message.content.some(c=>c.type==='toolCall')){
+        if(operations.length&&completionBlockers.length&&visualAvailable()&&completionRecoveryTurns<2){completionRecoveryTurns++;emit('仍有未修复问题，继续完成当前任务',true);return {action:'continue'};}
+        if(completionBlockers.length)pauseReason='已确认的问题仍未解决，模型未继续修复；已暂停并保留未完成草稿：'+completionBlockers.join('；');
+        emit(completionBlockers.length?pauseReason:'模型已结束文字回复，本轮不再自动续问；已有修改仅保留为待确认草稿',true);return {action:'end'};
+      }
+      if(progressVersion!==observedProgress)completionRecoveryTurns=0;
       emit(`第${calls}轮执行：${turnActions.join(' → ')||'仅文字回复'}；${progressVersion===observedProgress?'无新的有效进展':'有有效进展'}；${draft.animation?'已有动画配置':'尚无动画配置'}`,true);
       const noProgress=progressVersion===observedProgress;failedTurns=turnErrors.length&&noProgress?failedTurns+1:0;
       stagnantTurns=noProgress?stagnantTurns+1:0;observedProgress=progressVersion;

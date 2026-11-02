@@ -926,8 +926,11 @@
 @media(prefers-reduced-motion:reduce) {
 .studio * {
   scroll-behavior: auto!important;
-  animation: none!important;
   transition: none!important
+}
+/* Keep the native task-status spinner; suppress decorative motion. */
+.studio :not(.adx-run.is-active .anticon-loading) {
+  animation: none!important
 }
 }
 .animation-controls {
@@ -5667,19 +5670,7 @@
   object-fit: cover;
   border-radius: var(--sc-radius-md)
 }
-.canvas-studio .model-picker-trigger {
-  height: 30px;
-  min-width: 0;
-  max-width: 190px;
-  padding: 4px 7px;
-  display: inline-flex;
-  gap: 5px;
-  white-space: nowrap;
-  border: 0;
-  background: transparent!important;
-  color: var(--gray-11)!important;
-  font-size: 12px
-}
+
 .model-picker-trigger>span {
   overflow: hidden;
   text-overflow: ellipsis
@@ -5840,19 +5831,7 @@
   outline: 2px solid var(--gray-7);
   outline-offset: 2px
 }
-.canvas-studio .model-picker-trigger,.canvas-studio.editor-mode .chat-composer .model-picker-trigger {
-  margin: 0;
-  padding: 0 10px;
-  max-width: min(190px,38vw);
-  height: 32px;
-  min-height: 32px;
-  background: var(--gray-a3)!important;
-  border-radius: var(--sc-radius-lg);
-  color: var(--gray-12)!important;
-  font-size: 12px;
-  gap: 6px;
-  flex-shrink: 1
-}
+
 .canvas-studio .home-start.composer-send,.canvas-studio.editor-mode .chat-composer .composer-send,.canvas-studio .composer-send {
   width: 34px;
   height: 34px;
@@ -7081,7 +7060,10 @@
 @media(prefers-reduced-motion:reduce) {
 .canvas-studio.frosted-studio * {
   scroll-behavior: auto!important;
-  transition: none!important;
+  transition: none!important
+}
+/* Keep the native task-status spinner; suppress decorative motion. */
+.canvas-studio.frosted-studio :not(.adx-run.is-active .anticon-loading) {
   animation: none!important
 }
 }
@@ -8253,7 +8235,7 @@ body:has(.frosted-studio) .background-color-swatch.is-dark {
   --sidebar-gap-group: 20px
 }
 .canvas-studio.frosted-studio {
-  display: grid!important;
+  display: grid;
   grid-template-columns: var(--studio-sidebar) minmax(0,1fr);
   height: 100dvh;
   min-height: 0;
@@ -12002,14 +11984,14 @@ body:has(.frosted-studio) .workbench-project-info .editor-save-state,body:has(.f
   color: var(--sc-ink,#203334)
 }
 .canvas-inspector .canvas-swatches .ant-btn {
-  width: 25px;
-  height: 25px;
-  min-width: 25px;
-  padding: 0;
-  border-radius: var(--sc-radius-md);
-  border: 2px solid var(--sc-surface-elevated,#fdfefe);
-  outline: 1px solid var(--sc-border,#c8d5d5)
+  width:26px;height:26px;min-width:26px;padding:0;border-radius:7px;
+  border:2px solid var(--sc-surface-elevated);outline:1px solid var(--sc-border-subtle);outline-offset:0
 }
+.canvas-inspector .canvas-swatches {align-items:center}
+.canvas-inspector .canvas-swatches .ant-color-picker-trigger {width:26px;height:26px;min-width:26px;min-height:26px;padding:3px;border-radius:7px}
+.canvas-inspector .canvas-swatches .ant-color-picker-color-block {width:18px;height:18px;border-radius:4px}
+.canvas-inspector .canvas-swatches .ant-btn[aria-pressed=true] {outline:2px solid var(--sc-accent);outline-offset:1px}
+
 .canvas-inspector .canvas-property-tabs .ant-btn {
   flex: 1;
   min-width: 0;
@@ -13277,7 +13259,7 @@ body:has(.frosted-studio) .workbench-project-info .editor-save-state,body:has(.f
 }
 .quality-picker-option {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   padding: 8px 9px;
   border-radius: var(--sc-radius-md);
@@ -13981,16 +13963,19 @@ body:has(.frosted-studio) .workbench-project-info .editor-save-state,body:has(.f
 }
 .canvas-studio.frosted-studio.editor-mode .canvas-tool-rail .ant-btn[aria-pressed="true"] {
   background: var(--sc-accent-soft);
-  border-bottom-color: var(--sc-accent);
   color: var(--sc-accent);
+  font-weight: 500;
 }
 .canvas-studio.frosted-studio.editor-mode .editor-workspace:not(.editor-panel-open) .canvas-tool-rail .ant-btn {
   height: 32px;
   min-height: 32px;
 }
 .canvas-studio.frosted-studio.editor-mode .canvas-transform-tools {
-  border-radius: 6px;
-  border-color: var(--sc-border);
+  border-radius: 12px;
+  border-color: var(--sc-border-subtle);
+  box-shadow: var(--sc-shadow-panel);
+  padding: 5px;
+  height: 44px
 }
 .canvas-studio.frosted-studio.editor-mode .canvas-transform-tools .ant-btn {
   width: auto;
@@ -14031,24 +14016,24 @@ body:has(.frosted-studio) .workbench-project-info .editor-save-state,body:has(.f
   border-bottom: 1px solid var(--sc-border-subtle);
 }
 .canvas-studio.frosted-studio.editor-mode :is(.editor-panel-heading, .canvas-inspector, .canvas-asset-shelf, .conversation-panel-title) .ant-btn {
-  border-radius: 4px;
+  border-radius: 7px;
   box-shadow: none;
 }
 .canvas-studio.frosted-studio.editor-mode :is(.canvas-inspector, .canvas-asset-shelf, .editor-objects) .ant-input {
   font-size: 12px;
 }
 .canvas-studio.frosted-studio.editor-mode .canvas-property-tabs {
-  border: 1px solid var(--sc-border-subtle);
-  border-radius: 5px;
-  background: var(--sc-surface-subtle);
+  border: 0;
+  border-radius: 9px;
+  background: var(--sc-surface-muted);
 }
 .canvas-studio.frosted-studio.editor-mode .canvas-property-tabs .ant-btn[aria-pressed="true"] {
-  background: var(--sc-accent-soft);
-  color: var(--sc-accent);
-  box-shadow: none;
+  background: var(--sc-surface-elevated);
+  color: var(--sc-ink);
+  box-shadow: 0 1px 3px #0000000c;
 }
 .canvas-studio.frosted-studio.editor-mode :is(.object-tree-row, .object-tree-group-head) {
-  border-radius: 3px;
+  border-radius: 7px;
 }
 .canvas-studio.frosted-studio.editor-mode :is(.object-tree-row, .object-tree-group-head).is-selected {
   background: var(--sc-accent-soft);
@@ -14076,7 +14061,7 @@ body:has(.frosted-studio) .workbench-project-info .editor-save-state,body:has(.f
   box-shadow: none;
 }
 .canvas-studio.frosted-studio.editor-mode .conversation-panel-title {
-  background: var(--sc-surface-subtle);
+  background: var(--sc-surface-elevated);
   border-bottom: 1px solid var(--sc-border-subtle);
 }
 .canvas-studio.frosted-studio.editor-mode .conversation-panel-title strong {
@@ -14105,13 +14090,13 @@ body:has(.frosted-studio) .workbench-project-info .editor-save-state,body:has(.f
 }
 .canvas-studio.frosted-studio.editor-mode .adx-chat {
   --adx-shadow: none;
-  --adx-radius: 6px;
-  background: var(--sc-surface-subtle);
+  --adx-radius: 12px;
+  background: var(--sc-surface-elevated);
 }
 .canvas-studio.frosted-studio.editor-mode .adx-chat-topline {
   padding-top: 10px;
   padding-bottom: 8px;
-  border-bottom: 1px solid var(--sc-border-subtle);
+  border-bottom: 0;
   background: var(--sc-surface-elevated);
 }
 .canvas-studio.frosted-studio.editor-mode .adx-orb {
@@ -14201,14 +14186,14 @@ body:has(.frosted-studio) .workbench-project-info .editor-save-state,body:has(.f
 }
 .canvas-studio.frosted-studio :is(.ant-input-outlined,.ant-input-affix-wrapper-outlined,.ant-input-number-outlined):not(:disabled):not(.ant-input-disabled):not(.ant-input-affix-wrapper-disabled):not(.ant-input-number-disabled):hover,
 :is(.app-modal-panel,.ant-modal-content) :is(.ant-input-outlined,.ant-input-affix-wrapper-outlined,.ant-input-number-outlined):not(:disabled):not(.ant-input-disabled):not(.ant-input-affix-wrapper-disabled):not(.ant-input-number-disabled):hover {
-  border-color: var(--sc-border);
+  border-color: var(--sc-control-hover);
   background: var(--sc-surface-elevated)
 }
 .canvas-studio.frosted-studio :is(.ant-input-outlined:focus,.ant-input-affix-wrapper-focused,.ant-input-number-focused),
 :is(.app-modal-panel,.ant-modal-content) :is(.ant-input-outlined:focus,.ant-input-affix-wrapper-focused,.ant-input-number-focused):not(:disabled):not(.ant-input-disabled):not(.ant-input-affix-wrapper-disabled):not(.ant-input-number-disabled) {
-  border-color: color-mix(in srgb,var(--sc-accent) 55%,var(--sc-border));
+  border-color: var(--sc-accent);
   background: var(--sc-surface-elevated);
-  box-shadow: 0 0 0 2px color-mix(in srgb,var(--sc-accent) 9%,transparent)
+  box-shadow: 0 0 0 3px var(--sc-focus-ring)
 }
 .canvas-studio.frosted-studio :is(.ant-input-status-error,.ant-input-affix-wrapper-status-error),
 :is(.app-modal-panel,.ant-modal-content) :is(.ant-input-status-error,.ant-input-affix-wrapper-status-error) {
@@ -14299,16 +14284,7 @@ body:has(.frosted-studio) .workbench-project-info .editor-save-state,body:has(.f
   box-shadow: none;
   background: transparent
 }
-.canvas-studio.frosted-studio.editor-mode .adx-sender {
-  border-color: var(--sc-border-subtle);
-  border-radius: 10px;
-  background: var(--sc-surface-subtle);
-  box-shadow: none
-}
-.canvas-studio.frosted-studio.editor-mode .adx-sender:focus-within {
-  border-color: color-mix(in srgb,var(--sc-accent) 45%,var(--sc-border));
-  box-shadow: 0 0 0 2px color-mix(in srgb,var(--sc-accent) 7%,transparent)
-}
+
 @media(max-width:720px) {
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-creation {
   padding: 18px
@@ -14416,9 +14392,12 @@ body:has(.frosted-studio) .workbench-project-info .editor-save-state,body:has(.f
 .canvas-studio.frosted-studio .studio-sidebar-footer {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-top: 16px
+  gap: 6px;
+  padding-top: 12px;
+  border-top-color: var(--sc-border-subtle)
 }
+.canvas-studio.frosted-studio .studio-shell-nav .studio-nav-item > .studio-settings-update {display:inline-flex;position:absolute;right:10px;top:10px}
+@media(max-width:720px){.canvas-studio.frosted-studio .studio-shell-nav .studio-nav-item > .studio-settings-update {right:5px;top:7px}}
 .home-continue {
   display: flex;
   align-items: center;
@@ -14480,13 +14459,17 @@ body:has(.frosted-studio) .workbench-project-info .editor-save-state,body:has(.f
   min-width: 120px;
   max-width: 100%
 }
-/* The object bay is left; properties and assistant share the right bay. */
-.canvas-studio.frosted-studio.editor-mode .editor-workspace.inspector-expanded {
-  --dock-chat: var(--inspector-width,280px)
+/* Object properties share the left editing bay; the assistant stays independent on the right. */
+.canvas-studio.frosted-studio.editor-mode:not(.focus-scene) .editor-workspace.inspector-expanded {
+  --dock-panel: var(--inspector-width,280px)
+}
+.canvas-studio.frosted-studio.editor-mode .editor-workspace.inspector-expanded .canvas-tool-rail {
+  width: var(--inspector-width,280px);
+  max-width: 100%
 }
 .canvas-studio.frosted-studio.editor-mode .editor-workspace .canvas-inspector {
   position: absolute;
-  inset: 60px 0 0 auto;
+  inset: 104px auto 0 0;
   width: var(--inspector-width,280px);
   max-width: none;
   height: auto;
@@ -14494,27 +14477,19 @@ body:has(.frosted-studio) .workbench-project-info .editor-save-state,body:has(.f
   padding: 16px;
   overflow: auto;
   border: 0;
-  border-left: 1px solid var(--sc-border-subtle);
+  border-right: 1px solid var(--sc-border-subtle);
   border-radius: 0;
   background: var(--sc-surface-elevated);
   box-shadow: none;
   z-index: 26
 }
 .canvas-studio.frosted-studio.editor-mode .editor-workspace .canvas-inspector>header {
-  margin-top: 16px
+  margin-top: 0
 }
-.workbench-panel-tabs.ant-segmented {
-  width: 100%;
-  font-size: 14px
-}
-.workbench-panel-tabs .ant-segmented-group {
-  width: 100%;
-  display: flex
-}
-.workbench-panel-tabs .ant-segmented-item {
-  flex: 1;
-  text-align: center
-}
+.canvas-inspector-object {display:flex;align-items:center;gap:8px;overflow-wrap:anywhere;font-size:13px;color:var(--sc-ink)}
+.canvas-inspector-object svg {flex:none;width:16px;height:16px;color:var(--sc-ink-muted)}
+.conversation-panel-title>strong {display:flex;align-items:center;gap:8px}
+.conversation-panel-title>strong svg {width:16px;height:16px;color:var(--sc-accent)}
 .panel-resizer {
   position: absolute;
   top: 0;
@@ -14601,7 +14576,11 @@ body:has(.frosted-studio) .workbench-project-info .editor-save-state,body:has(.f
 .canvas-studio.frosted-studio .workbench-view-controls .viewport-bottom-bar .ant-btn {
   width: auto;
   height: 32px;
-  padding: 0 8px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
 }
 .canvas-studio.frosted-studio .workbench-view-controls .selection-action-trigger { display: none; }
 @media (max-width: 900px) {
@@ -14627,3 +14606,21 @@ body:has(.frosted-studio) .workbench-project-info .editor-save-state,body:has(.f
 .canvas-studio.editor-mode .canvas-renderer-notice button { padding: 4px 8px; color: var(--sc-accent); border-radius: 6px; }
 .canvas-studio.editor-mode .canvas-software-preview > div { top: 148px; }
 .canvas-studio.editor-mode .canvas-software-preview > p:first-child { bottom: 76px; font-size: 12px; }
+
+@media(max-width:900px) {
+.canvas-studio.frosted-studio.editor-mode:not(.focus-scene) .editor-workspace.inspector-expanded {--dock-panel:0px}
+.canvas-studio.frosted-studio.editor-mode .editor-workspace.inspector-expanded .canvas-tool-rail {width:var(--inspector-width,280px);max-width:100%}
+.canvas-studio.frosted-studio.editor-mode .editor-workspace.assistant-expanded.inspector-expanded .conversation-region {
+  inset:calc(60px + (100% - 60px)*.46) 0 0 0!important;
+  width:auto!important;
+  border-left:0!important;
+  border-top:1px solid var(--sc-border-subtle)!important
+}
+.canvas-studio.frosted-studio.editor-mode .editor-workspace.assistant-expanded.inspector-expanded .canvas-inspector {bottom:calc((100% - 60px)*.54)}
+.canvas-studio.frosted-studio.editor-mode .editor-workspace.assistant-expanded.inspector-expanded .scene-region {right:0!important;bottom:calc((100% - 60px)*.54)!important}
+.canvas-studio.frosted-studio.editor-mode .editor-workspace.assistant-expanded.inspector-expanded .canvas-transform-tools {display:none}
+}
+
+.canvas-studio.frosted-studio .workbench-view-controls .viewport-bottom-bar .ant-btn:is(:hover,.ant-popover-open):not(:disabled) {background:var(--sc-surface-muted);color:var(--sc-ink)}
+.canvas-studio.frosted-studio .workbench-view-controls .viewport-bottom-bar .ant-btn[aria-expanded=true] {background:var(--sc-accent-soft);color:var(--sc-accent)}
+.quality-picker-option[aria-checked=true]::after,.studio-control-menu .studio-menu-item[aria-checked=true]::after {content:'✓';margin-left:auto;color:var(--sc-accent);font-size:13px;font-weight:600}

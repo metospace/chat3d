@@ -1,4 +1,4 @@
-import {ManualInteraction,type CompositionInteraction} from './manualInteraction';
+import {ManualInteraction,groundPointAt,type CompositionInteraction} from './manualInteraction';
 import {ContactShading} from './contactShading';
 import {AdaptiveRenderQuality,loadRenderQuality,normalizeRenderQuality,RENDER_TIERS,type RenderQuality} from './renderQuality';
 import {InstancedRender} from './instancedRender';
@@ -28,6 +28,15 @@ interface NodeResources {
 export class Viewport {
   private instancedRender:InstancedRender|null=null;
   private composition:ManualInteraction|null=null;
+  private assetDropPreview:ManualInteraction|null=null;
+  private assetDropNodes:SceneNode[]|null=null;
+  assetDropPoint(x:number,y:number,step:number){return groundPointAt(this.renderer.domElement,this.camera,x,y,step);}
+  previewAssetDrop(nodes:SceneNode[],x:number,y:number,step:number){
+    if(!this.assetDropPreview)this.assetDropPreview=new ManualInteraction(this.renderer.domElement,this.scene,this.camera,()=>this.nodeMap,()=>this.markDirty());
+    if(this.assetDropNodes!==nodes){this.assetDropNodes=nodes;this.assetDropPreview.set({mode:'orbit',nodes:[],placement:nodes,snapStep:step,onPlace:()=>{},onTransform:()=>{},onCancel:()=>this.clearAssetDropPreview()});}
+    return this.assetDropPreview.previewPlacementAt(x,y);
+  }
+  clearAssetDropPreview(){this.assetDropPreview?.dispose();this.assetDropPreview=null;this.assetDropNodes=null;this.renderer.domElement.style.cursor=this.composition?.placing||this.boxSelection?'crosshair':'';this.markDirty();}
   setComposition(config:CompositionInteraction|null){if(!this.composition)this.composition=new ManualInteraction(this.renderer.domElement,this.scene,this.camera,()=>this.nodeMap,()=>{this.selectionHelpers.forEach(h=>h.update());this.markDirty();});this.composition.set(config);}
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
@@ -586,7 +595,7 @@ export class Viewport {
   }
 
   dispose(): void {
-    this.composition?.dispose();this.composition=null;
+    this.clearAssetDropPreview();this.composition?.dispose();this.composition=null;
     this.cancelPointerGesture?.();window.removeEventListener('keydown',this.escapeSelection);
     if (this.rafHandle !== null) cancelAnimationFrame(this.rafHandle);
     this.resizeObserver?.disconnect();

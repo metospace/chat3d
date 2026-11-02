@@ -1,3 +1,4 @@
+import {ProForm,ProFormText,ProFormTextArea} from '@ant-design/pro-components';
 import {useEffect,useRef,useState} from 'react';
 import {Button,Input} from 'antd';
 import {CheckIcon,ChevronDownIcon,MagnifyingGlassIcon,PlusIcon} from '@radix-ui/react-icons';
@@ -72,19 +73,21 @@ export function CategoryManager({onClose,encountered=[],kind='asset',onCreated,v
 }
 export function LibraryMetadataDialog({kind,initial,title,submitLabel,onSubmit,onClose,onBusyChange}:{kind:'asset'|'scene';initial:LibraryMetadata;title:string;submitLabel:string;onSubmit:(metadata:LibraryMetadata)=>Promise<void>;onClose:()=>void;onBusyChange?:(busy:boolean)=>void}){
  const [name,setName]=useState(initial.name),[category,setCategory]=useState(initial.category??(kind==='asset'?'其他':'')),[description,setDescription]=useState(initial.description??''),[manage,setManage]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');const lock=useRef(false),alive=useRef(true);
+ const formInitial=useRef({name:initial.name,description:initial.description??''});
  const {categories,error:categoryError,ready}=useLibraryCategories(category?[category]:[],kind);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
  async function submit(){if(lock.current)return;setError('');let metadata:LibraryMetadata;try{metadata=normalizeLibraryMetadata({name,category,description},kind);}catch(e){setError((e as Error).message);return;}lock.current=true;setBusy(true);onBusyChange?.(true);try{await onSubmit(metadata);if(alive.current)onClose();}catch(e){if(alive.current)setError(e instanceof Error?e.message:'保存失败');}finally{lock.current=false;onBusyChange?.(false);if(alive.current)setBusy(false);}}
  return <><PortalDialog label={title} onClose={onClose} closable={!busy} width={480} className="library-metadata-dialog">
   <h2 className="app-modal-title">{title}</h2>
   <p className="app-modal-description">{kind==='asset'?'整理资产名称、分类和说明。模型尺寸、版本与质量状态由实际数据保留。':'整理场景名称与说明，分类可选。场景中的资产引用保持固定版本。'}</p>
-  <form onSubmit={e=>{e.preventDefault();void submit();}}>
-   <label>{kind==='asset'?'资产名称':'场景名称'}<Input autoFocus aria-label={kind==='asset'?'资产名称':'场景名称'} value={name} maxLength={80} disabled={busy} onChange={e=>setName(e.target.value)} placeholder={kind==='asset'?'例如：蓝色网格托盘':'例如：原料仓库'}/></label>
+  <ProForm initialValues={formInitial.current} submitter={false} onValuesChange={values=>{if(values.name!==undefined)setName(values.name);if(values.description!==undefined)setDescription(values.description);}} onFinish={async()=>{await submit();}}>
+   <ProFormText name="name" label={kind==='asset'?'资产名称':'场景名称'} fieldProps={{autoFocus:true,'aria-label':kind==='asset'?'资产名称':'场景名称',maxLength:80,disabled:busy}} placeholder={kind==='asset'?'例如：蓝色网格托盘':'例如：原料仓库'}/>
+
    <div className="library-category-field"><label>{kind==='scene'?'分类（可选）':'分类'}<CategoryPicker label={kind==='asset'?'资产分类':'场景分类'} value={category} onChange={setCategory} categories={categories} optional={kind==='scene'} disabled={busy||!ready}/></label><Button type="text" disabled={busy||!ready} onClick={()=>setManage(true)}>管理分类</Button></div>
-   <label>说明（可选）<Input.TextArea aria-label="库内容说明" value={description} maxLength={1000} rows={3} disabled={busy} onChange={e=>setDescription(e.target.value)} placeholder={kind==='asset'?'用途、来源或需要注意的事项':'场景用途或备注'}/></label>
+   <ProFormTextArea name="description" label="说明" fieldProps={{'aria-label':'库内容说明',maxLength:500,disabled:busy,rows:3}} placeholder="用途、结构或需要保留的细节"/>
    {(error||categoryError)&&<p role="alert" className="resource-error">{error||categoryError}</p>}
    <div className="library-dialog-actions"><Button htmlType="button" disabled={busy} onClick={onClose}>取消</Button><Button type="primary" htmlType="submit" disabled={busy||!ready}>{busy?'正在保存…':submitLabel}</Button></div>
-  </form>
+  </ProForm>
  </PortalDialog>{manage&&<CategoryManager kind={kind} onCreated={c=>{setCategory(c.value);setManage(false);}} encountered={category?[category]:[]} onClose={()=>setManage(false)}/>}</>;
 }
 export function LibraryProjectSaveDialog({onClose,onSaved,onBusyChange}:{onClose:()=>void;onSaved:(notice:string)=>void;onBusyChange:(busy:boolean)=>void}){

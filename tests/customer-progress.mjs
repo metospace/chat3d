@@ -29,5 +29,15 @@ try{
  await test('AI operations are excluded from manual history and empty text does not point at absent history',async()=>{const entry=store.getState().past.at(-1);store.setState({past:[{...entry,source:'ai'}],future:[],messages:[]});const ui=render(React.createElement(TaskPanel,{onConversation:()=>{}}));assert.equal(ui.queryByLabelText('手动修改记录'),null);assert.ok(!ui.container.textContent.includes('上方记录'));});
  const {RunTrace}=await server.ssrLoadModule('/src/ui/RunTrace.tsx');
  await test('historical trace preserves ended semantics and omits raw details',async()=>{const ui=render(React.createElement(RunTrace,{run:{status:'stopped',mode:'pi',startedAt:1000,endedAt:4000,activity},now:5000}));assert.ok(ui.getByText('已停止'));assert.ok(ui.getByText('未完成'));assert.ok(!ui.container.textContent.includes('read_saved_asset'));assert.ok(!ui.container.textContent.includes('secret_private_tool'));});
+ await test('partial and unverified previews do not display processing completed',async()=>{
+  const {runStatusLabel}=await server.ssrLoadModule('/src/domain/runStatusLabel.ts');assert.equal(runStatusLabel({status:'preview',startedAt:1},{...activity,outcome:'partial'}),'未完成，已保留草稿');assert.equal(runStatusLabel({status:'preview',startedAt:1},{...activity,outcome:'budget-exhausted'}),'未完成，已保留草稿');assert.equal(runStatusLabel({status:'preview',startedAt:1},{...activity,detailAcceptance:{status:'pending'}}),'预览已生成，待核对');
+  const {RunTrace:ChatRunTrace}=await server.ssrLoadModule('/src/ui/chat/RunTrace.tsx');const a={...activity,outcome:'partial',explanations:[{text:'仍需完成完整取放动作'}]};const ui=render(React.createElement(ChatRunTrace,{run:{status:'preview',startedAt:1,activity:a}}));assert.ok(ui.getByText('未完成，已保留草稿'));assert.equal(ui.queryByText('处理完成'),null);
+ });
+ await test('task panel distinguishes unfinished drafts from successful model delivery',async()=>{
+  store.setState({aiStatus:'previewing',pendingBatch:{requestId:'partial',summary:'尚未恢复完整搬运',taskStatus:'partial',incomplete:true,operations:[]},pendingResult:null,lastRun:{...activity,outcome:'partial'},messages:[]});const ui=render(React.createElement(TaskPanel,{onConversation:()=>{}}));assert.ok(ui.getByRole('heading',{name:'未完成，已保留阶段草稿'}));assert.ok(ui.getByText('当前任务尚未完成，可继续处理剩余问题；也可保留或放弃阶段结果。'));
+ });
+ await test('completion gate separates explicit defects and missing functions from unknown evidence',async()=>{
+  const {confirmedCompletionIssues:issues}=await server.ssrLoadModule('/src/domain/completionIssues.ts');assert.deepEqual(issues(['材质尚未验收','原图模糊，无法确认文字是否错误','缺少材质证据','整车同步及穿插尚未完整验证']),[]);assert.deepEqual(issues(['货叉轨道未恢复','整车没有运动轨道','车身仍受遮挡']),['货叉轨道未恢复','整车没有运动轨道','车身仍受遮挡']);assert.deepEqual(issues(['主体偏高'],true),['主体偏高']);assert.deepEqual(issues(['参考图模糊','材质尚未验收'],true),[]);
+ });
  console.log(passed+' customer progress checks passed');
 }finally{cleanup();await server.close();dom.window.close()}
