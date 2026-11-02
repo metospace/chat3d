@@ -175,7 +175,7 @@ Click-Control '资产库'
  Shot 'ui-backup-saved';Dump-Controls 'ui-backup-controls'
  $checks.Add(@{name='real backup button writes two distinct valid JSON files';pass=$true;files=$saved})
  [System.Windows.Forms.SendKeys]::SendWait('{ESC}');Start-Sleep -Seconds 1
- Click-Control '连接模型' -NamePrefixMatch
+ Click-Control '连接并选择模型'
  Set-Input 'API 根地址' 'https://smoke-test.invalid/v1'
  Set-Input 'API Key' 'smoke-test-not-a-secret'
  Click-Control '服务不提供列表？手动填写模型名'
