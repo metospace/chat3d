@@ -24,12 +24,14 @@ function Shot($name) {
 function Find-Control($name,[switch]$AllowDisabled,[switch]$NamePrefixMatch) {
  $condition=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$name)
  for($i=0;$i -lt 30;$i++) {
-  $found=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)
+  $all=$window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+  $matches=@($all | Where-Object { $_.Current.Name -eq $name })
+  $preferred=$matches | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -or $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::MenuItem -or $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Hyperlink } | Select-Object -First 1
+  $found= if($preferred){$preferred} else { $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition) }
   if($found -and ($AllowDisabled -or $found.Current.IsEnabled)){return $found}
   if($NamePrefixMatch) {
-   $all=$window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
    $found=$all | Where-Object {
-    $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and
+    ($_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -or $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::MenuItem) -and
     $_.Current.Name.StartsWith($name) -and
     ($AllowDisabled -or $_.Current.IsEnabled)
    } | Select-Object -First 1
@@ -52,11 +54,29 @@ function Click-Control($name,[switch]$NamePrefixMatch) {
  Start-Sleep -Milliseconds 700
 }
 function Set-Input($name,$value) {
+ Write-Host "Set UI input: $name"
  $all=$window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
- $edit=$all | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit -and $_.Current.Name.StartsWith($name) } | Select-Object -First 1
+ $edit=$all | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit -and ($_.Current.Name -eq $name -or $_.Current.Name.StartsWith($name)) } | Select-Object -First 1
  if(!$edit){throw "Input missing: $name"}
- $edit.SetFocus();Start-Sleep -Milliseconds 200
- [System.Windows.Forms.SendKeys]::SendWait('^a');[System.Windows.Forms.SendKeys]::SendWait($value);[System.Windows.Forms.SendKeys]::SendWait('{TAB}');Start-Sleep -Milliseconds 500
+ try { $point=$edit.GetClickablePoint(); [SmokeMouse]::SetCursorPos([int]$point.X,[int]$point.Y) | Out-Null; Start-Sleep -Milliseconds 100; [SmokeMouse]::mouse_event(2,0,0,0,[UIntPtr]::Zero); Start-Sleep -Milliseconds 80; [SmokeMouse]::mouse_event(4,0,0,0,[UIntPtr]::Zero); Start-Sleep -Milliseconds 150 } catch { $edit.SetFocus(); Start-Sleep -Milliseconds 200 }
+ [System.Windows.Forms.SendKeys]::SendWait('^a'); Start-Sleep -Milliseconds 80
+ [System.Windows.Forms.SendKeys]::SendWait($value); Start-Sleep -Milliseconds 250
+ try {
+  $vp=$edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+  if($vp.Current.Value -ne $value){ $vp.SetValue($value); Start-Sleep -Milliseconds 200; [System.Windows.Forms.SendKeys]::SendWait('{END}'); [System.Windows.Forms.SendKeys]::SendWait(' '); [System.Windows.Forms.SendKeys]::SendWait('{BACKSPACE}'); Start-Sleep -Milliseconds 150 }
+ } catch {}
+ [System.Windows.Forms.SendKeys]::SendWait('{TAB}'); Start-Sleep -Milliseconds 500
+}
+function Wait-ControlEnabled($name,$timeoutSec=20) {
+ $deadline=(Get-Date).AddSeconds($timeoutSec)
+ while((Get-Date) -lt $deadline) {
+  $all=$window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+  $hit=$all | Where-Object { $_.Current.Name -eq $name -and $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $_.Current.IsEnabled } | Select-Object -First 1
+  if($hit){return $hit}
+  Start-Sleep -Milliseconds 400
+ }
+ Dump-Controls 'ui-wait-enabled-controls'
+ throw "UI control stayed disabled: $name"
 }
 function Dump-Controls($name) {
  $all=$window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
@@ -125,11 +145,12 @@ Click-Control '资产库'
  Set-Input 'API Key' 'smoke-test-not-a-secret'
  Click-Control '服务不提供列表？手动填写模型名'
  Set-Input '手动模型名' 'smoke-test'
+ Wait-ControlEnabled '保存配置' 25 | Out-Null
  Click-Control '保存配置'
  Set-Input '建模指令' 'Create one simple box for the synthetic failure test'
  Click-Control '发送'
  Start-Sleep -Seconds 8
- Click-Control '任务记录'
+ Click-Control '本项目任务记录'
  Click-Control '问题排查'
  Find-Control '下载脱敏诊断记录' | Out-Null
  $diagnosticBefore=@(Get-ChildItem $folder -Filter 'scenivo-diagnostics-*.json' -ErrorAction SilentlyContinue | ForEach-Object FullName)

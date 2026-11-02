@@ -40,7 +40,7 @@ try {
  assert.equal(ui.queryByText('服务不提供列表？手动填写模型名'),null);assert.equal(ui.getByRole('button',{name:'保存配置'}).disabled,true);console.log('PASS origin rejection does not suggest manual bypass');passed++;cleanup();
  handler=async()=>new Response('missing',{status:404});ui=mount();credentials(ui);
  await waitFor(()=>assert.ok(ui.getByRole('alert')));fireEvent.click(ui.getByText('服务不提供列表？手动填写模型名'));
- fireEvent.change(ui.getByLabelText('手动模型名（请以服务文档为准）'),{target:{value:'custom-model'}});assert.equal(ui.getByRole('button',{name:'保存配置'}).disabled,false);console.log('PASS unsupported model list offers explicit manual fallback');passed++;cleanup();
+ fireEvent.change(ui.getByRole('textbox',{name:'手动模型名'}),{target:{value:'custom-model'}});assert.equal(ui.getByRole('button',{name:'保存配置'}).disabled,false);console.log('PASS unsupported model list offers explicit manual fallback');passed++;cleanup();
  let releaseOld;handler=()=>new Promise(resolve=>{releaseOld=resolve});ui=mount();credentials(ui);await waitFor(()=>assert.ok(releaseOld));
  handler=async()=>new Response(JSON.stringify({data:[{id:'new-model'}]}));fireEvent.change(ui.getByLabelText('API 根地址',{exact:false}),{target:{value:'https://new-provider.test/v1'}});fireEvent.change(ui.getByLabelText('API Key',{exact:true}),{target:{value:'new-provider-key'}});fireEvent.blur(ui.getByLabelText('API 根地址',{exact:false}));
  await waitFor(()=>assert.ok(selected(ui,'选择模型').includes('new-model')));
