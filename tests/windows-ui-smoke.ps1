@@ -87,6 +87,41 @@ function Assert-ControlMissing($name) {
  $hit=$all | Where-Object { $_.Current.Name -eq $name } | Select-Object -First 1
  if($hit){throw "UI control unexpectedly present: $name ($($hit.Current.ControlType.ProgrammaticName))"}
 }
+function Wait-ControlAbsent($name,$timeoutSec=20) {
+ $deadline=(Get-Date).AddSeconds($timeoutSec)
+ while((Get-Date) -lt $deadline) {
+  $all=$window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+  $hit=$all | Where-Object { $_.Current.Name -eq $name } | Select-Object -First 1
+  if(!$hit){return}
+  Start-Sleep -Milliseconds 400
+ }
+ Dump-Controls 'ui-wait-absent-controls'
+ throw "UI control stayed present: $name"
+}
+function Invoke-EnabledButton($name,$timeoutSec=25) {
+ Write-Host "Invoke UI: $name"
+ $element=Wait-ControlEnabled $name $timeoutSec
+ try {
+  $pattern=$element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+  $pattern.Invoke()
+  Start-Sleep -Milliseconds 800
+  return
+ } catch {
+  Write-Host "InvokePattern unavailable for $name; falling back to click"
+ }
+ Click-Control $name
+}
+function Wait-ControlPresent($name,$timeoutSec=45) {
+ $deadline=(Get-Date).AddSeconds($timeoutSec)
+ while((Get-Date) -lt $deadline) {
+  $all=$window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+  $hit=$all | Where-Object { $_.Current.Name -eq $name -and ($_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -or $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Text -or $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Hyperlink -or $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Group -or $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Custom -or $_.Current.IsEnabled) } | Select-Object -First 1
+  if($hit){return $hit}
+  Start-Sleep -Milliseconds 500
+ }
+ Dump-Controls 'ui-wait-present-controls'
+ throw "UI control not found within timeout: $name"
+}
 try {
  # Prove the isolated server is reachable before testing the installed UI.
  $fixtureLogin=Invoke-RestMethod -Uri ($teamBase + '/api/team/login') -Method Post -ContentType 'application/json' -Body (@{name='smoke-bob';password='isolated-smoke-password-b'} | ConvertTo-Json)
@@ -145,12 +180,14 @@ Click-Control '资产库'
  Set-Input 'API Key' 'smoke-test-not-a-secret'
  Click-Control '服务不提供列表？手动填写模型名'
  Set-Input '手动模型名' 'smoke-test'
- Wait-ControlEnabled '保存配置' 25 | Out-Null
- Click-Control '保存配置'
+ Invoke-EnabledButton '保存配置' 25
+ Wait-ControlAbsent '连接模型，开始创作' 25
+ Assert-ControlMissing '连接模型，开始创作'
  Set-Input '建模指令' 'Create one simple box for the synthetic failure test'
  Click-Control '发送'
- Start-Sleep -Seconds 8
+ Start-Sleep -Seconds 3
  Click-Control '本项目任务记录'
+ Wait-ControlPresent '问题排查' 60 | Out-Null
  Click-Control '问题排查'
  Find-Control '下载脱敏诊断记录' | Out-Null
  $diagnosticBefore=@(Get-ChildItem $folder -Filter 'scenivo-diagnostics-*.json' -ErrorAction SilentlyContinue | ForEach-Object FullName)

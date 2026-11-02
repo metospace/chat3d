@@ -46,14 +46,14 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     lastCredentials.current = credentialId;
     const id = ++sequence.current;
     controller.current?.abort(); const c = new AbortController(); controller.current = c;
-    setFetching(true); setError(''); setResult(null); setModels(null); setManual(false);
+    setFetching(true); setError(''); setResult(null); setModels(null);
     const timeout = window.setTimeout(() => c.abort(), 20000);
     try {
       const r = await fetchModels({baseURL:baseURL.trim(),apiKey:apiKey.trim(),model:'',useMock:false}, c.signal);
       if (id !== sequence.current) return;
       setModels(r.models);
-      if (r.error) { setError(c.signal.aborted ? '获取模型超时，请检查接口或稍后重试' : r.error); setModel(''); }
-      else { setModel((previous) => r.models.includes(previous) ? previous : (r.models.length === 1 ? r.models[0] : '')); }
+      if (r.error) { setError(c.signal.aborted ? '获取模型超时，请检查接口或稍后重试' : r.error); }
+      else { setManual(false); setModel((previous) => r.models.includes(previous) ? previous : (r.models.length === 1 ? r.models[0] : '')); }
     } catch (e) { if (id === sequence.current) setError(e instanceof Error ? e.message : '获取模型失败'); }
     finally { window.clearTimeout(timeout); if (id === sequence.current) setFetching(false); }
   };
