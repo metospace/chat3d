@@ -25,7 +25,7 @@ let completed=false;
 try{
  await page.addInitScript(()=>localStorage.setItem('chat3d.renderQuality.v1','fast'));await page.route('**/*',r=>r.request().url().startsWith(base)||r.request().url().startsWith('data:')||r.request().url().startsWith('blob:')?r.continue():r.abort());
  await page.goto(base);await page.waitForFunction(async()=>(await import('/src/workspace.ts')).useWorkspaceStore.getState().ready);
- await page.getByRole('button',{name:'创建空白资产',exact:true}).click();await page.getByRole('textbox',{name:'建模指令'}).waitFor();
+ await page.getByRole('button',{name:'新建项目',exact:true}).click(); await page.getByRole('menuitem',{name:'新建空白资产',exact:true}).click();await page.getByRole('textbox',{name:'建模指令'}).waitFor();
  await page.evaluate(async()=>{const w=await import('/src/workspace.ts');w.renameSession(w.useWorkspaceStore.getState().activeId,'模块化柔性装配工作站与长名称工业设备托盘定位机构参考方案');});
  await page.evaluate(async()=>{const s=(await import('/src/store.ts')).useEditorStore;const {applyBatch}=await import('/src/domain/commands.ts');s.setState({doc:applyBatch(s.getState().doc,{operations:[{op:'createPrimitive',name:'模块化工作台底座',parentId:null,materialId:'mat_blue',geometry:{type:'box',params:{width:2.4,height:.2,depth:1.2}},transform:{position:[0,.1,0],rotationQuaternion:[0,0,0,1],scale:[1,1,1]}}]}).doc});});
  for(const theme of ['light','dark'])for(const width of [1920,1440,1280])for(const panel of ['narrow','wide']){

@@ -3,8 +3,8 @@ import {modelConfigStorageError} from '../ai/modelConfigStorage';
 import {normalizeTaskBudget,TASK_BUDGET_PRESETS} from '../ai/taskBudget';
 import {SiteAccessRecovery} from './SiteAccessRecovery';
 import {AGENT_LIMITS} from '../ai/agentPolicy';
-import {Button,Checkbox,Input,InputNumber,Select} from 'antd';
-import {Cross1Icon} from '@radix-ui/react-icons';
+import {Button,Checkbox,Input,InputNumber,Select,Tooltip} from 'antd';
+import {Cross1Icon,ReloadIcon,InfoCircledIcon} from '@radix-ui/react-icons';
 import { useEffect, useRef, useState } from 'react';
 import { ModelConfig, fetchModels, testConnection } from '../ai/provider';
 import { useEditorStore } from '../store';
@@ -16,11 +16,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [rememberApiKey,setRememberApiKey]=useState(config?.rememberApiKey===true);
   const [model, setModel] = useState(config?.model ?? '');
   const [agentMode, setAgentMode] = useState<'pi'|'single'>(config?.agentMode ?? 'pi');
+  const [reasoningEffort,setReasoningEffort]=useState<NonNullable<ModelConfig['reasoningEffort']>|'default'>(config?.reasoningEffort??'default');
   const [taskBudget,setTaskBudget]=useState(()=>normalizeTaskBudget(config?.taskBudget));
   const [parallelDrafts,setParallelDrafts]=useState(config?.parallelDrafts===true);
   const [stream, setStream] = useState(config?.agentMode === 'single' ? config.stream !== false : true);
   const [models, setModels] = useState<string[] | null>(null);
-  const [query, setQuery] = useState('');
   const [manual, setManual] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [error, setError] = useState(modelConfigStorageError()??'');
@@ -36,7 +36,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   useEffect(() => () => { sequence.current++; controller.current?.abort(); }, []);
   const invalidate = () => {
     sequence.current++; controller.current?.abort(); setFetching(false); setTesting(false);
-    setModels(null); setModel(''); setError(''); setResult(null); setManual(false); setQuery('');
+    setModels(null); setModel(''); setError(''); setResult(null); setManual(false);
     lastCredentials.current = '';
   };
   const load = async (force = true) => {
@@ -65,39 +65,32 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     const timeout = window.setTimeout(() => c.abort(), 20000);
     setTesting(true); setResult(null);
     try {
-      const r = await testConnection({baseURL:baseURL.trim(),apiKey:apiKey.trim(),model:model.trim(),useMock:false}, c.signal);
+      const r = await testConnection({baseURL:baseURL.trim(),apiKey:apiKey.trim(),model:model.trim(),useMock:false,reasoningEffort:reasoningEffort==='default'?undefined:reasoningEffort}, c.signal);
       if (id === sequence.current) setResult(c.signal.aborted ? {ok:false,text:'连接测试超时，请检查服务响应后重试'} : r);
     } finally { window.clearTimeout(timeout); if (id === sequence.current) setTesting(false); }
   };
   const save = () => {
     if (!valid) return;
-    const cfg: ModelConfig = {rememberApiKey,generationStyle:useEditorStore.getState().aiConfig?.generationStyle??'realistic',generationQuality:useEditorStore.getState().aiConfig?.generationQuality==='fast'?'fast':'fine',taskBudget:normalizeTaskBudget(taskBudget),baseURL:baseURL.trim(),apiKey:apiKey.trim(),model:model.trim(),useMock:false,stream,agentMode,parallelDrafts:agentMode==='pi'&&parallelDrafts};
+    const cfg: ModelConfig = {rememberApiKey,generationStyle:useEditorStore.getState().aiConfig?.generationStyle??'realistic',generationQuality:useEditorStore.getState().aiConfig?.generationQuality==='fast'?'fast':'fine',reasoningEffort:reasoningEffort==='default'?undefined:reasoningEffort,taskBudget:normalizeTaskBudget(taskBudget),baseURL:baseURL.trim(),apiKey:apiKey.trim(),model:model.trim(),useMock:false,stream,agentMode,parallelDrafts:agentMode==='pi'&&parallelDrafts};
     useEditorStore.getState().setAiConfig(cfg);
     const storageFailure=modelConfigStorageError();
     if(storageFailure){setError(storageFailure);return;}
     onClose();
   };
-  const shown = (models ?? []).filter((id) => id.toLowerCase().includes(query.toLowerCase()));
   const originBlocked = error.includes('origin not allowed');
-  return <Modal open onCancel={onClose} footer={null} closable={false} width={680} mask={{closable:false}} className="settings-dialog model-settings-module" title={<div className="settings-dialog-head"><h2 id="model-settings-title" className="settings-dialog-title">连接模型服务</h2><Button type="text" aria-label="关闭模型配置" onClick={onClose} icon={<Cross1Icon/>}/></div>}>
+  return <Modal open onCancel={onClose} footer={null} closable={false} width={560} mask={{closable:false}} className="settings-dialog model-settings-module" title={<div className="settings-dialog-head"><h2 id="model-settings-title" className="settings-dialog-title">连接模型服务</h2><Button type="text" aria-label="关闭模型配置" onClick={onClose} icon={<Cross1Icon/>}/></div>}>
       <div className="settings-dialog-body">
-        <p className="settings-lede">1. 填写接口和密钥　2. 获取并选择模型　3. 保存配置（可先测试连接）</p>
-        <label className="settings-field"><span>API 根地址</span><Input className={inputClass} type="url" value={baseURL} onChange={(e)=>{invalidate();setBaseURL(e.target.value);setApiKey('')}} onBlur={()=>void load(false)} placeholder="https://你的服务/v1" /><span className="settings-hint">填写到 /v1 或服务提供的 API 根路径，不要包含 /models 或 /chat/completions。更换地址后请重新输入对应密钥，避免将旧密钥发送给新服务</span></label>
-        <label className="settings-field"><span>API Key</span><Input.Password className={inputClass} autoComplete="off" value={apiKey} onChange={(e)=>{invalidate();setApiKey(e.target.value)}} onBlur={()=>void load(false)} placeholder="填写服务提供的密钥" /></label>
-        <Checkbox checked={rememberApiKey} onChange={e=>setRememberApiKey(e.target.checked)}><span>在此设备记住密钥</span></Checkbox>
-        <p className="settings-hint">默认仅本次会话使用，刷新或关闭后需重新输入。勾选后会以明文保存在本机浏览器中，请仅在可信设备使用。</p>
+        <label className="settings-field"><span>API 根地址 <Tooltip title="填写 /v1 或服务提供的 API 根路径，不包含 /models 或 /chat/completions。更换地址会清空密钥。"><InfoCircledIcon aria-label="API 地址说明" tabIndex={0}/></Tooltip></span><Input aria-label="API 根地址" className={inputClass} type="url" value={baseURL} onChange={(e)=>{invalidate();setBaseURL(e.target.value);setApiKey('')}} onBlur={()=>void load(false)} placeholder="https://你的服务/v1" /></label>
+        <label className="settings-field"><span>API Key</span><Input.Password aria-label="API Key" className={inputClass} autoComplete="off" value={apiKey} onChange={(e)=>{invalidate();setApiKey(e.target.value)}} onBlur={()=>void load(false)} placeholder="填写服务提供的密钥" /></label>
+        <div className="settings-key-retention"><Checkbox checked={rememberApiKey} onChange={e=>setRememberApiKey(e.target.checked)}><span>在此设备记住密钥</span></Checkbox><span className="settings-hint">{rememberApiKey?'明文保存在本机，仅用于可信设备。':'仅本次会话使用。'}</span></div>
         <div className="settings-stack">
-          <Button type="primary" block onClick={()=>void load()} disabled={!ready || fetching} className="settings-fetch">{fetching ? '正在获取模型列表…' : models?.length ? '重新获取模型列表' : '获取可用模型'}</Button>
+          <div className="settings-model-heading"><label id="model-choice-label" htmlFor={manual?'manual-model':'model-choice'}>模型{models?.length?` · ${models.length} 个可选`:''}</label><Button type="text" size="small" onClick={()=>void load()} disabled={!ready || fetching} loading={fetching} className="settings-fetch" icon={<ReloadIcon/>}>{fetching?'获取中…':models?.length?'刷新列表':'获取模型'}</Button></div>
+          {manual?<Input id="manual-model" aria-label="手动模型名" className={inputClass} value={model} onChange={(e)=>{sequence.current++;controller.current?.abort();setTesting(false);setResult(null);setModel(e.target.value)}} placeholder="服务实际支持的模型 ID" />:<Select id="model-choice" aria-label="选择模型" className="settings-select" value={model||undefined} placeholder={fetching?'正在获取模型…':'选择或搜索模型'} showSearch={{optionFilterProp:'label'}} loading={fetching} disabled={!models?.length||fetching} options={[...(model&&!models?.includes(model)?[{value:model,label:model}]:[]),...(models??[]).map(id=>({value:id,label:id}))]} onChange={value=>{sequence.current++;controller.current?.abort();setTesting(false);setModel(value);setResult(null)}} notFoundContent="没有匹配的模型"/>}
           <SiteAccessRecovery error={error}/>
           {error && <div role="alert" className="settings-error">{error}</div>}
-          {!!models?.length && !manual && <>
-            <label className="settings-field"><span>筛选模型（共 {models.length} 个）</span><Input className={inputClass} value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="输入名称筛选" /></label>
-            <label className="settings-field"><span>选择模型</span><Select aria-label="选择模型" className="settings-select" value={model||undefined} placeholder="请选择一个模型" showSearch options={[...(model&&!shown.includes(model)?[{value:model,label:`${model}（当前选择）`}]:[]),...shown.map(id=>({value:id,label:id}))]} onChange={value=>{sequence.current++;controller.current?.abort();setTesting(false);setModel(value);setResult(null)}}/></label>
-            {shown.length === 0 && <p className="settings-lede">没有匹配的模型，请修改筛选词</p>}
-          </>}
           {!fetching && models !== null && !models.length && !originBlocked && !manual && <Button type="link" className="settings-manual" onClick={()=>setManual(true)}>服务不提供列表？手动填写模型名</Button>}
-          {manual && <label className="settings-field"><span>手动模型名（请以服务文档为准）</span><input aria-label="手动模型名" className={inputClass} value={model} onChange={(e)=>{sequence.current++;controller.current?.abort();setTesting(false);setResult(null);setModel(e.target.value)}} placeholder="服务实际支持的模型 ID" /></label>}
         </div>
+        <label className="settings-field"><span>推理强度 <Tooltip title="默认不传参数，由服务决定。低 / 中 / 高 / 超高需要模型与网关支持 reasoning_effort，可能影响耗时与费用；不支持时请选择默认。也可在模型选择面板中直接切换。"><InfoCircledIcon aria-label="推理强度说明" tabIndex={0}/></Tooltip></span><Select aria-label="推理强度" className="settings-select" value={reasoningEffort} onChange={value=>{sequence.current++;controller.current?.abort();setFetching(false);setTesting(false);setResult(null);setReasoningEffort(value)}} options={[{value:'default',label:'默认 · 跟随服务'},{value:'low',label:'低'},{value:'medium',label:'中'},{value:'high',label:'高'},{value:'xhigh',label:'超高'}]}/></label>
         <details className="settings-advanced"><summary>高级设置 · 执行方式与流式输出</summary><div className="settings-stack">        <label className="settings-field"><span>建模执行方式</span><Select aria-label="建模执行方式" className="settings-select" value={agentMode} onChange={value=>{setAgentMode(value);if(value==='pi')setStream(true);}} options={[{value:'pi',label:'连续建模（推荐）'},{value:'single',label:'单次生成（兼容模式）'}]}/><span className="settings-hint">连续建模需要模型支持图片、工具调用与流式输出；在任务预算内有有效进展就继续，到限后保留未验收草稿。连续 {AGENT_LIMITS.noProgressTurns} 轮无进展或 {AGENT_LIMITS.consecutiveErrorTurns} 轮工具失败且无进展会暂停；连续 {AGENT_LIMITS.idleTimeoutMs/60000} 分钟无活动会停止。每轮最多 {AGENT_LIMITS.outputPerTurn} 输出 Token。会将场景截图发送至你配置的同一接口，实际费用以网关为准。</span></label>
         <fieldset disabled={agentMode!=='pi'} className="settings-budget"><legend>每次建模任务预算</legend>
           <div className="settings-presets" role="group" aria-label="预算预设">{([['small','小改动'],['standard','常规建模'],['extended','复杂场景']] as const).map(([key,label])=><Button key={key} type="default" aria-pressed={taskBudget.maxMinutes===TASK_BUDGET_PRESETS[key].maxMinutes&&taskBudget.maxRounds===TASK_BUDGET_PRESETS[key].maxRounds&&taskBudget.maxReportedTokens===TASK_BUDGET_PRESETS[key].maxReportedTokens} onClick={()=>setTaskBudget({...TASK_BUDGET_PRESETS[key]})}>{label}</Button>)}</div>

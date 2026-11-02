@@ -181,8 +181,8 @@ Click-Control '资产库'
  Click-Control '服务不提供列表？手动填写模型名'
  Set-Input '手动模型名' 'smoke-test'
  Invoke-EnabledButton '保存配置' 25
- Wait-ControlAbsent '连接模型，开始创作' 25
- Assert-ControlMissing '连接模型，开始创作'
+ Wait-ControlAbsent '连接并选择模型' 25
+ Assert-ControlMissing '连接并选择模型'
  Set-Input '建模指令' 'Create one simple box for the synthetic failure test'
  Click-Control '发送'
  Start-Sleep -Seconds 3

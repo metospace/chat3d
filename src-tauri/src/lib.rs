@@ -1,6 +1,7 @@
 use tauri::Manager;
 use std::io::Write;
-use tauri_plugin_dialog::DialogExt;
+mod export_file;
+use export_file::{cancel_export_destination, commit_export_file, select_export_destination, PendingExports};
 
 #[cfg(desktop)]
 #[macro_use]
@@ -41,50 +42,16 @@ fn save_support_json(app: tauri::AppHandle, contents: String, kind: String) -> R
     Err("未能创建唯一文件名，请稍后重试".into())
 }
 
-// The frontend supplies only a suggested basename; the native dialog owns the destination.
-#[tauri::command]
-async fn save_export_file(
-    app: tauri::AppHandle,
-    contents: Vec<u8>,
-    kind: String,
-    filename: String,
-) -> Result<Option<String>, String> {
-    let (label, extension) = match kind.as_str() {
-        "html" => ("HTML", "html"),
-        "glb" => ("GLB", "glb"),
-        "json" => ("JSON", "json"),
-        _ => return Err("不支持的导出类型".into()),
-    };
-    if filename.is_empty()
-        || filename == "."
-        || filename == ".."
-        || filename.contains(['/', '\\', ':', '\0'])
-    {
-        return Err("导出文件名不能包含路径".into());
-    }
-
-    // Blocking dialogs must not run on the main event-loop thread.
-    tauri::async_runtime::spawn_blocking(move || {
-        let selected = app.dialog().file()
-            .add_filter(label, &[extension])
-            .set_file_name(filename)
-            .blocking_save_file();
-        let Some(selected) = selected else {
-            return Ok(None);
-        };
-        let path = selected.into_path().map_err(|e| e.to_string())?;
-        let mut file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
-        file.write_all(&contents).map_err(|e| e.to_string())?;
-        file.sync_all().map_err(|e| e.to_string())?;
-        Ok(Some(path.to_string_lossy().into_owned()))
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
+        .manage(PendingExports::default())
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                window.state::<PendingExports>().remove_window(window.label());
+            }
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init());
@@ -100,13 +67,17 @@ pub fn run() {
         builder.invoke_handler(tauri::generate_handler![
             greet,
             save_support_json,
-            save_export_file,
+            select_export_destination,
+            commit_export_file,
+            cancel_export_destination,
             update_download_url,
             download_and_install_mirrored_update
         ])
     };
     #[cfg(not(desktop))]
-    let builder = builder.invoke_handler(tauri::generate_handler![greet, save_support_json, save_export_file]);
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        greet, save_support_json, select_export_destination, commit_export_file, cancel_export_destination
+    ]);
     builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

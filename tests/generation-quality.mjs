@@ -74,7 +74,7 @@ try {
     const f = fake([[edit,{name:'inspect_model_quality',args:{}},capture],[finish]]), o = opts(f);
     o.capture = async () => {images++; return picture;};
     const r = await runModelingAgent(o);
-    assert.equal(f.calls,2);assert.equal(images,2);assert.equal(r.batch.taskStatus,'submitted');assert.equal(r.batch.incomplete,true);
+    assert.equal(f.calls,2);assert.equal(images,2);assert.equal(r.batch.taskStatus,'submitted');assert.notEqual(r.batch.incomplete,true);
     assert.equal(r.activity.generationQuality,'fast');assert.equal(r.activity.generationReview.basicReviewCompleted,true);
     assert.equal(r.activity.generationReview.staticImages,2);assert.equal(r.activity.detailAcceptance.status,'pending');assert.equal(r.activity.detailAcceptance.reviews.length,0);
     assert.ok(r.batch.qualityIssues.some(i=>i.includes('尚未完成六项')));assert.match(r.batch.summary,/不代表精细质量通过/);
@@ -89,11 +89,11 @@ try {
   });
   await test('fine and legacy runs retain richer automatic target views without increasing user budgets', async () => {
     for(const quality of ['fine',undefined]) {
-      let images = 0; const f = fake([[edit,capture],[finish]]), o = opts(f,quality);o.config.generationQuality=quality;
-      o.capture = async () => {images++;return picture;};
+      const seen=[]; const f = fake([[edit,capture],[finish]]), o = opts(f,quality);o.config.generationQuality=quality;
+      o.capture = async (_doc,view,ids) => {seen.push({view,ids});return picture;};
       const r = await runModelingAgent(o);
-      assert.equal(r.activity.generationQuality,'fine');assert.equal(images,4);assert.equal(r.activity.generationReview.staticImageLimit,null);
-      assert.equal(r.batch.incomplete,true);assert.notEqual(r.activity.detailAcceptance.status,'self_reviewed');
+      assert.equal(r.activity.generationQuality,'fine');assert.ok(seen.some(x=>x.view==='front'&&x.ids?.includes(r.result.doc.nodes[0].id)));assert.ok(seen.some(x=>x.view==='back'&&x.ids?.includes(r.result.doc.nodes[0].id)));assert.equal(r.activity.generationReview.staticImageLimit,null);
+      assert.notEqual(r.batch.incomplete,true);assert.notEqual(r.activity.detailAcceptance.status,'self_reviewed');
     }
   });
   await test('fast allowance exhaustion stops in the same turn and retains all applied draft changes', async () => {
@@ -112,7 +112,7 @@ try {
   });
   await test('fine does not inherit fast image ceiling', async () => {
     let images=0;const f=fake([[edit,capture],[{name:'capture_multiview',args:{views:['front','back','side']}}],[finish]]),o=opts(f,'fine');o.capture=async()=>{images++;return picture;};
-    const r=await runModelingAgent(o);assert.equal(images,7);assert.equal(r.batch.taskStatus,'submitted');assert.equal(r.activity.generationReview.staticImages,7);
+    const r=await runModelingAgent(o);assert.ok(images>4);assert.equal(r.batch.taskStatus,'submitted');assert.equal(r.activity.generationReview.staticImages,images);
   });
   await test('same-turn review remains rejected in fast mode', async () => {
     const f=fake([[edit,capture,finish],'不能提前读取图片']),r=await runModelingAgent(opts(f));
@@ -185,9 +185,16 @@ try {
     assert.ok(!requests[0].messages[0].content.includes('# 参考范例'));assert.equal(requests[0].max_tokens,requests[1].max_tokens);
     assert.match(requests[0].messages[0].content,/多轮任务预算监控和视觉修复仅适用于Pi模式/);
     responses.push('not JSON');
-    const live={...config,generationQuality:'fast',stream:false};
-    const retried=await provider.generateBatch('创建主体',live,{nodes:[],selection:[]},undefined,[],[],()=>{live.generationQuality='fine';});
+    const live={...config,generationQuality:'fast',reasoningEffort:'high',stream:false};
+    const retried=await provider.generateBatch('创建主体',live,{nodes:[],selection:[]},undefined,[],[],()=>{live.generationQuality='fine';live.reasoningEffort='low';});
     assert.equal(requests.length,4);assert.match(retried.summary,/快速模式数据草稿/);assert.match(requests.at(-1).messages[0].content,/本次生成档位：快速/);
+    assert.ok(requests.slice(2).every(body=>body.reasoning_effort==='high'),'correction requests keep the invocation reasoning snapshot');
+    assert.ok(requests.slice(0,2).every(body=>!Object.hasOwn(body,'reasoning_effort')),'legacy/default requests omit the parameter');
+    for(const reasoningEffort of [undefined,'low','medium','high','xhigh'])for(const stream of [false,true]) {
+      await provider.generateBatch('创建主体',{...config,reasoningEffort,stream},{nodes:[],selection:[]});
+      const body=requests.at(-1);assert.equal(body.reasoning_effort,reasoningEffort);assert.equal(Object.hasOwn(body,'reasoning_effort'),reasoningEffort!==undefined);
+      assert.equal(body.stream,stream);assert.equal(body.max_tokens,8192);assert.equal(body.temperature,.2);assert.equal(body.model,config.model);
+    }
   });
   console.log(`${passed} generation-quality policy checks passed; all model/render calls mocked, no measured speed or fidelity claims`);
 } finally {

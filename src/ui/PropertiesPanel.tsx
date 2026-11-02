@@ -9,7 +9,7 @@ import {Vector3} from 'three';
 import type {AppearancePatch, Command} from '../domain/commands';
 import { useDisplayDoc, useEditorStore } from '../store';
 
-const geometryNames:Record<string,string>={box:'长方体',sphere:'球体',cylinder:'圆柱体',cone:'圆锥体',plane:'平面',roundedPlate:'圆角板',capsule:'胶囊体',frame:'框架',tube:'空心管',trapezoid:'梯形体'};
+const geometryNames:Record<string,string>={sectionLoft:'连续截面放样',box:'长方体',sphere:'球体',cylinder:'圆柱体',cone:'圆锥体',plane:'平面',roundedPlate:'圆角板',capsule:'胶囊体',frame:'框架',tube:'空心管',trapezoid:'梯形体'};
 const parameterNames:Record<string,string>={width:'宽度',height:'高度',depth:'深度',length:'长度',radius:'半径',radiusTop:'顶部半径',radiusBottom:'底部半径',outerRadius:'外半径',innerRadius:'内半径',widthTop:'顶部宽度',widthBottom:'底部宽度',thickness:'厚度',bevelRadius:'倒角半径',cornerRadius:'圆角半径',holeRadius:'孔半径',widthSegments:'横向分段数',heightSegments:'纵向分段数',depthSegments:'深度分段数',radialSegments:'圆周分段数'};
 const parameterLabel=(key:string)=>(parameterNames[key]??key)+(key.endsWith('Segments')?'':'（米）');
 function FocusObject({doc,node}:{doc:SceneDocument;node:SceneNode}){const ready=useEditorStore(s=>s.viewportStatus==='ready');return <Button className="prop-focus-btn" disabled={!ready} title={ready?undefined:'三维未就绪，请使用软件检查的选中近景'} onClick={()=>focusSceneObjects(node.assemblyId?doc.nodes.filter(n=>n.assemblyId===node.assemblyId).map(n=>n.id):[node.id])}>{node.assemblyId?'聚焦当前设备':'聚焦选中对象'}</Button>;}
@@ -119,7 +119,7 @@ export function PropertiesPanel() {
           </div>
         )}
 
-        {g&&(g.type==='profileSweep'||g.type==='loft'||g.type==='sweepTube')&&<p className="prop-hint">连续曲面模型；可通过对话调整截面或路径，位置、缩放和材质仍可编辑。</p>}
+        {g&&(g.type==='sectionLoft'||g.type==='profileSweep'||g.type==='loft'||g.type==='sweepTube')&&<p className="prop-hint">连续曲面模型；可通过对话调整截面或路径，位置、缩放和材质仍可编辑。</p>}
         {g&&(g.type==='profile'||g.type==='lathe')&&<p className="prop-hint">轮廓包含 {g.params.points.length} 个控制点；可通过对话修改轮廓，位置、缩放和材质仍可直接编辑。</p>}
         {g?.type==='mesh'&&<p className="prop-hint">导入网格：{g.params.positions.length/3} 顶点，{g.params.indices.length/3} 三角形。支持部件移动、旋转、缩放和材质修改；不支持通过尺寸字段重建拓扑。</p>}
         {/* 实际包围尺寸 */}
@@ -184,7 +184,7 @@ function AppearanceEditor({doc,nodes}:{doc:SceneDocument;nodes:SceneNode[]}){
 // 各几何类型的局部包围盒（米）
 function geomBbox(g: Geometry): [number, number, number] {
   switch (g.type) {
-    case 'profileSweep':case 'loft':case 'sweepTube':case 'mesh':case 'lathe':case 'profile': {const b=boundsFor(g);return [b.max.x-b.min.x,b.max.y-b.min.y,b.max.z-b.min.z];}
+    case 'sectionLoft':case 'profileSweep':case 'loft':case 'sweepTube':case 'mesh':case 'lathe':case 'profile': {const b=boundsFor(g);return [b.max.x-b.min.x,b.max.y-b.min.y,b.max.z-b.min.z];}
     case 'capsule': return [g.params.radius*2,g.params.length+g.params.radius*2,g.params.radius*2];
     case 'tube': return [g.params.outerRadius*2,g.params.height,g.params.outerRadius*2];
     case 'trapezoid': return [Math.max(g.params.widthTop,g.params.widthBottom),g.params.height,g.params.depth];

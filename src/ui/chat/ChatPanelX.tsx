@@ -4,9 +4,9 @@ import {PreviewDecision} from './PreviewDecision';
 import {focusSceneObjects} from '../../scene/focus';
 import {prepareReference,MAX_ATTACHMENT_BYTES,isReferenceImage} from '../../domain/referenceAttachments';
 import {REFERENCE_IMAGE_JPEG_QUALITY,REFERENCE_IMAGE_MAX_SIDE} from '../../domain/referenceImageLimits';
-import {PlusIcon,ChatBubbleIcon,DotsHorizontalIcon,Pencil1Icon,TrashIcon,EnterIcon,ListBulletIcon} from '@radix-ui/react-icons';
+import {PlusIcon,DotsHorizontalIcon,Pencil1Icon,TrashIcon,EnterIcon,ListBulletIcon} from '@radix-ui/react-icons';
 import {Button,Dropdown,Popover,Select,Checkbox} from 'antd';
-import {Attachments,Bubble,Prompts,Sender,Welcome} from '@ant-design/x';
+import {Attachments,Bubble,Sender} from '@ant-design/x';
 import {ReferenceAttachments,MessageAttachments} from './ReferenceAttachments';
 import {useSenderLabel} from './useSenderLabel';
 import {useStore} from 'zustand';
@@ -14,6 +14,7 @@ import {useEditorStore,type ChatMessage} from '../../store';
 import {activeConversationStore} from '../../conversationStores';
 import {conversationController} from '../../runtime/conversationController';
 import {sceneChanges} from '../../domain/editScope';
+import {activityProgress} from '../../domain/customerProgress';
 import {useAppearance} from '../Appearance';
 import {SiteAccessRecovery} from '../SiteAccessRecovery';
 import {MessageText} from '../MessageText';
@@ -60,13 +61,13 @@ const MESSAGE_ROLES={
   notice:{placement:'start',variant:'borderless',style:{width:'100%'},styles:{content:{padding:0,width:'100%'}}}
 } as const;
 
-export type ChatPanelProps={autoStartRequest?:{id:string;projectId:string}|null;onAutoStartConsumed?:(id:string)=>void;executionDetails?:boolean;onConfigure?:()=>void;onAssets?:()=>void;canvasMode?:boolean;expanded?:boolean;onExpand?:()=>void};
+export type ChatPanelProps={autoStartRequest?:{id:string;projectId:string}|null;onAutoStartConsumed?:(id:string)=>void;executionDetails?:boolean;onConfigure?:()=>void;canvasMode?:boolean;expanded?:boolean;onExpand?:()=>void};
 
 export function ChatPanelX(props:ChatPanelProps){
   return <AppTheme><ChatSurface {...props}/></AppTheme>;
 }
 
-function ChatSurface({onConfigure,onAssets,canvasMode=false,expanded=true,onExpand,autoStartRequest,onAutoStartConsumed}:ChatPanelProps){
+function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoStartRequest,onAutoStartConsumed}:ChatPanelProps){
   const {resolved}=useAppearance();
   const { messages, aiStatus, aiError, pendingBatch, pendingResult, aiConfig, selection, doc } = useEditorStore();
   const editor=activeConversationStore();
@@ -103,17 +104,19 @@ function ChatSurface({onConfigure,onAssets,canvasMode=false,expanded=true,onExpa
   const busy = ['capturing','context','generating','validating','applying'].includes(aiStatus);
   const viewportStatus=useEditorStore(s=>s.viewportStatus);
   const previewing = aiStatus === 'previewing';
-  const selectedNames=[...new Set((pendingResult?.doc??doc).nodes.filter(node=>selection.includes(node.id)).map(node=>node.assemblyName??node.name))];
+  const contextDoc=pendingResult?.doc??doc;
+  const selectedNames=[...new Set(contextDoc.nodes.filter(node=>selection.includes(node.id)).map(node=>node.assemblyName??node.name))];
 
   const changes=useMemo(()=>previewing&&pendingResult?sceneChanges(doc,pendingResult.doc):[],[previewing,doc,pendingResult]);
   const elapsed = Math.max(0, Math.floor((now - started) / 1000));
+  const progress=activityProgress(agentActivity,busy,now);
 
   useEffect(() => {
     aliveRef.current=true;
     return()=>{aliveRef.current=false;const state=store();if(state.aiStatus==='previewing'&&state.pendingResult)state.setPreviewDoc(state.pendingResult.doc);};
   },[editor]);
   useEffect(()=>{if(busy)setCompareBefore(false);},[busy]);
-  useEffect(() => { if (!busy) return; const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id); }, [busy]);
+  useEffect(() => { if (!busy) return; setNow(Date.now());const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id); }, [busy,started]);
   useLayoutEffect(() => {
     if(scrollAfterSend.current&&listRef.current?.scrollBoxNativeElement){scrollAfterSend.current=false;scrollToLatest();}
     if(!stickRef.current)setNewMessages(true);
@@ -174,30 +177,24 @@ function ChatSurface({onConfigure,onAssets,canvasMode=false,expanded=true,onExpa
 
   const bubbleContent=(m:ChatMessage)=><div className="adx-bubble-body">
     {!!m.images?.length&&<MessageAttachments values={m.images}/>}
-    {m.role==='assistant'&&m.error?<><MessageText text={m.text.includes('倒角半径')?'零件倒角超出尺寸限制，生成已暂停。请恢复指令后重试。':'本次生成未完成，请查看错误详情。'}/>{!(aiError&&m.text.includes(aiError))&&<details className="adx-bubble-error"><summary>错误详情</summary><MessageText text={m.text}/></details>}</>:m.role==='assistant'&&m.batch?<ResultMessage text={m.text}/>:<MessageText text={m.text}/>}
+    {m.role==='assistant'&&m.error?<><MessageText text="本次生成未完成，请展开错误详情查看当前未解决的问题。"/>{!(aiError&&m.text.includes(aiError))&&<details className="adx-bubble-error"><summary>错误详情</summary><MessageText text={m.text}/></details>}</>:m.role==='assistant'&&m.batch?<ResultMessage text={m.text}/>:<MessageText text={m.text}/>}
   </div>;
 
-  const welcome=!messages.length && <div className="adx-welcome">
-        <Welcome variant="borderless"
-          icon={<span className="adx-orb" aria-hidden="true"><ChatBubbleIcon/></span>}
-          title={doc.nodes.length?'让模型更进一步。':'把想法，变成立体。'}
-          description={doc.nodes.length?'描述你想改变的地方，或选择对象精确调整。每次修改都会先预览，由你决定是否应用。':'告诉我用途、尺寸和你在意的细节，也可以上传参考附件，一起完成你的第一个模型。'}/>
-        <Prompts className="adx-starters" aria-label="从这里开始" vertical
-          title={<span className="adx-starters-label">从这里开始</span>}
-          classNames={{item:'adx-starter'}}
-          items={[
-            {key:'workbench',label:<><strong>创建一个有明确尺寸的工作台</strong><span aria-hidden="true">↗</span></>},
-            ...(!doc.nodes.length?[{key:'scene',label:<><strong>组合一个场景</strong><span aria-hidden="true">↗</span></>}]:[]),
-            ...(onAssets?[{key:'assets',label:<><strong>从资产库开始</strong><span aria-hidden="true">↗</span></>}]:[]),
-          ]}
-          onItemClick={({data})=>{
-            if(data.key==='workbench')setInput('创建一个长 1.2 米、宽 0.8 米、高 0.75 米的工作台');
-            else if(data.key==='scene')setInput('创建一个小型仓储场景，包含货架、周转箱和一条清晰通道；先给出布局和尺寸假设，再生成可编辑模型');
-            else if(data.key==='assets')onAssets?.();
-          }}/>
-        <p className="adx-welcome-note">参考图用于近似重建，背面与真实尺寸需要补充说明。</p>
-      </div>;
-  const connect=(!aiConfig || aiConfig.useMock || !aiConfig.apiKey)&&<div className="adx-connect" role="note"><div><strong>连接模型，开始创作</strong><small>手动编辑、保存与导出始终可用</small></div><Button type="primary" onClick={onConfigure}>连接模型 ↗</Button></div>;
+  const configured=!!aiConfig?.baseURL&&!!aiConfig.apiKey&&!aiConfig.useMock;
+  const exampleTarget=selectedNames[0]??contextDoc.nodes[0]?.assemblyName??contextDoc.nodes[0]?.name;
+  const examples=exampleTarget?[
+    {label:`调整“${exampleTarget}”的配色`,text:`将“${exampleTarget}”改为深灰色，保留尺寸和位置`},
+    {label:`了解“${exampleTarget}”的尺寸`,text:`说明“${exampleTarget}”的尺寸和结构，先不要修改`}
+  ]:[
+    {label:'创建带尺寸的工作台',text:'创建一个长 1.2 米、宽 0.8 米、高 0.75 米的工作台'},
+    {label:'规划小型仓储场景',text:'创建一个小型仓储场景，包含货架、周转箱和通道'}
+  ];
+  const emptyState=!messages.length&&<div className="adx-empty-state">
+    <p>{contextDoc.nodes.length?'描述要调整的地方，修改会先预览。':'描述要创建的模型或场景，也可以添加参考附件。'}</p>
+    <div className="adx-examples" role="group" aria-label="指令示例">
+      {examples.map(example=><button type="button" key={example.text} title={example.text} onClick={()=>{setInput(example.text);focusComposer();}}>{example.label}</button>)}
+    </div>
+  </div>;
   const errorNotice=(aiStatus==='error' || aiStatus==='cancelled') && <div className="adx-chat-alert" role="status"><span>{aiStatus==='error'?'本次未完成，原场景未修改':'已停止生成'}</span>{lastRequest && <button type="button" className="adx-link" onClick={restore}>恢复指令重试</button>}{aiError && <details><summary>错误详情</summary><p className="adx-selectable">{aiError}</p></details>}</div>;
   const messageItems=messages.filter(m=>!m.queuedTask).flatMap(m=>{
     const hasContent=!!(m.text.trim()||m.images?.length||m.batch);
@@ -218,28 +215,29 @@ function ChatSurface({onConfigure,onAssets,canvasMode=false,expanded=true,onExpa
     return m.role==='user'?[messageItem,...processItems]:[...processItems,messageItem];
   });
   const listItems=[
-    ...(welcome?[{key:'welcome',role:'notice',content:welcome}]:[]),
-    ...(connect?[{key:'connect',role:'notice',content:connect}]:[]),...messageItems,
+    ...(emptyState?[{key:'empty',role:'notice',content:emptyState}]:[]),...messageItems,
     ...(errorNotice?[{key:'error',role:'notice',content:errorNotice}]:[]),
     ...(!canvasMode&&previewing&&!messages.some(m=>m.batch?.requestId===pendingBatch?.requestId)?[{key:'preview',role:'notice',content:previewCard}]:[])
   ];
 
   return <div className={`chat-panel adx-chat ${canvasMode?'canvas-chat':''} ${!expanded?'is-compact':''}`} data-adx-appearance={resolved}>
-    <div className="adx-chat-topline">
-      <span className="adx-chat-context" title="会话在本浏览器保存；请下载项目文件长期备份">{selection.length ? `已选 ${selection.length} 个对象` : `场景 ${doc.nodes.length} 个对象`}</span>
+    {(busy||previewing)&&<div className="adx-chat-topline">
+      <span data-phase={progress.phase} data-model-state={progress.modelState}>{busy?progress.label:'修改结果待确认'}</span>
       {busy&&<span className="adx-chat-status" role="presentation"><i className="adx-live-dot"/>{elapsed} 秒</span>}
-    </div>
+    </div>}
     <Bubble.List ref={listRef} className="adx-messages" classNames={MESSAGE_LIST_CLASSES} role={MESSAGE_ROLES} autoScroll items={listItems}
       onScroll={event=>{stickRef.current=Math.abs(event.currentTarget.scrollTop)<64;if(stickRef.current)setNewMessages(false);}}/>
     {canvasMode&&expanded&&previewCard&&(reviewHost?createPortal(previewCard,reviewHost):previewCard)}
     <SiteAccessRecovery error={aiError}/>
     {newMessages && <button type="button" className="adx-scroll-latest" onClick={()=>{stickRef.current=true;setNewMessages(false);scrollToLatest();}}>查看最新消息 ↓</button>}
-    {notice && <div role="status" className="adx-notice">{notice}</div>}
-    {busy && agentActivity && (agentActivity.inputTokens+agentActivity.outputTokens>=100000 || elapsed>=300) && <p role="status" className="adx-notice">任务耗时较长，详情见任务记录。可随时停止并保留已生成草稿。</p>}
+    {busy&&<div role="status" className="adx-notice" aria-label="当前草稿状态" data-phase={progress.phase} data-model-state={progress.modelState}>{progress.modelEditAgeSeconds!==undefined&&<p aria-label="距上次模型修改">距上次模型修改 {progress.modelEditAgeSeconds} 秒</p>}{progress.reviewNote&&<p>{progress.reviewNote}</p>}{agentActivity&&(agentActivity.inputTokens+agentActivity.outputTokens>=100000||elapsed>=300)&&<p>任务耗时较长，详情见任务记录。可随时停止并保留已生成草稿。</p>}</div>}
     {canvasMode&&!expanded&&previewing&&<div className="adx-compact-strip"><span>修改结果待确认</span><Button size="small" onClick={onExpand}>查看详情</Button><Button size="small" type="primary" disabled={compareBefore} onClick={commit}>应用修改</Button><Button size="small" onClick={discard}>放弃修改</Button></div>}
-    {canvasMode&&!expanded&&busy&&<div className="adx-compact-strip"><span>正在处理 · {{idle:'就绪',capturing:'检查画面',context:'准备上下文',generating:'生成中',validating:'校验修改',applying:'应用修改',previewing:'待确认',error:'失败',cancelled:'已停止'}[aiStatus]}</span><Button size="small" onClick={onExpand}>查看过程</Button></div>}
+    {canvasMode&&!expanded&&busy&&<div className="adx-compact-strip"><span>{agentActivity?.phase||progress.modelState?progress.label:`正在处理 · ${{idle:'就绪',capturing:'检查画面',context:'准备上下文',generating:'生成中',validating:'校验修改',applying:'应用修改',previewing:'待确认',error:'失败',cancelled:'已停止'}[aiStatus]}`}</span><Button size="small" onClick={onExpand}>查看过程</Button></div>}
     <div className="adx-composer">
-      <div className="instruction-context" role="group" aria-label="本次指令范围"><div><strong>{busy?'执行中':previewing?'继续调整当前预览':doc.nodes.length?'修改当前项目':'创建模型'}</strong>{selectedNames.length>0&&<span aria-label="当前选中对象" title={(scopeMode==='selection'?'修改范围已限制为当前选中对象：':'当前选中用于指代；修改范围以右侧设置为准：')+selectedNames.join('、')}>当前选中：{selectedNames.slice(0,2).join('、')}{selectedNames.length>2?' 等':''}</span>}{lockPlacement&&<span>已锁定位置与朝向</span>}</div><label>修改范围<Select aria-label="对话修改范围" size="small" value={scopeMode} disabled={busy} onChange={setScopeMode} popupMatchSelectWidth={false} popupRender={menu=><>{menu}{doc.nodes.length>0&&<div className="adx-scope-options" onMouseDown={event=>event.preventDefault()}><Checkbox disabled={busy} checked={lockPlacement} onChange={event=>setLockPlacement(event.target.checked)}>锁定已有对象的位置与朝向</Checkbox><p>选中对象用于指代；选择“仅选中对象”才会限制修改范围。</p></div>}</>} options={[{value:'scene',label:'全场景'},{value:'selection',label:`仅选中对象（${selection.length}）`}]}/></label></div>
+      {(contextDoc.nodes.length>0||scopeMode==='selection'||lockPlacement)&&<div className="instruction-context" role="group" aria-label="本次指令范围">
+        <div>{selectedNames.length>0&&<span aria-label="当前选中对象" title={(scopeMode==='selection'?'修改范围已限制为当前选中对象：':'当前选中用于指代；修改范围以右侧设置为准：')+selectedNames.join('、')}>当前选中：{selectedNames.slice(0,2).join('、')}{selectedNames.length>2?' 等':''}</span>}{lockPlacement&&<span>已锁定位置与朝向</span>}</div>
+        <label>修改范围<Select aria-label="对话修改范围" size="small" value={scopeMode} disabled={busy} onChange={setScopeMode} popupMatchSelectWidth={false} popupRender={menu=><>{menu}<div className="adx-scope-options" onMouseDown={event=>event.preventDefault()}><Checkbox disabled={busy} checked={lockPlacement} onChange={event=>setLockPlacement(event.target.checked)}>锁定已有对象的位置与朝向</Checkbox><p>选中对象用于指代；选择“仅选中对象”才会限制修改范围。</p></div></>} options={[{value:'scene',label:'全场景'},{value:'selection',label:`仅选中对象（${selection.length}）`}]}/></label>
+      </div>}
       {scopeMode==='selection'&&!selection.length&&<p className="instruction-scope-empty" role="note">请先选择要修改的对象，或切换到全场景。</p>}
       {removedQueueId&&<div className="adx-queue-undo">已移出队列 <button type="button" className="adx-link" onClick={restoreQueued}>撤销移除</button></div>}
       <div className={`adx-composer-surface${pendingMessages.length?' has-queue':''}`}>
@@ -270,7 +268,7 @@ function ChatSurface({onConfigure,onAssets,canvasMode=false,expanded=true,onExpa
             {!attachments.length&&messages.some(m=>m.images?.length)&&<Popover trigger="click" placement="topLeft" open={referenceOpen} onOpenChange={setReferenceOpen} title="参考附件" content={
               <fieldset disabled={busy} className="adx-reference-controls"><Checkbox checked={reuseReference} onChange={event=>setReuseReference(event.target.checked)}>沿用最近参考附件</Checkbox></fieldset>
             }><Button type="text" size="small" disabled={busy} aria-label="参考附件设置" title="沿用最近参考附件">参考⌄</Button></Popover>}
-            <QualityPicker onConfigure={onConfigure}/>
+            {configured&&<QualityPicker onConfigure={onConfigure}/>}
             <ModelPicker onConfigure={onConfigure}/>
           </div>
           <span className="adx-send-cluster">
@@ -282,6 +280,7 @@ function ChatSurface({onConfigure,onAssets,canvasMode=false,expanded=true,onExpa
         </div>}
 
       />
+      {notice?<div role="status" className="adx-composer-notice">{notice}</div>:!configured&&<p className="adx-connection-hint" role="note">连接模型后即可生成，草稿和附件会保留。</p>}
       </div>
     </div>
   </div>;

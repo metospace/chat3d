@@ -43,6 +43,7 @@ export function loadModelConfig(): ModelConfig | null {
     const config: ModelConfig = {
       generationStyle: normalizeGenerationStyle(c.generationStyle),
       generationQuality: c.generationQuality === 'fast' ? 'fast' : 'fine',
+      reasoningEffort: c.reasoningEffort === 'low' || c.reasoningEffort === 'medium' || c.reasoningEffort === 'high' || c.reasoningEffort === 'xhigh' ? c.reasoningEffort : undefined,
       taskBudget: normalizeTaskBudget(c.taskBudget), baseURL: c.baseURL, model: c.model,
       apiKey: typeof c.apiKey === 'string' ? c.apiKey : '', rememberApiKey: c.rememberApiKey === true,
       agentMode: c.agentMode === 'single' ? 'single' : 'pi', parallelDrafts: c.parallelDrafts === true,

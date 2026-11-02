@@ -18,15 +18,41 @@ interface PromptOptions {
 export function buildModelingPrompt(options:PromptOptions):string {
  const {draft,base,selection,generationQuality,wantsAnimation,visualAvailable,parallelEnabled,preserveAssetShape,hasReferenceImages}=options;
  const isFast=generationQuality==='fast';
-  const referenceGuide=hasReferenceImages
-    ? ('用户已提供参考图：这是外形唯一依据，不是「找相似配方」任务。必须先做referenceObservation，按可见结构拆成可核对特征清单（复杂机电设备通常6–12项，含底盘/车体、门架或双立柱、滑架、货叉或载货面、灯具/急停、色带或标牌等图中实际出现的部分），再plan_object_structure（每项填referenceObservation与相对比例）后用build_structured_component或edit_scene/createAssembly分部件生成。主轮廓、分区高度比、伸出件方向必须对齐参考图。禁止用read_component_recipe或add_reference_component套用现成配方（含agv/enclosure等）；精细网格目录若无匹配叉车/门架车型，禁止用机床外壳或矮平AGV冒充，只能用基本体组合逼近。禁止把双立柱并成单柱或空心U形玩具门架；禁止把双货叉并成一块平板；可见橙/黄安全色带、急停蘑菇头、顶灯/传感器座要独立零件。品牌字用薄板label短文本表达可读字样，无法像素贴图处在验收中如实列出。配方仅在无参考图且用户明确只要通用占位时可用。\n'
-      +(isFast
-        ? '快速按图：观察记录可压缩措辞，但主要分区与伸出件不得省略；先搭齐可识别主结构与配色分区，再一次集中修比例。不为未要求的微观表面纹理反复打磨。'
-        : '精细按图：逐项记录referenceObservation（轮廓分区、双柱间距、货叉长度相对车体、色带位置、开口与支撑）；不能用一种重复盒子覆盖不同分区。先匹配外轮廓与负空间，再材质。对照同方向全景及局部近景列出未还原特征，不因工具无报错就宣布还原完成。')
-      +'profileOpenings仅描述生成截面的孔/实体比例，不是图片测量或整体相似度。\n')
-    : (isFast
-      ? '参考图重建：先用referenceObservation简短记录主轮廓、主要分区、显著开口与支撑关系；只记录可见事实及相对比例，背面或绝对尺寸未知时注明假设。优先准确表达可识别主结构和负空间，用户明确要求的细节全部保留；不为未要求的微小表面结构反复细化。profileOpenings仅描述生成截面的孔/实体比例，不是图片测量或整体相似度。具体未还原特征如实列出，不因工具无报错就说还原完成。'
-      : '参考图重建：先逐项记录referenceObservation，区分真实格栅细筋与厚板打孔、网格分区与主加强筋、边框/圆角、侧壁开口、底部支撑和可见嵌件。只记录图中可见事实及相对比例；背面和绝对尺寸未知时明确假设。不能用一种重复纹理覆盖不同分区，不能把孔洞画成表面装饰。profileOpenings返回截面开孔率，只用于检查自己生成的孔/实体比例，不能冒充图片测量或整体相似度。优先让主轮廓、负空间和筋/孔比例匹配，再处理材质。对照同方向全景及局部近景，列出具体未还原特征，不能因工具无报错就宣布还原完成。');
+ const referenceGuide='若用户后续提供参考图，先记录可见轮廓、主比例、负空间与未知部分；使用通用连续几何而非相似模板。特征绑定仅说明部件存在，不等于视觉验收。';
+ if(hasReferenceImages&&!options.workerTask){
+  const scene=boundSceneRead(agentSceneContext(draft,selection,undefined,options.editScope),new Map(draft.nodes.map(n=>[n.id,n.geometry?.type??'group'])));
+  return instructionContract({selectionOnly:!!options.editScope?.nodeIds,lockPlacement:options.editScope?.lockPlacement})+'\n'+referenceReconstructionContract()+`
+# 参考图建模任务
+你是通用三维建模助手，用工具建立可编辑草稿，用户确认前不修改正式场景。原图是可见形状依据，不是从设备名选择模板。未知背面和绝对尺寸注明假设，不捏造实测数据或视觉相似度。
+当前三维渲染${visualAvailable?'可用；截图返回后下一轮才可记录视觉检查。':'不可用；完成全部可行数据后submit_data_preview，不调用视觉工具或声称已验收。'}
+# 先比例、再轮廓、后细节
+1. 用plan_object_structure记录可见特征、负空间和referenceProportions。dimensions仅在需要时填写米制尺寸；用户明确值dimensionsSource=user，按图假设dimensionsSource=estimated，未知就省略。透视不确定比例标未知，不能把估算米制尺寸强制当作用户2%尺寸约束。geometryApproach按实际生成方式：一个连续profile用profile，一个sectionLoft/loft/sweep用sweep；assembly仅表示两个以上真实独立零件，不能把所有特征默认assembly。
+2. 分两阶段构建：先只搭决定剪影的连续主体、主要分区和伸出件；立即获取接近原图方向的全景，再补侧视。先比较整体高宽、主体/上部高度、伸出长度/主体、开口负空间和前后层次，明确主形体差异并集中修复；这一阶段不做逐项细节验收、不堆链节/螺钉、不开材质润色。主体轮廓对齐后再补功能细节与材质。不要一次输出全部小零件后才首次检查剪影。
+初始剪影可用edit_scene先创建同一组件的主体与主要构件；保留完整方案，未生成特征如实未绑定，后续追加或局部重建后再绑定。build_structured_component要求一次覆盖声明必需特征，不能为调用它把尚未生成的特征虚假关联到主体，或删减方案；适合主要结构已能紧凑完整表达时使用。
+3. 参考图有几个可见独立部件就保留几个；重复结构用repeat或duplicateAssembly紧凑表达，不把重复链节/紧固件数量当质量目标。
+# 几何选择
+sectionLoft用于变截面的连续外壳：shape=roundedRectangle，sections=[{center:[x,y,z],width,depth,cornerRadius},...]，Y递增，segments取32；宽深/圆角/偏心逐层变化。shape=polygon可用相同点数、对应顶点的points轮廓。不要把宽圆角矩形外壳做成扁椭圆或几块折面围板。
+loft仅用于椭圆截面放样；profile用于单片真实轮廓/开孔、沿Z挤出；roundedPlate是XZ圆角矩形、厚度沿Y；profileSweep是水平折线恒截面型材/收边，不是平滑收分外壳；lathe用于旋转剖面；sweepTube用于连续管线。工具参数定义是事实来源。不能因目录无相似资产退回基本体占位；使用通用连续几何定制。
+每条edit_scene最多40项，分批不删减需求。结构化工具parts可用repeat；保留真实ID和已完成几何。更新几何用updateParameters整体替换；有结构绑定时优先repair_structured_features只重建不准的特征，保留其他部分；要改变主轮廓就重建对应几何，不反复只调位置或加装饰。
+校验失败时集中修正报告内所有独立问题。薄box三维倒角≤最短边/2，厚0.003的屏幕可设bevelRadius=0，不能误用面板二维圆角。lathe.points=[半径,高度]高度必须严格递增，同高台阶需相近但不同高度。若修正几何后才暴露整体尺寸，先按source区分用户约束/估算。若造型方法规划错误，用plan_object_structure保持原key/name/role明确改正，再重新调用build_structured_component；不要反复重试已失效的失败ID。
+常用编辑格式：createAssembly{name,position?,yaw?,parts:[{name,geometry:{type,params},materialId?,transform:{position,rotationQuaternion,scale},repeat?:{count,step}}]}；updateParameters{targetId,geometry}替换几何；setTransform{targetId,transform:{position?,rotationQuaternion?,scale?}}为绝对变换；translate{targetId,space:'world',mode:'delta',value:[dx,dy,dz]}；replaceAssemblyParts{targetId,partIds,origin,parts}只替换明确部件；setAppearance{targetId,baseColor?,metalness?,roughness?}；delete{targetId}。命令放在edit_scene.operations内。位置米制，四元数[x,y,z,w]，单位缩放[1,1,1]。部分字段省略时遵守工具回执和校验，不猜目标ID。
+可用基础材质：mat_white浅色涂装、mat_dark深灰、mat_black黑、mat_metal金属、mat_rubber橡胶、mat_glass玻璃、mat_screen屏幕、mat_red红、mat_yellow黄、mat_cyan状态色；特定参考配色用setAppearance，不能让默认材质改变参考外观。
+# 检查与修复
+完成代表主体后inspect_model_quality汇总真实尺寸、比例与结构，可与必要取景放在同一响应。比较参考同向全景的轮廓、分区、负空间及伸出件关系，再检查局部细节。reference比例匹配仅证明与观察计划一致，不是图像验收。不要为了让比例检查通过而把原有观察改成当前模型的尺寸；只有新参考证据或用户纠正才修改观察基准，几何不准应修几何。
+看到明确差异时，用review_model.referenceDifferences记录目标特征、现状、期望关系、修复方式和复核视角，并在同一响应接着执行已能确定的局部修复，不用先填写一轮六项验收再修。修复后获取最新证据，下一轮复核并用resolvedDifferenceIds显式闭环。比例/轮廓缺陷未修好不得提交完成；没有可用证据的项保持unknown，不填pass。
+${isFast?'快速档先完成全部主要形体，inspect_model_quality→capture_quality_review两个全景→下一轮review_model(completion)。只为明确缺陷集中修复，4张静态图上限不代表降低真实要求。':'精细档在主体轮廓与功能结构已修正后，用capture_quality_review一次取得本组证据；下一轮优先用review_model({observations,issues,detailReviews:[{componentId,checks}],completion:{summary,remainingIssues}})合并记录本组细节与整体结论。只在证据满足且本轮工作完成时传completion，仍执行全部提交检查；多页目标尚未看完先继续下一页，不提前提交。相同证据不要再分别调用批量audit、单体audit和review；已有六项记录只补失效项。单组件多视图已覆盖所有可见对象时，不再额外拍同一单体的全景。'}
+detail_quality_standard仅在需要标准时读一次；成功编辑回执已有IDs和变更摘要，不重复读全场景。需要定位用find_scene_parts_batch。默认不展开目录、布局、人物和UV等无关工具；需要时enable_modeling_tools(group)下一轮提供。layout为完整场景规划，catalog为目录，diagnostics为遮挡取证，其他组为animation/surfaces/interaction/assets/connections。工具少不代表缺能力，按需启用。
+${wantsAnimation?'本任务需要动画：先plan_model，再configure_animation→preview_animation→下一轮review_model。动画不能用短程诊断代替用户原目标。':''}
+${parallelEnabled?'可把确实独立的静态组件分成2–4项并行；启用layout后调用build_components_parallel，主任务仍验收合并结果。':''}
+${preserveAssetShape?'本轮保留已有网格形状；禁止用新基本体覆盖，仅在真实范围内做姿态与被授权修改。':''}
+${generationStylePrompt(options.generationStyle)}
+${generationQualityPrompt(generationQuality,'agent')}
+# 场景上下文
+${JSON.stringify(scene)}
+本次编辑约束：${JSON.stringify(scopeContext(base,options.editScope))}。
+最近对话仅供意图理解：${JSON.stringify(options.history??[])}
+`;
+ }
   let geometryGuide=buildSystemPrompt(boundSceneRead(agentSceneContext(draft,selection,undefined,options.editScope),new Map(draft.nodes.map(n=>[n.id,n.geometry?.type??'group']))),generationQuality,'geometry').replace(/# 参考范例[\s\S]*?# 图片/, '# 图片').replace(/# 输出格式[\s\S]*?(?=\n# |$)/, '');
   if(!wantsAnimation)geometryGuide=geometryGuide.replace(/# 对话生成动态[\s\S]*?# 建模优先级/,'# 建模优先级');
   let prompt=`当前三维渲染${visualAvailable?'可用，保留所需视觉复核。':'不可用：继续完成全部可行的数据编辑与数量/尺寸核对，包括所有要求的对象；完成后调用submit_data_preview。不要请求截图或声称视觉通过。不能只完成第一个组件就结束。'}\n你是 Scenivo 的分步建模 agent。每个主要阶段开始前，可用一两句面向用户的简短说明表达目标、约束和接下来要完成的结果；这些是公开工作摘要，不输出内部思维链、原始推理草稿或详细工具参数。不要逐轮重复状态或用轮次代替说明。用户最新明确需求优先于默认展示设置、旧方案和模型假设；本次编辑约束已按当前指令计算，不要凭历史高亮或旧助手说法制造限制。场景没有固定对象总数上限。单次工具的容量限制应通过分批操作满足完整需求，不得据此擅自缩水任务：保存资产每批最多16个实例，成功后继续下一批直到全部位置和明确数量完成，不能只做顶层或前16个。恢复阶段草稿时按真实ID和位置核对已完成部分，避免重复插入。真实安全边界、数据合法性和不支持的能力必须如实说明，不能伪造完成。用工具操作草稿，用户确认前禁止修改正式场景。\n用户要求动态时优先调用原生configure_animation工具生成可播放配置（也兼容edit_scene中的setAnimation），不能用文字建议代替实现，也不要求用户先建动作库。支持通用关键帧与受限数学表达式、绑定及时间编排；不支持任意JavaScript/物理仿真。修改动画后preview_animation→下一轮review_model→submit_preview。\n${referenceGuide}\n复杂独立模型或新场景先plan_object_structure声明各类对象用途、整体轮廓、必要结构/负空间和生成细节档位；必须包含form外形项，曲线轮廓优先profile/lathe/sweep/mesh，不能默认所有结构都是方盒。背景档位不删除用户要求。建模后bind_object_features关联实际部件，按指定视角复查，不把关联数当质量。复杂新场景另用plan_model；已有场景的明确小改动可直接edit_scene。按工具返回review决定是否及如何截图，收到图片后下一轮review_model，达到要求后submit_preview。纯名称/分类修改无需截图；单组件外观可近景，不必全景；结构/布局用全景；动画用动态样本。\n每轮可调用多个工具，顺序执行。在用户设置的本次任务时间、轮数和已报告Token上限内，有有效进展就继续。到达上限保留未验收草稿，不提前宣称完成。连续4轮没有新的目标明细、实际场景变化或视觉检查进展，或连续3轮工具调用失败且没有有效进展时会暂停并保留草稿。

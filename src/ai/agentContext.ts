@@ -39,7 +39,13 @@ export function targetedSceneContext(doc:SceneDocument,selection:string[],nodeId
 export function compactAgentContext(messages: AgentMessage[]): AgentMessage[] {
   const sceneReads=new Set(['read_scene','find_scene_parts','find_scene_parts_batch','prepare_local_edit','read_pose_rig']);
   const sceneEdits=new Set(['retry_structured_component','bind_object_features','repair_structured_features','build_structured_component','align_saved_instances','add_saved_assets','retry_scene_edit','define_pose_rig','pose_with_rig','bend_existing_mesh','pose_existing_parts','pose_bimanual_interaction','pose_arm_interaction','create_hand_pose','edit_scene','configure_animation','configure_process_route','add_reference_component','add_mesh_component','add_mesh_components','connect_scene_parts','remove_connection','set_surface_detail','set_surfaces_batch','build_components_parallel','prepare_surface_uv','move_components']);
-  let latestScene=-1, latestEdit=-1, latestInspection=-1, latestAudit=-1, latestCaptureRevision='',latestCaptureScope='';
+  sceneEdits.delete('bind_object_features'); // Metadata associations remain authoritative across later geometry edits.
+  const successful=new Map(messages.filter(m=>m.role==='toolResult'&&!m.isError).map(m=>[(m as Extract<AgentMessage,{role:'toolResult'}>).toolCallId,m]));
+  const latestPlanKeys=new Map<string,string>();const planCalls=new Set<string>();let latestPlan='';
+  for(const m of messages)if(m.role==='assistant')for(const c of m.content)if(c.type==='toolCall'&&successful.has(c.id)){if(c.name==='plan_model')latestPlan=c.id;if(c.name==='plan_object_structure'&&Array.isArray(c.arguments.objects)){planCalls.add(c.id);for(const p of c.arguments.objects)if(p?.key)latestPlanKeys.set(p.key,c.id);}}
+  const duplicateResults=new Set<number>(),seenPayloads=new Set<string>();
+  for(let i=messages.length-1;i>=0;i--){const m=messages[i];if(m.role!=='toolResult'||m.isError||!['inspect_scene','inspect_model_quality','bind_object_features','plan_object_structure'].includes(m.toolName))continue;const key=JSON.stringify([m.toolName,m.content]);if(seenPayloads.has(key))duplicateResults.add(i);else seenPayloads.add(key);}
+  let latestScene=-1, latestEdit=-1, latestInspection=-1, latestQuality=-1, latestAudit=-1, latestCaptureRevision='',latestCaptureScope='';
   const auditedScopes=new Set<string>();
   for(let i=0;i<messages.length;i++) {
     const m=messages[i];
@@ -47,7 +53,8 @@ export function compactAgentContext(messages: AgentMessage[]): AgentMessage[] {
     if(sceneReads.has(m.toolName)||sceneEdits.has(m.toolName))latestScene=i;
     if(sceneEdits.has(m.toolName))latestEdit=i;
     if(m.toolName==='inspect_scene')latestInspection=i;
-    if(m.toolName==='audit_model_detail'||m.toolName==='audit_model_details_batch'){latestAudit=i;const d=m.details as {revision?:number;componentId?:string;componentIds?:string[]}|undefined;if(d?.componentId)auditedScopes.add(String(d.revision)+':'+d.componentId);for(const id of d?.componentIds??[])auditedScopes.add(String(d?.revision)+':'+id);}
+    if(m.toolName==='inspect_model_quality'&&m.content.some(c=>{if(c.type!=='text')return false;try{return JSON.parse(c.text).repeated!==true;}catch{return false;}}))latestQuality=i;
+    if(m.toolName==='audit_model_detail'||m.toolName==='audit_model_details_batch'||m.toolName==='review_model'){if(m.toolName!=='review_model')latestAudit=i;const d=m.details as {revision?:number;componentId?:string;componentIds?:string[]}|undefined;if(d?.componentId)auditedScopes.add(String(d.revision)+':'+d.componentId);for(const id of d?.componentIds??[])auditedScopes.add(String(d?.revision)+':'+id);}
     if((m.toolName==='capture_view'||m.toolName==='capture_multiview'||m.toolName==='capture_quality_review'||m.toolName==='capture_detail_diagnostic'||m.toolName==='capture_component_intrinsic')) {
       const text=m.content.filter(c=>c.type==='text').map(c=>c.text).join('');
       latestCaptureRevision=/revision=(\d+)/.exec(text)?.[1]??'';latestCaptureScope=/scope=([^\s]+)/.exec(text)?.[1]??'';
@@ -60,7 +67,7 @@ export function compactAgentContext(messages: AgentMessage[]): AgentMessage[] {
   let currentRevision=-1;const scopedReads=new Map<string,number>();
   for(const m of messages)if(m.role==='toolResult'&&!m.isError){const d=m.details as {revision?:number}|undefined;if(typeof d?.revision==='number')currentRevision=Math.max(currentRevision,d.revision);}
   for(let i=0;i<messages.length;i++){const m=messages[i];if(m.role==='toolResult'&&sceneReads.has(m.toolName)&&!m.isError){const d=m.details as {revision?:number;scopeKey?:string;snapshot?:boolean}|undefined;if(d?.revision===currentRevision&&d.snapshot&&d.scopeKey)scopedReads.set(d.scopeKey,i);}}
-  const retainedReads=new Set([...scopedReads.values()].sort((a,b)=>b-a).slice(0,24));
+  const retainedReads=new Set(scopedReads.values());
   // Remove old successful edit call/result PAIRS, preserving the newest edit, errors,
   // user instructions and IDs supplied by current scene reads. Never mutate stored transcript.
   const historical=new Map<string,string>();
@@ -70,21 +77,27 @@ export function compactAgentContext(messages: AgentMessage[]): AgentMessage[] {
   const succeeded=new Set(messages.filter(m=>m.role==='toolResult'&&!m.isError&&sceneEdits.has(m.toolName)).map(m=>(m as any).toolCallId as string));
   const paired=new Set<string>();
   for(const m of messages)if(m.role==='assistant')for(const c of m.content)if(c.type==='toolCall'&&historical.has(c.id))paired.add(c.id);
-  return messages.map((m,i)=>{
+  return messages.map((m,i):AgentMessage=>{
     if(m.role==='system'&&latestEdit>=0&&typeof m.content==='string')return {...m,content:m.content.replace(/# 场景上下文[\s\S]*?(?=\n本次编辑约束：)/,'# 场景上下文\n初始场景快照已过期；以最近成功编辑结果和当前版本查询为准。\n')};
-    if(m.role==='assistant')return {...m,content:m.content.map(c=>{
+    if(m.role==='assistant')return {...m,content:m.content.map((c):typeof m.content[number]=>{
       if(c.type!=='toolCall')return c;
-      if(paired.has(c.id))return {type:'text' as const,text:`[历史edit_scene已成功：${String(c.arguments.summary??'场景修改').slice(0,180)}。参数已省略，以最新场景与read_scene为准。]`};
+      if(successful.has(c.id)&&c.name==='plan_model'&&c.id!==latestPlan)return {...c,arguments:{_historyOnly:'已被后续完整建模计划替代；以最新plan_model为准。'}};
+      if(successful.has(c.id)&&c.name==='plan_object_structure'&&Array.isArray(c.arguments.objects)){const objects=c.arguments.objects.filter(p=>latestPlanKeys.get(p.key)===c.id);return {...c,arguments:{...c.arguments,objects,...(objects.length!==c.arguments.objects.length?{_historyOnly:'仅省略已由同key新方案完整替代的对象；其他当前方案仍有效。'}:{})}};}
+      if(paired.has(c.id))return {type:'text' as const,text:`[历史edit_scene已成功：${String(c.arguments.summary??'场景修改')}。目标ID：${JSON.stringify(Array.isArray(c.arguments.operations)?[...new Set(c.arguments.operations.flatMap((op:any)=>[op.targetId,...(op.partIds??[]),...(op.nodeIds??[])]).filter(Boolean))]:[])}。参数已省略，以最新场景与read_scene为准。]`};
       // Successful calls have authoritative results. Avoid resending large generated
       // geometry on every subsequent round; retain pairing, summary and target IDs.
       // Failed or pending calls remain untouched so the model can diagnose/retry.
-      if(succeeded.has(c.id)&&JSON.stringify(c.arguments).length>6000)return {...c,arguments:{_historyOnly:'已成功执行的历史参数摘要，不可作为新工具参数。当前几何和ID以对应结果为准。',summary:String(c.arguments.summary??c.name).slice(0,300),operationCount:Array.isArray(c.arguments.operations)?c.arguments.operations.length:null,targetIds:Array.isArray(c.arguments.operations)?[...new Set(c.arguments.operations.map((op:any)=>op.targetId).filter(Boolean))].slice(0,64):[],originalArgumentsOmitted:true}};
+      if(succeeded.has(c.id)&&JSON.stringify(c.arguments).length>6000)return {...c,arguments:{_historyOnly:'已成功执行的历史参数摘要，不可作为新工具参数。当前几何和ID以对应结果为准。',summary:String(c.arguments.summary??c.name),operationCount:Array.isArray(c.arguments.operations)?c.arguments.operations.length:null,targetIds:Array.isArray(c.arguments.operations)?[...new Set(c.arguments.operations.flatMap((op:any)=>[op.targetId,...(op.partIds??[]),...(op.nodeIds??[])]).filter(Boolean))]:[],originalArgumentsOmitted:true}};
       return c;
     })};
     if(m.role!=='toolResult')return m;
     const imageKeys=captureKeys.get(i);if(imageKeys?.length&&imageKeys.every(key=>latestCaptureByKey.get(key)!==i))return {...m,content:[{type:'text' as const,text:'相同版本、对象和视角已有更新截图，请使用后续图片；原始记录保留。'}]};
     if(m.isError){if(m.toolName!=='plan_model')return m;return {...m,content:m.content.map(c=>c.type==='text'?{...c,text:c.text.split('Received arguments:')[0].slice(0,1800)+'\n规划参数未通过校验，场景未改变。steps和每类设备features最多24项；合并同类条目后重新调用plan_model，保留需求含义。不要原样重复失败参数。'}:c)};}
+    if(duplicateResults.has(i))return {...m,content:[{type:'text' as const,text:'同工具的完全相同成功结果已在后续保留；请复用后续结果。'}]};
+    if(m.toolName==='plan_object_structure'&&planCalls.has(m.toolCallId))return {...m,content:m.content.map(c=>{if(c.type!=='text')return c;try{const data=JSON.parse(c.text);if(Array.isArray(data.objects))return {...c,text:JSON.stringify({...data,objects:data.objects.map((p:{key:string})=>({key:p.key})),planDetails:'完整当前结构方案保留在对应成功调用参数中；同key以最新方案为准。'})};}catch{}return c;})};
+    if(m.toolName==='bind_object_features')return {...m,content:m.content.map(c=>{if(c.type!=='text')return c;try{const data=JSON.parse(c.text);if(Array.isArray(data.objects))return {...c,text:JSON.stringify({...data,objects:data.objects.map((p:any)=>latestPlanKeys.has(p.key)?({...p,features:p.features?.map((f:any)=>({key:f.key,nodeIds:f.nodeIds,status:f.status,methodMatches:f.methodMatches}))}):p),planDetails:'特征名称、参考观察与造型方案见当前plan_object_structure；实际关联ID和问题在此完整保留。'})};}catch{}return c;})};
     if((m.toolName==='audit_model_detail'||m.toolName==='audit_model_details_batch')&&i!==latestAudit)return {...m,content:[{type:'text' as const,text:'此前细节检查已归入最新验收报告，原始记录保留。'}]};
+    if(m.toolName==='inspect_model_quality'&&(i<latestEdit||i!==latestQuality)&&m.content.some(c=>{if(c.type!=='text')return false;try{return JSON.parse(c.text).repeated!==true;}catch{return false;}}))return {...m,content:[{type:'text' as const,text:'历史质量快照已由后续成功编辑或质量报告更新；当前已知缺陷见运行时修复单和最近检查，未完成项不代表通过。'}]};
     if(sceneReads.has(m.toolName)&&retainedReads.has(i)&&i!==latestScene){const raw=m.content.filter(c=>c.type==='text').map(c=>c.text).join('');if(raw.length>8000){try{const data=JSON.parse(raw);if(data.nodes)return {...m,content:[{type:'text' as const,text:JSON.stringify({revision:data.revision,scopeKey:data.scopeKey,detailOmitted:true,nodes:data.nodes.map((n:any)=>({id:n.id,name:n.name,position:n.position,rotationQuaternion:n.rotationQuaternion,scale:n.scale,materialId:n.materialId})),next:'部件ID与变换仍有效；需精确形状时用read_scene({nodeIds:[目标ID]})，仅取正在修改的部件。'})}]};}catch{}}}
     if(m.toolName==='inspect_scene'&&i!==latestInspection)return {...m,content:[{type:'text' as const,text:'历史场景检查已省略，请以最新检查和当前几何为准。'}]};
     if((sceneReads.has(m.toolName)||sceneEdits.has(m.toolName))&&i!==latestScene&&i!==latestEdit&&!retainedReads.has(i))

@@ -37,7 +37,7 @@ export function quickEdit(text:string,doc:SceneDocument,selection:string[],scope
   const t=target(m[1]);if(!t?.node||t.assembly||t.node.geometry?.type!=='box')return null;const v=Number(m[3])*(m[4]==='厘米'?.01:m[4]==='毫米'?.001:1);if(v<=0||v>100)return null;
   const key={宽度:'width',高度:'height',深度:'depth'}[m[2]]!;operations=[{op:'updateParameters',targetId:t.node.id,geometry:{type:'box',params:{...t.node.geometry.params,[key]:v}}}];
  }else return null;
- const batch:CommandBatch={requestId:makeId(),projectId:doc.projectId,baseRevision:doc.revision,selectedIds:[...selection],editScope:scope,incomplete:true,summary:'明确编辑已完成数据校验（本地执行）。请检查预览后应用；尚未做视觉验收。',operations};
+ const batch:CommandBatch={requestId:makeId(),projectId:doc.projectId,baseRevision:doc.revision,selectedIds:[...selection],editScope:scope,taskStatus:'submitted',summary:'明确编辑已完成数据校验（本地执行）。请检查预览后应用；尚未做视觉验收。',operations};
  const result=applyBatch(doc,batch);if(result.errors.length||checkEditScope(doc,result.doc,scope).length)return null;
  if(!operations.every(op=>op.op==='delete')&&JSON.stringify(doc.animation)!==JSON.stringify(result.doc.animation))return null;
  return {batch,result};

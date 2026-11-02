@@ -10,7 +10,7 @@ import {ConversationActions} from './ConversationActions';
 type Props={batch:CommandBatch;changes:SceneChange[];document:SceneDocument;before:boolean;viewportReady:boolean;referenceImages:string[];onCompare:()=>void;onApply:()=>void;onContinue:()=>void;onDiscard:()=>void;onLocate:(ids:string[])=>void;onPrepareChecks:(text:string)=>void};
 export function PreviewDecision({batch,changes,document,before,viewportReady,referenceImages,onCompare,onApply,onContinue,onDiscard,onLocate,onPrepareChecks}:Props){
  const [panel,setPanel]=useState<'checks'|'changes'|null>(null);
- const checks=previewChecks(batch.qualityIssues??[],batch.summary);
+ const checks=previewChecks(batch.qualityIssues,batch.summary);
  const groups=[...new Set(checks.map(check=>check.kind))];
  const needsReview=!!checks.length||batch.incomplete||!viewportReady;
  function locate(text:string){const matches=document.nodes.filter(node=>(node.assemblyName&&text.includes(node.assemblyName))||text.includes(node.name)).map(node=>node.id);if(matches.length){setPanel(null);onLocate(matches);}}

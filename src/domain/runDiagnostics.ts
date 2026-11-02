@@ -1,10 +1,39 @@
 import {safeRequestFootprint} from '../ai/requestFootprint';
+import {safeExecutionMetadata,safeToolFailureCategory} from '../ai/executionTelemetry';
 import type {AgentActivity} from '../ai/modelingAgent';
 // Only allowlisted operational metadata. Never export messages, raw errors, URLs,
 // tool arguments, scene content, images or credentials (even if an error echoed them).
 const finite=(v:unknown)=>typeof v==='number'&&Number.isFinite(v)&&v>=0?v:undefined;
-const identifier=(v:unknown)=>typeof v==='string'&&/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/.test(v)&&!/^sk-|bearer|token-/i.test(v)?v:undefined;
+const oneOf=<T extends string>(value:unknown,values:readonly T[])=>values.find(item=>item===value);
+// Tool names are app-owned, not arbitrary identifiers that could disguise a credential.
+const TOOL_NAMES=['enable_modeling_tools','detail_quality_standard','audit_model_detail','prepare_surface_uv','set_surface_detail','audit_model_details_batch','set_surfaces_batch','connect_scene_parts','inspect_connections','inspect_contact_surfaces','remove_connection','move_components','find_scene_parts_batch','find_scene_parts','add_mesh_components','read_saved_asset','inspect_asset_instances','align_saved_instances','list_saved_assets','add_saved_assets','list_mesh_components','add_mesh_component','configure_process_route','add_reference_component','submit_data_preview','read_component_recipe','check_requirements','plan_object_structure','build_structured_component','repair_structured_features','bind_object_features','plan_model','read_scene','edit_scene','retry_structured_component','retry_scene_edit','inspect_scene','prepare_local_edit','read_pose_rig','define_pose_rig','pose_with_rig','bend_existing_mesh','pose_existing_parts','pose_arm_interaction','pose_bimanual_interaction','create_hand_pose','inspect_part_topology','inspect_workcells','inspect_access_route','inspect_clearance','inspect_model_quality','capture_quality_review','inspect_view_visibility','capture_detail_diagnostic','capture_component_intrinsic','capture_multiview','capture_view','configure_animation','preview_animation','review_model','submit_preview','build_components_parallel'] as const;
 export function runDiagnostics(status:string,activity:AgentActivity|null,error:string|null){
- const category=!error?null:/体验页访问验证|访问会话/.test(error)?'site-access':/网络|连接|fetch|Connection/i.test(error)?'connection':/超时|无响应/.test(error)?'timeout':/校验|参数|工具/.test(error)?'validation':'unclassified';
- return {format:'chat3d-diagnostics-v1',createdAt:new Date().toISOString(),status,errorCategory:category,httpStatus:error?.match(/HTTP\s+(\d{3})/i)?.[1]??null,run:activity?{outcome:['preview-ready','partial','answered','budget-exhausted','cancelled','failed'].includes(activity.outcome??'')?activity.outcome:undefined,executionMeta:activity.executionMeta?{appVersion:identifier(activity.executionMeta.appVersion),model:identifier(activity.executionMeta.model),buildCommit:identifier(activity.executionMeta.buildCommit),initialRevision:finite(activity.executionMeta.initialRevision),contextPolicy:identifier(activity.executionMeta.contextPolicy),executionMode:activity.executionMeta.executionMode==='pi'?'pi':undefined}:undefined,turns:activity.turn,usageIncomplete:!!activity.usageIncomplete||activity.timings.some(t=>t.kind==='model'&&(t.usageState==='unknown'||(!t.usageState&&!(Number(t.inputTokens)>0||Number(t.outputTokens)>0)))),subagents:activity.parallelRuns?.map(r=>({status:r.status,rounds:r.rounds,toolCalls:r.toolCalls,inputTokens:r.inputTokens,outputTokens:r.outputTokens,usageReported:r.usageReported,startedAt:r.startedAt,endedAt:r.endedAt})),toolCalls:activity.toolCalls,inputTokens:activity.inputTokens,outputTokens:activity.outputTokens,timings:activity.timings.map(t=>({kind:t.kind,toolName:t.kind==='tool'&&typeof t.toolName==='string'&&/^[a-z][a-z0-9_]{0,63}$/.test(t.toolName)?t.toolName:undefined,repeatedInput:typeof t.repeatedInput==='boolean'?t.repeatedInput:undefined,argumentsChars:finite(t.argumentsChars),resultChars:finite(t.resultChars),sceneRevision:finite(t.sceneRevision),firstDataAt:finite(t.firstDataAt),firstContentAt:finite(t.firstContentAt),responseAt:finite(t.responseAt),usageState:t.kind==='model'?(['reported','reported-zero','unknown'].includes(t.usageState??'')?t.usageState:(Number(t.inputTokens)>0||Number(t.outputTokens)>0?'reported':'unknown')):undefined,uncachedInputTokens:finite(t.uncachedInputTokens),cacheReadTokens:finite(t.cacheReadTokens),cacheWriteTokens:finite(t.cacheWriteTokens),startedAt:t.startedAt,endedAt:t.endedAt,failed:t.failed??false,inputTokens:t.inputTokens,outputTokens:t.outputTokens,requestFootprint:safeRequestFootprint(t.requestFootprint)}))}:null};
+ const message=typeof error==='string'?error:'';
+ const category=!message?null:/体验页访问验证|访问会话/.test(message)?'site-access':/网络|连接|fetch|Connection/i.test(message)?'connection':/超时|无响应/.test(message)?'timeout':/校验|参数|工具/.test(message)?'validation':'unclassified';
+ const timings=activity&&Array.isArray(activity.timings)?activity.timings:[];
+ return {
+  format:'chat3d-diagnostics-v1',createdAt:new Date().toISOString(),
+  status:oneOf(status,['idle','capturing','context','generating','validating','previewing','applying','error','cancelled']),
+  errorCategory:category,httpStatus:message.match(/HTTP\s+(\d{3})/i)?.[1]??null,
+  run:activity?{
+   outcome:oneOf(activity.outcome,['preview-ready','partial','answered','budget-exhausted','cancelled','failed']),
+   phase:oneOf(activity.phase,['planning','building','reviewing','repairing']),lastModelEditAt:finite(activity.lastModelEditAt),
+   executionMeta:activity.executionMeta?safeExecutionMetadata(activity.executionMeta):undefined,
+   turns:finite(activity.turn),
+   usageIncomplete:activity.usageIncomplete===true||timings.some(t=>t.kind==='model'&&(t.usageState==='unknown'||(!t.usageState&&!(finite(t.inputTokens)||finite(t.outputTokens))))),
+   subagents:Array.isArray(activity.parallelRuns)?activity.parallelRuns.map(r=>({status:oneOf(r.status,['queued','running','ready','done','failed','cancelled']),rounds:finite(r.rounds),toolCalls:finite(r.toolCalls),inputTokens:finite(r.inputTokens),outputTokens:finite(r.outputTokens),usageReported:typeof r.usageReported==='boolean'?r.usageReported:undefined,startedAt:finite(r.startedAt),endedAt:finite(r.endedAt)})):undefined,
+   toolCalls:finite(activity.toolCalls),inputTokens:finite(activity.inputTokens),outputTokens:finite(activity.outputTokens),
+   timings:timings.map(t=>({
+    kind:oneOf(t.kind,['model','tool']),toolName:t.kind==='tool'?oneOf(t.toolName,TOOL_NAMES):undefined,
+    failureCategory:t.kind==='tool'&&t.failed===true?(safeToolFailureCategory(t.failureCategory)??'other'):undefined,
+    repeatedInput:typeof t.repeatedInput==='boolean'?t.repeatedInput:undefined,
+    argumentsChars:finite(t.argumentsChars),resultChars:finite(t.resultChars),sceneRevision:finite(t.sceneRevision),
+    firstDataAt:finite(t.firstDataAt),firstContentAt:finite(t.firstContentAt),responseAt:finite(t.responseAt),
+    usageState:t.kind==='model'?(oneOf(t.usageState,['reported','reported-zero','unknown'])??((finite(t.inputTokens)||finite(t.outputTokens))?'reported':'unknown')):undefined,
+    uncachedInputTokens:finite(t.uncachedInputTokens),cacheReadTokens:finite(t.cacheReadTokens),cacheWriteTokens:finite(t.cacheWriteTokens),
+    startedAt:finite(t.startedAt),endedAt:finite(t.endedAt),failed:t.failed===true,
+    inputTokens:finite(t.inputTokens),outputTokens:finite(t.outputTokens),requestFootprint:safeRequestFootprint(t.requestFootprint),
+   })),
+  }:null,
+ };
 }

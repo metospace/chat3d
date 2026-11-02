@@ -4,6 +4,7 @@ import {Button,Tag} from 'antd';
 import {InfoCircledIcon} from '@radix-ui/react-icons';
 import {PortalDialog} from './kit/PortalDialog';
 import {APP_VERSION, formatInstallingProgress, type UpdateView} from '../domain/appUpdate';
+import {UPDATE_HISTORY} from '../domain/updateHistory';
 import {
   applyAppUpdate,
   appUpdateView,
@@ -123,6 +124,10 @@ export function AppUpdatePanel({layout = 'settings'}: {layout?: 'settings' | 'di
       {!hasUpdate && !showInstalling && !showInstalled && <Button type="primary" className="app-update-primary-action" disabled={checking || updating} onClick={() => void checkForAppUpdate({manual: true})}>{checking ? '正在检查…' : '检查更新'}</Button>}
       {hasUpdate && !showReadyActions && !showBusyActions && !showFailed && !showInstalled && !showInstalling && <Button type="primary" className="app-update-primary-action" disabled={checking || updating} onClick={() => void applyAppUpdate()}>{applyUpdateLabel(version)}</Button>}
     </div>
+    <section className="app-update-history" aria-label="更新日志"><header><h3>更新日志</h3><span>最新在前</span></header><p className="app-update-history-source">历史时间采用版本提交时间；开发中内容尚未发布为安装包。</p>
+      <ol>{UPDATE_HISTORY.slice(0,3).map(entry=><li key={entry.version}><div className="app-update-history-meta"><strong>{entry.development?entry.version:`v${entry.version}`}</strong>{entry.version===APP_VERSION&&<Tag>当前版本</Tag>}<time dateTime={entry.date}>{entry.date.slice(0,10)}{entry.date.includes('T')?` ${entry.date.slice(11,16)}（UTC+8）`:''}</time></div><ul>{entry.changes.map(change=><li key={change}>{change}</li>)}</ul></li>)}</ol>
+      <details className="app-update-history-older"><summary>查看更早记录（{UPDATE_HISTORY.length-3}）</summary><ol>{UPDATE_HISTORY.slice(3).map(entry=><li key={entry.version}><div className="app-update-history-meta"><strong>v{entry.version}</strong>{entry.version===APP_VERSION&&<Tag>当前版本</Tag>}<time dateTime={entry.date}>{entry.date.slice(0,10)} {entry.date.slice(11,16)}（UTC+8）</time></div><ul>{entry.changes.map(change=><li key={change}>{change}</li>)}</ul></li>)}</ol></details>
+    </section>
   </div>;
 }
 

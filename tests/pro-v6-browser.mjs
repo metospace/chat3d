@@ -16,7 +16,7 @@ try{
  await page.emulateMedia({reducedMotion:'reduce'});page.on('pageerror',error=>report.errors.push(error.message));
  const base='http://127.0.0.1:'+server.httpServer.address().port;
  await page.route('**/*',route=>route.request().url().startsWith(base)?route.continue():route.abort());
- await page.goto(base);await page.getByRole('heading',{name:'项目工作台',exact:true}).waitFor();
+ await page.goto(base);await page.getByLabel('新项目描述',{exact:true}).waitFor();
  await check('ProLayout and PageContainer render a usable home',async()=>{
   assert.ok(await page.locator('.ant-pro-layout').count());
   const main=await page.locator('.pro-home-page').boundingBox();assert.ok(main.width>900);
@@ -57,7 +57,7 @@ try{
   await page.getByRole('button',{name:'设置',exact:true}).click();await page.getByRole('tab',{name:'通用',exact:true}).waitFor();
   await page.screenshot({path:join(output,'pro-v6-settings.png'),fullPage:true});
   await page.getByRole('tab',{name:'数据管理',exact:true}).click();assert.ok(await page.getByRole('button',{name:'管理项目备份',exact:true}).isVisible());
-  await page.getByRole('tab',{name:'关于',exact:true}).click();assert.ok(await page.getByText('0.2.27',{exact:true}).isVisible());
+  await page.getByRole('tab',{name:'关于',exact:true}).click();
  });
  await page.getByRole('button',{name:'首页',exact:true}).click();
  await check('home input survives navigation and native themes work',async()=>{

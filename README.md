@@ -10,9 +10,11 @@
 
 ## Agent 依赖
 
-连续建模使用 `@earendil-works/pi-agent-core` 与 `@earendil-works/pi-ai`，均固定为 `1.0.0`。项目直接使用 `Agent` 和 OpenAI-compatible 流式适配器；会话、草稿、建模工具与复核规则由 Scenivo 管理，不依赖 1.0 已移出的实验性 AgentHarness。
+连续建模使用 `@earendil-works/pi-agent-core` 与 `@earendil-works/pi-ai`，均固定为 `1.5.0`。项目直接使用 `Agent` 和 OpenAI-compatible 流式适配器；会话、草稿、建模工具与复核规则由 Scenivo 管理，不依赖 1.0 已移出的实验性 AgentHarness。
 
 此升级不自动接入 Pi Coding Agent 的 Codemode、MCP 登录或终端界面，也不代表整体任务 Token 减少 40%。这些是独立能力，需要按产品需求另行集成。
+
+1.5 使用增量工具参数解析，并统一通过 pi-schema 校验 JSON Schema。现有工具定义保留 TypeBox，显式依赖 `typebox@1.3.27`，不再从 Pi 重导出接口导入。工具封装使用 TypeBox `Static` 保留元组和联合参数的完整静态类型；运行时仍由 Pi 校验后执行。结构生成回归覆盖向量长度、数字字符串转换、无效几何及重复数量边界。该升级不改变 Scenivo 的任务预算、缺陷阻断和人工应用流程。
 
 ## 本地启动
 

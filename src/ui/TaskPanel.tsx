@@ -1,7 +1,7 @@
 import {downloadJson} from '../util/downloadJson';
 import {RequirementList} from './RequirementList';
 import {runDiagnostics} from '../domain/runDiagnostics';
-import {customerText,progressSteps} from '../domain/customerProgress';
+import {activityProgress,customerText,progressSteps} from '../domain/customerProgress';
 import {RunTrace} from './RunTrace';
 import {useEffect,useState} from 'react';
 import {useEditorStore,type EditorStore} from '../store';
@@ -12,7 +12,7 @@ export function TaskPanel({onConversation,editor}:{onConversation:()=>void;edito
  const targetEditor=editor??useEditorStore;
  const {lastRun,aiStatus,aiError,pendingBatch,pendingResult,doc,messages,past,future}=useStore(targetEditor);
  const busy=['capturing','context','generating','validating','applying'].includes(aiStatus);
- const [exportNotice,setExportNotice]=useState(''),[exporting,setExporting]=useState(false),[diagnosticText,setDiagnosticText]=useState('');const [now,setNow]=useState(Date.now());useEffect(()=>{if(!busy)return;const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[busy]);
+ const [exportNotice,setExportNotice]=useState(''),[exporting,setExporting]=useState(false),[diagnosticText,setDiagnosticText]=useState('');const [now,setNow]=useState(Date.now());useEffect(()=>{if(!busy)return;setNow(Date.now());const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[busy]);
  const runs=messages.filter(m=>m.run).slice().reverse(),latest=runs[0]?.run;
  const outcomes=messages.filter(m=>m.batch).slice().reverse(),outcome=outcomes[0];
  const steps=progressSteps(lastRun,busy),done=steps.reduce((n,s)=>n+s.completed,0),failed=steps.reduce((n,s)=>n+s.failed,0);
@@ -20,12 +20,13 @@ export function TaskPanel({onConversation,editor}:{onConversation:()=>void;edito
  const start=latest?.startedAt??lastRun?.timings[0]?.startedAt;
  const elapsed=start===undefined?'—':`${Math.max(0,Math.floor(((busy?now:latest?.endedAt??lastRun?.lastEventAt??start)-start)/1000))} 秒`;
  const pending=!!pendingBatch||!!pendingResult;
- const title=busy?customerText(lastRun?.title):pending?(pendingBatch?.taskStatus==='partial'?'未完成，已保留阶段草稿':pendingBatch?.incomplete?'预览已生成，仍需核对':'模型已生成，请检查预览'):aiStatus==='error'||latest?.status==='failed'?'这次处理未完成':aiStatus==='cancelled'||latest?.status==='stopped'?'已停止，已生成的内容保留':outcome?.outcome==='applied'?'修改已应用到场景':outcome?.outcome==='discarded'?'这次预览已放弃':latest?.mode==='demo'?'历史模拟记录已结束 · 当前无运行任务':lastRun||latest?'本次处理已结束':manualHistory.length?(past.some(e=>e.source!=='ai')?'修改记录已更新':'修改已撤销'):'还没有建模任务';
+ const progress=activityProgress(lastRun,busy,now);
+ const title=busy?(lastRun?.phase?progress.label:customerText(lastRun?.title)):pending?(pendingBatch?.taskStatus==='partial'?'未完成，已保留阶段草稿':pendingBatch?.incomplete||pendingBatch?.qualityIssues?.length?'预览已生成，仍需核对':'模型已生成，请检查预览'):aiStatus==='error'||latest?.status==='failed'?'这次处理未完成':aiStatus==='cancelled'||latest?.status==='stopped'?'已停止，已生成的内容保留':outcome?.outcome==='applied'?'修改已应用到场景':outcome?.outcome==='discarded'?'这次预览已放弃':latest?.mode==='demo'?'历史模拟记录已结束 · 当前无运行任务':lastRun||latest?'本次处理已结束':manualHistory.length?(past.some(e=>e.source!=='ai')?'修改记录已更新':'修改已撤销'):'还没有建模任务';
  const next=busy?'正在继续处理，可返回对话补充要求或停止。':pending?(pendingBatch?.taskStatus==='partial'?'当前任务尚未完成，可继续处理剩余问题；也可保留或放弃阶段结果。':'检查模型后选择应用或放弃。应用不等于质量验收通过。'):aiStatus==='error'?'回到对话查看提示，确认后再继续。不会自动重试。':'可以继续提出修改要求，或保存当前模型。';
  const exportDiagnostics=async()=>{if(exporting)return;setExporting(true);try{const state=targetEditor.getState();const text=JSON.stringify(runDiagnostics(state.aiStatus,state.lastRun,state.aiError),null,2);setDiagnosticText(text);setExportNotice(await downloadJson(text,'diagnostics'));}catch(e){setExportNotice('下载失败：'+String(e)+'。可展开下方诊断内容手动复制。');}finally{setExporting(false);}};
  return <section className="task-panel customer-task-panel" aria-label="任务记录">
  <header className="task-panel-intro"><ActivityLogIcon/><h2>任务与执行记录</h2><p>当前进展、处理结果和接下来要做的事。</p></header>
- <section className={`customer-current ${busy?'is-running':''}`} aria-label="当前任务状态"><span className="customer-status">{busy?'正在处理':pending?'等待应用':'当前状态'}</span><h3>{title}</h3><p>{next}</p><button onClick={onConversation}>{pending?'查看预览':busy?'返回对话':'前往对话'}</button></section>
+ <section className={`customer-current ${busy?'is-running':''}`} aria-label="当前任务状态" data-phase={progress.phase} data-model-state={progress.modelState}><span className="customer-status">{busy?progress.label:pending?'等待应用':'当前状态'}</span><h3>{title}</h3>{progress.modelEditAgeSeconds!==undefined&&<p aria-label="距上次模型修改">距上次模型修改 {progress.modelEditAgeSeconds} 秒</p>}{progress.reviewNote&&<p>{progress.reviewNote}</p>}<p>{next}</p><button onClick={onConversation}>{pending?'查看预览':busy?'返回对话':'前往对话'}</button></section>
  {(lastRun||latest)&&<div className="customer-facts"><div><strong>{elapsed}</strong><span>本次用时</span></div><div><strong>{done}</strong><span>已完成步骤</span></div><div><strong>{lastRun?.generationQuality==='fast'?'快速':lastRun?.generationQuality==='fine'?'精细':'未记录'}</strong><span>生成档位</span></div></div>}
  {(aiError||failed>0)&&<section className="customer-notice" aria-label="需要留意"><h3>需要留意</h3><p>{aiError?customerText(aiError,'处理遇到问题，请返回对话查看'): `${failed} 个处理步骤没有完成${busy?'，当前仍在继续处理':'，请检查保留结果'}。`}</p></section>}
  {pending&&<p className="task-footnote">当前展示的是预览；尚未写入正式场景。</p>}

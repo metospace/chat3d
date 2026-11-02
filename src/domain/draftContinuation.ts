@@ -12,5 +12,5 @@ export function continueDraft(base:SceneDocument,parent:DraftBaseline|null,batch
  if(result.errors.length)throw new Error(result.errors.map(e=>e.message).join('；'));
  const errors=checkEditScope(working,result.doc,batch.editScope);if(errors.length)throw new Error(errors.join('；'));
  if(!parent)return {batch,result};
- return {batch:{...batch,summary:batch.summary+(parent.batch.incomplete&&!batch.incomplete?'\n此前草稿仍有未完成事项，请结合前面的阶段记录核对。':''),baseRevision:base.revision,operations:[...parent.batch.operations,...batch.operations],editScope:undefined},result:{doc:result.doc,applied:[...parent.result.applied,...result.applied],errors:[]}};
+ return {batch:{...batch,baseRevision:base.revision,operations:[...parent.batch.operations,...batch.operations],editScope:undefined},result:{doc:result.doc,applied:[...parent.result.applied,...result.applied],errors:[]}};
 }

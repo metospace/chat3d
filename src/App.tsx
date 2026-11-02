@@ -1,4 +1,5 @@
 import {AccessibleModal as Modal} from './ui/kit/AccessibleModal';
+import {exportHtml} from './scene/exportHtml';
 import './ui/studio/tokens.css';
 import './ui/studio/product-structure.css';
 import './ui/theme/legacy-tokens.css';
@@ -17,6 +18,7 @@ import {makeId} from './util/ids';
 import {ConversationResize,useConversationWidth} from './ui/ConversationResize';
 import type {CSSProperties} from 'react';
 import {CanvasAssetShelf,CanvasInspector,CanvasSelectionSummary,type CanvasPropertyTab} from './ui/CanvasPanels';
+import {CanvasEmptyState} from './ui/CanvasEmptyState';
 import {focusSceneObjects} from './scene/focus';
 import {CursorArrowIcon,MoveIcon,RotateCounterClockwiseIcon,SizeIcon,EnterFullScreenIcon,ArrowLeftIcon} from '@radix-ui/react-icons';
 import {AppearanceProvider} from './ui/Appearance';
@@ -47,6 +49,15 @@ import {downloadJson} from './util/downloadJson';
 import {exportFile} from './util/exportFile';
 import {initializeWorkspace,useWorkspaceStore,createSession,anySessionRunning,exportWorkspaceBackup} from './workspace';
 import { MAX_PROJECT_BYTES, parseProject, serializeProject } from './domain/project';
+import {activityProgress} from './domain/customerProgress';
+
+function CanvasDraftStatus(){
+ const activity=useEditorStore(state=>state.lastRun);
+ const [now,setNow]=useState(Date.now());
+ useEffect(()=>{const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[]);
+ const progress=activityProgress(activity,true,now);
+ return <><Tag color="processing" data-phase={progress.phase} data-model-state={progress.modelState} title={progress.reviewNote}>{progress.phase||progress.modelState?progress.label:'AI 正在生成'}</Tag>{progress.modelEditAgeSeconds!==undefined&&<small aria-label="距上次模型修改">距上次模型修改 {progress.modelEditAgeSeconds} 秒</small>}</>;
+}
 
 export default function App() {
   const [taskQueueRequest,setTaskQueueRequest]=useState(0);
@@ -74,6 +85,8 @@ export default function App() {
   const [librarySaving,setLibrarySaving]=useState(false),[showLibrarySave,setShowLibrarySave]=useState(false);
 
   const [exporting, setExporting] = useState(false);
+  const [exportProgress,setExportProgress]=useState('');
+  const htmlExportBusy=useRef(false);
   const downloadGlb = async () => {
     setExportNotice(null);
     setExporting(true);
@@ -85,17 +98,20 @@ export default function App() {
     finally { setExporting(false); }
   };
   const downloadHtml = async () => {
-    setExportNotice(null);
-    setExporting(true);
+    if(htmlExportBusy.current)return;
+    htmlExportBusy.current=true;setExportNotice(null);setExporting(true);setExportProgress('请选择 HTML 保存位置…');
+    const state=useEditorStore.getState(),title=useWorkspaceStore.getState().sessions.find(s=>s.id===useWorkspaceStore.getState().activeId)?.title??'Scenivo 模型';
+    const source=state.doc;
     try {
-      const state=useEditorStore.getState(),title=useWorkspaceStore.getState().sessions.find(s=>s.id===useWorkspaceStore.getState().activeId)?.title??'Scenivo 模型';
-      const snapshot=structuredClone(state.doc);
-      const {exportHtml}=await import('./scene/exportHtml');
-      const html=await exportHtml(snapshot,title);
-      const message=await exportFile(html,'html',`scenivo-${state.doc.projectId.slice(0,8)}.html`);
+      const message=await exportFile(async()=>{
+        setExportProgress('正在准备 HTML 导出…');
+        const html=await exportHtml(structuredClone(source),title,progress=>setExportProgress(progress.stage==='geometry'?`正在构建导出模型 ${progress.completed??0}/${progress.total??0}…`:progress.stage==='textures'?'正在处理材质与贴图…':'正在打包离线 HTML…'));
+        setExportProgress('正在保存 HTML 文件…');
+        return html;
+      },'html',`scenivo-${source.projectId.slice(0,8)}.html`);
       if(message)setExportNotice({message});
     }catch(error){setExportNotice({message:`HTML 导出失败：${error instanceof Error?error.message:String(error)}`});}
-    finally{setExporting(false);}
+    finally{htmlExportBusy.current=false;setExporting(false);setExportProgress('');}
   };
   const saveProject = async () => {
     setExportNotice(null);
@@ -151,6 +167,7 @@ export default function App() {
     const next=!assistantOpen;setAssistantOpen(next);
 
   }
+  function focusComposer(){setAssistantOpen(true);setFocusScene(false);requestAnimationFrame(()=>document.querySelector<HTMLTextAreaElement>('[aria-label="建模指令"]')?.focus());}
   useEffect(()=>{!selection.length&&setInspectorOpen(false)},[selection.join('|')]);
   const [taskDetailsOpen,setTaskDetailsOpen]=useState(false);
   const [focusScene,setFocusScene]=useState(false);
@@ -182,10 +199,11 @@ export default function App() {
         <AppUpdateNotice onBackup={()=>setShowTools(true)}/>
         {saveNotice&&!workspace.error&&<SaveToast message={projectNotice} onClose={closeSaveNotice}/>}
         {exportNotice&&<SaveToast key={exportNotice.message} message={exportNotice.message} onClose={closeExportNotice} duration={4000} verbatim/>}
+        {exportProgress&&<div className="workspace-notice" role="status"><Spin size="small"/><span>{exportProgress}</span></div>}
         {workspace.error&&!conflictDismissed&&<div role="alert" className="workspace-notice is-error"><div className="workspace-conflict-copy"><span>{workspace.error}</span><small>请关闭其他标签页，下载备份后刷新本页。</small>{backupStatus&&<span role="status">{backupStatus}</span>}</div><Button disabled={backupBusy} onClick={()=>void backupConflict()}>下载工作台备份</Button><Button type="primary" onClick={()=>window.location.reload()}>我已备份，刷新本页</Button><Button type="text" aria-label="隐藏冲突提示" icon={<Cross1Icon/>} onClick={()=>setConflictDismissed(true)}/></div>}
         {!workspace.error&&(autosaveError||(projectNotice&&!saveNotice))&&<div role="status" className={`workspace-notice ${autosaveError?'is-error':''}`}><span>{autosaveError||projectNotice}</span>{!autosaveError&&<Button type="text" aria-label="关闭通知" icon={<Cross1Icon/>} onClick={()=>setProjectNotice('')}/>}</div>}
         {!workspace.ready&&<div className="workspace-loading"><Spin size="large"/><p>正在恢复项目…</p></div>}
-        {workspace.ready&&<StudioHome onImport={()=>modelFileRef.current?.click()} onTasks={()=>setTaskQueueRequest(v=>v+1)} onConfigure={()=>setShowSettings(true)} onGenerate={projectId=>setAutoStartRequest({id:makeId(),projectId})} hidden={modulePage!=='home'} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);}} onLibrary={setModulePage}/>}
+        {workspace.ready&&<StudioHome onImport={()=>modelFileRef.current?.click()} onTasks={()=>setTaskQueueRequest(v=>v+1)} onConfigure={()=>setShowSettings(true)} onGenerate={projectId=>setAutoStartRequest({id:makeId(),projectId})} hidden={modulePage!=='home'} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);}}/>}
         {workspace.ready&&(modulePage==='asset'||modulePage==='scene')&&<ProjectLibrary key={modulePage+libraryRefresh} kind={modulePage} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);}} onManage={()=>setShowAssets(true)}/>}
         {workspace.ready&&modulePage==='team'&&<TeamStudioPage onCopied={()=>setLibraryRefresh(v=>v+1)}/>}
         {workspace.ready&&modulePage==='tasks'&&<TaskCenter locked={locked} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);}}/>}
@@ -194,16 +212,16 @@ export default function App() {
         <header className="studio-header workbench-project-actions" hidden={modulePage!=='workbench'}>
           <Button className="workbench-back" type="text" aria-label="返回首页" icon={<ArrowLeftIcon/>} onClick={()=>navigateStudio('home')}/>
           <div className="workbench-project-summary"><strong title={active?.title}>{active?.title??'未命名项目'}</strong><span className="workbench-kind-tag">{active?.moduleKind==='asset'?'资产':'场景'}</span><span className={`workbench-save-status ${workspace.error?'is-error':''}`}>{workspace.error?'本机保存异常':workspace.saving?'正在保存':'已保存到本机'}<span aria-hidden="true"> · </span>{previewing?'待确认':!active?.librarySavedAt?'草稿':active.savedRevision===revision?'已入库':'修改未入库'}</span></div>
-          <div className="workbench-view-controls"><Button type="text" aria-label="撤销" title="撤销" disabled={!canUndo||locked} onClick={undo} icon={<CounterClockwiseClockIcon/>}/><Button type="text" aria-label="重做" title="重做" disabled={!canRedo||locked} onClick={redo} icon={<ReloadIcon/>}/></div>
-          <div className="workbench-document-controls"><Popover trigger="click" placement="topRight" content={<div role="dialog" aria-label="项目信息" className="workbench-project-info">
+          <div className="workbench-history-controls" role="group" aria-label="编辑历史"><Button type="text" aria-label="撤销" title="撤销" disabled={!canUndo||locked} onClick={undo} icon={<CounterClockwiseClockIcon/>}/><Button type="text" aria-label="重做" title="重做" disabled={!canRedo||locked} onClick={redo} icon={<ReloadIcon/>}/></div>
+          <div className="workbench-view-controls"/>
+          <div className="workbench-document-controls" role="group" aria-label="项目操作"><Popover trigger="click" placement="bottomRight" content={<div role="dialog" aria-label="项目信息" className="workbench-project-info">
           <span className="canvas-project-title" title={active?.title}>{active?.title??'正在恢复工作台…'}</span>
           <Tag color={workspace.error?'error':workspace.saving?'warning':'default'} className="save-badge">{workspace.error?'保存异常':workspace.saving?'正在保存':'会话已自动保存到本浏览器'}</Tag>
           {active?.assetSource&&<Tag color={(active.assetCatalogVersion??active.assetSource.version)>active.assetSource.version?'warning':'default'}>编辑 v{active.assetSource.version}{(active.assetCatalogVersion??0)>active.assetSource.version?` · 库内最新 v${active.assetCatalogVersion}，当前草稿未替换`:''}</Tag>}
           <span className="editor-save-state">{active?.snapshot.pendingBatch?'待确认':!active?.librarySavedAt?'草稿':active.savedRevision===useEditorStore.getState().doc.revision?'已保存到库':'未保存到库'}</span></div>}><Button type="text" aria-label="项目状态" title={active?.title} icon={<LayersIcon/>}/></Popover>
+          <Button type="text" className="workbench-assistant-toggle" title={assistantOpen?'收起 AI 助手':'打开 AI 助手'} aria-expanded={assistantOpen} aria-label={assistantOpen?'收起 AI 助手':'打开 AI 助手'} onClick={toggleAssistant} icon={<ChatBubbleIcon/>}/>
+          <Dropdown trigger={['click']} menu={{items:exportItems}} disabled={locked||!workspace.ready}><Button className="workbench-export" aria-label="导出与更多" disabled={locked||!workspace.ready}>导出 <ChevronDownIcon/></Button></Dropdown>
           <Button className="workbench-save" type="primary" aria-label={librarySaving?'正在保存…':active?.moduleKind==='asset'?'保存资产':'保存场景'} disabled={locked||librarySaving||!workspace.ready} onClick={()=>{if(active?.moduleKind==='asset'&&!useEditorStore.getState().doc.nodes.length){setProjectNotice('还没有可保存的模型。请先创建或导入模型，再保存到资产库。');setAssistantOpen(true);return;}setShowLibrarySave(true);}}>{librarySaving?'保存中…':active?.moduleKind==='asset'?'保存资产':'保存场景'}</Button>
-          <Button type="text" aria-label="模型配置" icon={<GearIcon/>} onClick={()=>setShowSettings(true)}/>
-          <Button type="text" className="workbench-assistant-toggle" aria-expanded={assistantOpen} aria-label={assistantOpen?'收起 AI 助手':'打开 AI 助手'} onClick={toggleAssistant} icon={<ChatBubbleIcon/>}>AI 助手</Button>
-          <Dropdown trigger={['click']} menu={{items:exportItems}} disabled={locked||!workspace.ready}><Button type="text" aria-label="导出与更多" disabled={locked||!workspace.ready}>导出 <ChevronDownIcon/></Button></Dropdown>
           </div>
           <input ref={fileRef} type="file" accept=".json,.chat3d.json" className="hidden" onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void openProject(file);}}/>
           <input ref={modelFileRef} type="file" accept=".glb" className="hidden" onChange={async e=>{const file=e.target.files?.[0];e.target.value='';if(!file)return;try{if(file.size>20*1024*1024)throw Error('GLB超过20MB');setProjectNotice('正在校验并导入网格模型…');const result=await importGlb(await file.arrayBuffer(),file.name);if(!createSession(result.doc,{moduleKind:'asset',title:file.name.replace(/\.glb$/i,'')||'导入模型',assetCategory:'其他'}))throw Error('请结束当前生成后再导入');setModulePage('workbench');useCompositionTool.setState({mode:'orbit'});setProjectNotice(`已导入 ${result.doc.nodes.length} 个网格部件到新会话。${result.warnings.join(' ')}`);}catch(error){setProjectNotice(`网格导入失败：${error instanceof Error?error.message:String(error)}`);}}}/>
@@ -213,7 +231,7 @@ export default function App() {
         <div className="editor-upper"><aside className="editor-objects canvas-surface" hidden={!structureOpen}><div className="editor-panel-heading">场景结构<Button type="text" aria-label="收起场景结构" icon={<Cross1Icon/>} onClick={()=>setStructureOpen(false)}/></div><ObjectTree/><PanelResize label="调整对象面板宽度" width={objectsWidth} min={200} max={360} side="right" onChange={setObjectsWidth}/></aside>
           <main className="scene-region">
             <div className="scene-stage"><ViewportPanel/></div>
-        <div className="canvas-transform-tools canvas-surface" role="group" aria-label="场景编辑工具">
+        {nodeCount>0&&<div className="canvas-transform-tools canvas-surface" role="group" aria-label="场景编辑工具">
           <ToolbarAction label="浏览场景" help="左键拖动旋转视角，右键平移，滚轮缩放；单击选择不切换编辑模式" pressed={compositionMode==='orbit'&&!selectionBox} onPress={()=>{useSelectionTool.setState({box:false});useCompositionTool.setState({mode:'orbit'});}}><span>浏览</span></ToolbarAction>
           <ToolbarAction label="选择对象" help="打开场景结构，从列表中选择要编辑的对象" onPress={()=>structureOpen?setStructureOpen(false):openEditorPanel('structure')}><CursorArrowIcon/><span>选择</span></ToolbarAction>
           <ToolbarAction pressed={selectionBox} label={selectionBox?'退出框选':'框选对象'} help="默认按可见表面框选；Shift / Ctrl / ⌘ 追加，Esc 取消。本次选择可在旁边开启穿透" disabled={!viewportReady||locked} disabledReason={!viewportReady?'三维视图不可用，可在结构列表中多选':'请先结束生成或处理预览'} onPress={()=>useSelectionTool.setState({box:!selectionBox})}><span aria-hidden="true">▧</span></ToolbarAction>
@@ -226,17 +244,17 @@ export default function App() {
           <ToolbarAction label="聚焦选中对象" help="把镜头移动到选中内容附近，方便查看" disabled={!selection.length||!viewportReady} disabledReason={!selection.length?'请先选中一个或多个对象':'当前三维视图不可用'} onPress={()=>focusSceneObjects(selection)}><EnterFullScreenIcon/></ToolbarAction><span/>
           <DeleteSelectionAction active={workspace.ready&&modulePage==='workbench'} onNotice={setProjectNotice}/>
           <ToolbarAction label={focusScene?'恢复工作台':'专注场景'} help={focusScene?'恢复对话与编辑面板':'暂时收起周边面板，放大模型画布'} onPress={()=>setFocusScene(!focusScene)}><EnterFullScreenIcon/></ToolbarAction>
-        </div>
+        </div>}
 
-            <div className="workbench-review-slot"/><div className="canvas-context-label"><LayersIcon/>{previewing?'修改预览':locked?'正在处理草稿':active?.title??'三维视图'}<small>{nodeCount} 个零件 · m</small><Tag color={previewing?'warning':locked?'processing':undefined}>{previewing?'待确认预览':locked?'AI 正在生成':compositionMode==='move'?'移动对象':compositionMode==='rotate'?'旋转对象':compositionMode==='scale'?'缩放对象':selectionBox?'框选对象':'浏览场景'}</Tag></div>
-            {nodeCount===0&&!locked&&viewportReady&&!placingAsset&&!draggingAsset&&<div className="canvas-empty-guide"><span className="canvas-empty-symbol" aria-hidden="true"><CubeIcon/></span><h2>{active?.moduleKind==='asset'?'从一个模型开始':'搭建你的三维场景'}</h2><p>向 AI 描述想法，也可以从本地资源开始。</p><div><Button onClick={()=>openEditorPanel('asset')} icon={<CubeIcon/>}>浏览本地资产</Button><Button onClick={()=>modelFileRef.current?.click()} icon={<UploadIcon/>}>导入 GLB 模型</Button></div><small>模型可继续编辑，并保存为本地资产或场景</small></div>}
+            <div className="workbench-review-slot"/>{nodeCount>0&&<div className="canvas-context-label"><LayersIcon/>{previewing?'修改预览':locked?'正在处理草稿':active?.title??'三维视图'}<small>{nodeCount} 个零件 · m</small>{locked&&!previewing?<CanvasDraftStatus/>:<Tag color={previewing?'warning':undefined}>{previewing?'待确认预览':compositionMode==='move'?'移动对象':compositionMode==='rotate'?'旋转对象':compositionMode==='scale'?'缩放对象':selectionBox?'框选对象':'浏览场景'}</Tag>}</div>}
+            {nodeCount===0&&!previewing&&viewportReady&&!placingAsset&&!draggingAsset&&<CanvasEmptyState busy={locked} asset={active?.moduleKind==='asset'} onConversation={focusComposer} onAssets={()=>openEditorPanel('asset')} onImport={()=>modelFileRef.current?.click()} onTask={()=>setTaskDetailsOpen(true)}/>}
             <footer className="scene-footer"><span className="mobile-editor-note">移动设备支持查看项目和任务；精确编辑请使用桌面设备。</span><span><span className="status-dot"/>{previewing?'预览尚未提交':locked?'正在处理草稿':'可编辑场景'}</span><span>单位 m · Y 轴向上</span><span>{dirty?'当前修改尚未导出备份':'项目文件无待导出修改'}</span></footer>
           </main>
           {!inspectorOpen&&<CanvasSelectionSummary onEdit={()=>openInspector()}/>}
           {inspectorOpen&&selection.length>0&&<CanvasInspector resize={<PanelResize label="调整属性面板宽度" width={inspectorWidth} min={260} max={400} side="right" onChange={setInspectorWidth}/>} onClose={()=>setInspectorOpen(false)} onAdvanced={()=>setAdvancedOpen(true)} tab={propertyTab} setTab={setPropertyTab}/>}
 
         </div>
-          <aside className="conversation-region" aria-label="AI 助手" hidden={!assistantOpen}><ConversationResize width={assistantWidth} onChange={setAssistantWidth}/><header className="conversation-panel-title"><strong><ChatBubbleIcon/>AI 助手</strong><div><Button type="text" size="small" aria-label="本项目任务记录" onClick={()=>setTaskDetailsOpen(true)}>任务记录</Button><Button type="text" aria-label="收起对话区" icon={<Cross1Icon/>} onClick={()=>setAssistantOpen(false)}/></div></header><div className="assistant-project-context"><span>{active?.moduleKind==='asset'?'资产项目':'场景项目'}</span><strong title={active?.title}>{active?.title}</strong></div><div id="chat-content" className="assistant-content"><ChatPanel autoStartRequest={autoStartRequest} onAutoStartConsumed={id=>setAutoStartRequest(current=>current?.id===id?null:current)} key={workspace.activeId} canvasMode expanded onExpand={()=>setAssistantOpen(true)} executionDetails={false} onAssets={()=>setShowAssets(true)} onConfigure={()=>setShowSettings(true)}/></div></aside>
+          <aside className="conversation-region" aria-label="AI 助手" hidden={!assistantOpen}><ConversationResize width={assistantWidth} onChange={setAssistantWidth}/><header className="conversation-panel-title"><strong><ChatBubbleIcon/>AI 助手</strong><div><Button type="text" size="small" aria-label="本项目任务记录" onClick={()=>setTaskDetailsOpen(true)}>任务记录</Button><Button type="text" aria-label="收起对话区" icon={<Cross1Icon/>} onClick={()=>setAssistantOpen(false)}/></div></header><div id="chat-content" className="assistant-content"><ChatPanel autoStartRequest={autoStartRequest} onAutoStartConsumed={id=>setAutoStartRequest(current=>current?.id===id?null:current)} key={workspace.activeId} canvasMode expanded onExpand={()=>setAssistantOpen(true)} executionDetails={false} onConfigure={()=>setShowSettings(true)}/></div></aside>
         </div>}
       </StudioMain>
       </StudioShell>

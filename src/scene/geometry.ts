@@ -1,3 +1,4 @@
+import {buildSectionLoft} from './sectionLoftGeometry';
 import {buildProfileSweep} from './profileSweepGeometry';
 import {smoothRadialProfile} from '../domain/radialProfile';
 import * as THREE from 'three';
@@ -8,6 +9,7 @@ import { Geometry } from '../domain/types';
 // 视口与导出共享几何构建，避免下载模型与画面不一致。
 export function buildPrimitiveGeometry(g: Geometry): THREE.BufferGeometry {
   switch (g.type) {
+    case 'sectionLoft':return buildSectionLoft(g.params);
     case 'profileSweep':return buildProfileSweep(g.params);
     case 'loft': {
       const {rings,segments:N}=g.params;const positions:number[]=[],indices:number[]=[],uvs:number[]=[];const stride=N+1;

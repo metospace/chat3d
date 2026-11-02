@@ -84,6 +84,7 @@ try{
  let modelRequests=0;await ui.route('**/chat/completions',route=>{modelRequests++;return route.abort();});
  ui.on('pageerror',error=>console.error('UI '+error.message));
  await ui.goto('http://127.0.0.1:'+port+'/');
+ 
  const picker=ui.getByRole('button',{name:'生成档位，当前精细'}).first();await picker.click();
  assert.equal(await ui.getByRole('menuitemradio',{name:'写实风格'}).getAttribute('aria-checked'),'true');
  await ui.getByRole('menuitemradio',{name:'简洁风格'}).click();

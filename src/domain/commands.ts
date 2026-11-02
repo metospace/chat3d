@@ -321,7 +321,7 @@ function cloneNode(n: SceneNode): SceneNode {
 
 // 克隆 Geometry 保持判别联合完整（直接对象字面量会把 type 推断成宽联合）
 export function cloneGeometry(g: Geometry): Geometry {
-  if(g.type==='profileSweep')return structuredClone(g);
+  if(g.type==='sectionLoft'||g.type==='profileSweep')return structuredClone(g);
   return { type: g.type, params: { ...g.params } } as Geometry;
 }
 

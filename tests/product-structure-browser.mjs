@@ -14,16 +14,18 @@ try{
  const base='http://127.0.0.1:'+server.httpServer.address().port;
  page.on('pageerror',error=>report.errors.push(error.stack));page.on('console',message=>{if(message.type()==='error')report.errors.push(message.text());});
  await page.route('**/*',route=>route.request().url().startsWith(base)?route.continue():route.abort());
- await page.goto(base);await page.getByRole('heading',{name:'项目工作台',exact:true}).waitFor();
- await check('project hub separates the project library and three creation methods',async()=>{
-  const library=await page.getByRole('region',{name:'本地项目',exact:true}).boundingBox(),create=await page.getByRole('complementary',{name:'创建新项目',exact:true}).boundingBox();assert.ok(library.x+library.width<=create.x);
+ await page.goto(base);await page.getByLabel('新项目描述',{exact:true}).waitFor();
+ await check('project hub preserves ideas across generation settings and alternate creation menu',async()=>{
+  const library=await page.getByRole('region',{name:'本地项目',exact:true}).boundingBox(),create=await page.getByRole('region',{name:'创建新项目',exact:true}).boundingBox();assert.ok(create.y+create.height<=library.y);
   await page.getByLabel('新项目描述',{exact:true}).fill('保留我的创作输入');
-  await page.getByRole('radiogroup',{name:'创建方式',exact:true}).getByText('空白项目',{exact:true}).click();assert.ok(await page.getByRole('button',{name:'创建空白资产',exact:true}).isVisible());
-  await page.getByRole('radiogroup',{name:'创建方式',exact:true}).getByText('导入 GLB',{exact:true}).click();assert.ok(await page.getByRole('button',{name:'选择 GLB 文件',exact:true}).isVisible());
-  await page.getByRole('radiogroup',{name:'创建方式',exact:true}).getByText('AI 生成',{exact:true}).click();assert.equal(await page.getByLabel('新项目描述',{exact:true}).inputValue(),'保留我的创作输入');
+  
+  await page.getByRole('radiogroup',{name:'新项目类型',exact:true}).getByText('完整场景',{exact:true}).click();
+  
+  await page.getByRole('button',{name:'新建项目',exact:true}).click();await page.keyboard.press('Escape');
+  assert.equal(await page.getByLabel('新项目描述',{exact:true}).inputValue(),'保留我的创作输入');
   await page.screenshot({path:join(output,'project-hub.png')});
  });
- await page.getByRole('button',{name:'新建项目',exact:true}).click();await page.getByRole('menuitem',{name:'新建空白资产',exact:true}).click();
+ await page.getByRole('radiogroup',{name:'新项目类型',exact:true}).getByText('单个模型',{exact:true}).click();await page.getByRole('button',{name:'新建项目',exact:true}).click();await page.getByRole('menuitem',{name:'新建空白资产',exact:true}).click();
  await page.getByLabel('建模指令',{exact:true}).fill('只修改已选层板的高度');
  await page.evaluate(async()=>{const {useEditorStore:s}=await import('/src/store.ts');s.getState().applyCommandBatch([{op:'createPrimitive',name:'货架层板',parentId:null,materialId:'mat_blue',geometry:{type:'box',params:{width:2,height:.08,depth:.6}},transform:{position:[0,1,0],rotationQuaternion:[0,0,0,1],scale:[1,1,1]}}],'fixture');s.getState().select([s.getState().doc.nodes[0].id]);});
  await page.getByRole('button',{name:'属性',exact:true}).click();

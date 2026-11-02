@@ -500,6 +500,7 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-updater",
  "url",
+ "uuid",
 ]
 
 [[package]]

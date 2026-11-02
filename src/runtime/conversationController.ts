@@ -81,7 +81,7 @@ function createConversationController(editor:EditorStore) {
     store().setAiError(null);
     if (!batch.operations.length) { store().setPreviewDoc(null); store().setAiStatus('idle'); finishRun('completed'); store().addAssistantMessage(batch.summary); return; }
     const detail=evaluateDetailAcceptance(store().doc,result.doc,store().lastRun?.detailAcceptance?.reviews??[]);
-    if(detail.issues.length){batch={...batch,qualityIssues:[...new Set([...(batch.qualityIssues??[]),...detail.issues])],incomplete:true,continuation:batch.continuation??'继续按通用六项细节标准检查并修正当前模型'};}
+    if(detail.issues.length){batch={...batch,qualityIssues:[...new Set([...(batch.qualityIssues??[]),...detail.issues])],continuation:batch.continuation??'继续按通用六项细节标准检查并修正当前模型'};}
     if(parentDraft.current&&batch.requestId!==parentDraft.current.batch.requestId){const priorId=parentDraft.current.batch.requestId;editor.setState(state=>({messages:state.messages.map(m=>m.batch?.requestId===priorId?{...m,outcome:'superseded' as const}:m)}));}
     store().setPendingBatch(batch); store().setPendingResult(result); store().setPreviewDoc(result.doc);
     store().setAiStatus('previewing'); finishRun('preview'); store().addAssistantMessage(batch.summary, batch);
@@ -120,6 +120,7 @@ function createConversationController(editor:EditorStore) {
     reservations.add(editor);useConversationRuns.setState({activeCount:reservations.size});ui.setState({running:true});
     let lastActivitySave=0;
     const parent=store().aiStatus==='previewing'&&store().pendingBatch&&store().pendingResult?{batch:store().pendingBatch!,result:store().pendingResult!}:null;
+    const referenceRepairs=parent?structuredClone(store().lastRun?.referenceRepairs??[]):[];
     parentDraft.current=parent;
     const original=store().doc,working=parent?.result.doc??original;
     checkpointRef.current=null;store().setPreviewDoc(parent?.result.doc??null);
@@ -167,7 +168,7 @@ function createConversationController(editor:EditorStore) {
       if(usePi) {
         const {runModelingAgent} = await import('../ai/modelingAgent');
         if(!alive()) return;
-        const generated = await runModelingAgent({text:modelText,config:cfg,document:working,qualityBaseline:parent?original:working,selection:selectedIds,images,history,signal:controller.signal,editScope,captureAvailable:isIsolatedCaptureAvailable,captureEvidence:captureIsolatedSceneEvidence,
+        const generated = await runModelingAgent({text:modelText,config:cfg,document:working,qualityBaseline:parent?original:working,referenceRepairs,selection:selectedIds,images,history,signal:controller.signal,editScope,captureAvailable:isIsolatedCaptureAvailable,captureEvidence:captureIsolatedSceneEvidence,
           onControl:control=>{if(alive()){controlRef.current=control;setCanSteer(!!control);if(!control)clearControl();}},
           onSteeringApplied:id=>{if(alive()){markSteering(id,'received');setNotice('补充要求已送入模型上下文');}},
           onCheckpoint:cp=>{if(alive()){const combined=continueDraft(original,parent,cp.batch,cp.result);checkpointRef.current={...cp,...combined};editor.setState({pendingBatch:combined.batch,pendingResult:combined.result});}},

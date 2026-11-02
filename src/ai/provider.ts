@@ -1,3 +1,4 @@
+import {sanitizeSectionLoftParams} from '../domain/sectionLoft';
 import {generationStylePrompt, normalizeGenerationStyle, type GenerationStyle} from './generationStyle';
 import {PHYSICAL_MATERIAL_KEYS, PHYSICAL_MATERIAL_LIMITS} from '../domain/physicalMaterial';
 import {generationQualityPrompt, normalizeGenerationQuality, type GenerationQuality} from './generationPolicy';
@@ -23,6 +24,7 @@ export interface ModelConfig {
   apiKey: string;
   rememberApiKey?: boolean; // Explicit opt-in; otherwise the key stays in memory.
   model: string; // 如 gpt-4o-mini
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh'; // undefined leaves the service default unchanged.
   agentMode?: 'pi' | 'single';
   generationStyle?: GenerationStyle;
   generationQuality?: GenerationQuality; // 缺省为精细；独立于模型、代理模式和预算
@@ -65,7 +67,7 @@ const IMPLEMENTED_OPS = new Set([
   'setMaterial','setAppearance','setAssemblyMetadata',
 ]);
 
-const GEOMETRY_TYPES = new Set(['profileSweep','loft','sweepTube','lathe','profile','box', 'sphere', 'cylinder', 'cone', 'plane', 'roundedPlate','capsule','frame','tube','trapezoid']);
+const GEOMETRY_TYPES:Record<string,true> = {sectionLoft:true,profileSweep:true,loft:true,sweepTube:true,lathe:true,profile:true,box:true,sphere:true,cylinder:true,cone:true,plane:true,roundedPlate:true,capsule:true,frame:true,tube:true,trapezoid:true};
 
 const KNOWN_MATERIALS = new Set([...EXTRA_MATERIALS.map(m=>m.id),'mat_gray', 'mat_blue', 'mat_dark', 'mat_metal', 'mat_white', 'mat_rubber', 'mat_yellow', 'mat_red', 'mat_cyan', 'mat_black','mat_glass','mat_screen','mat_pcb','mat_green']);
 
@@ -197,6 +199,7 @@ duplicateAssembly：{"op":"duplicateAssembly","targetId":"组件任意零件id�
      tube: outerRadius,innerRadius,height。沿Y中空管件，0<innerRadius<outerRadius，可用于管道/套筒/轮毂。
      trapezoid: widthTop,widthBottom,height,depth。XY梯形沿Z拉伸；上窄下宽或上宽下窄，适合斜面机罩、底座、人体躯干。组合局部旋转可改变斜面方向。
      loft: rings=[{center:[x,y,z],radiusX, radiusZ},...]，2–32个椭圆截面，Y严格递增、半径>0，segments=8–64。连续封闭放样，支持偏心和宽深独立变化，用于收腰躯干、曲面外壳、软垫、渐变形体；不要再用箱体冒充曲面。
+     sectionLoft: 通用封闭连续截面放样；shape:'roundedRectangle',segments:32,sections:[{center:[0,0,0],width:1.1,depth:1.8,cornerRadius:.12},{center:[0,.25,0],width:1.15,depth:1.85,cornerRadius:.15},{center:[.03,.8,0],width:.95,depth:1.6,cornerRadius:.2},{center:[.04,1,0],width:.85,depth:1.45,cornerRadius:.18}]。2–32层水平XZ截面，center的Y严格递增且层距至少0.000001米，宽深独立收分和XZ偏移；segments为8–64的4倍数，圆角至少0.000001米且严格小于短边一半。此形状含真实直线边与圆角，不是椭圆。自定义非椭圆轮廓用shape:'polygon',sections:[{center:[0,0,0],points:[[-.5,-.4],[.5,-.4],[.35,.4],[-.5,.25]]},{center:[.03,1,0],points:[[-.4,-.3],[.4,-.3],[.25,.3],[-.4,.2]]}]，不传segments；每层3–64个局部[x,z]点，点数相同、绕序相同、索引对应、不重复首点，可凹但不能自交。层间对应导致扭转、自接触或退化会整体拒绝，不会自动重采样/降级。坐标±100米，默认封两端并提供连续法线与UV。直角轮廓用polygon；已有椭圆loft保持原API。
      profileSweep: profile=[[横向偏移,高度],...]为3–64个闭合截面轮廓点（不重复首点、暂不含孔），path=[[X,Z],...]为2–64个水平折线路径点，closed可选默认false；闭合路径至少3点且不重复首点，正偏移朝外，开放路径正偏移沿XZ平面左法线。米制坐标±100；沿路径保持连续斜接，开放端封口并带米制UV。用于导轨、收边、折角型材和连续线脚，能用现有profile/lathe完成的形体仍沿用原工具。拐角过尖、截面过宽、路径自交会拒绝，请按诊断调整，不得强行降级成盒子。
      sweepTube: points=[[x,y,z],...]为2–32个连续曲线控制点，radius为圆管半径，segments=8–128，radialSegments=8–32；沿真实路径生成连续曲线管，用于软管、线缆、弯曲扶手/枝条。两端开放，按用途加接头，不等于流体仿真。
      lathe: smooth=true可将径向控制剖面做保形三次平滑插值，适合陶瓷、圆滑壳体和有机收分；保留直线/台阶设计时不启用。points=[[半径,高度],...]为Y轴旋转剖面，2–32点，高度严格递增，半径非负；segments=8–64。用于连续旋转曲面，非均匀缩放可形成椭圆截面。默认两端不封口；实心底座必须明确capStart:true,capEnd:true，避免中心意外开洞。薄壁灯罩/漏斗用wallThickness（正且小于所有半径）生成真实内外壁与端缘，保持两端开口，不能与端盖同用。禁止用多层tube环堆成锥形罩；连续收分用一个lathe。轮廓不是自动居中。示例实心底座points:[[.14,0],[.15,.01],[.14,.035],[.02,.045]],segments:64,capStart:true,capEnd:true；薄壳points:[[.08,0],[.07,.035],[.045,.08],[.018,.11]],segments:64,wallThickness:.002。
@@ -323,7 +326,8 @@ function cleanGeometry(raw: unknown): Geometry | null {
   if (!raw || typeof raw !== 'object') return null;
   const g = raw as Record<string, unknown>;
   const type = typeof g.type === 'string' ? g.type : '';
-  if (!GEOMETRY_TYPES.has(type)) return null;
+  if (!Object.prototype.hasOwnProperty.call(GEOMETRY_TYPES,type)) return null;
+  if(type==='sectionLoft'){const params=sanitizeSectionLoftParams(g.params);return params?{type:'sectionLoft',params}:null;}
   if(type==='profileSweep'||type==='loft'||type==='sweepTube'||type==='lathe'||type==='profile'){const candidate=structuredClone(g) as unknown as Geometry;return validateGeometry(candidate).length?null:candidate;}
   const paramsRaw = (g.params ?? {}) as Record<string, unknown>;
   const params: Record<string, number> = {};
@@ -589,6 +593,7 @@ async function fetchChat(
     },
     body: JSON.stringify({
       model: cfg.model.trim(),
+      ...(cfg.reasoningEffort ? {reasoning_effort: cfg.reasoningEffort} : {}),
       messages,
       temperature: 0.2,
       max_tokens: 8192,
@@ -608,6 +613,7 @@ async function fetchChat(
 // 测试连接：只验证「能联通 + key 有效 + 模型名被服务方接受」
 // 不要求模型按 DSL 格式回答（生成链路的 JSON 校验放在 chat 侧）
 export async function testConnection(cfg: ModelConfig, signal?: AbortSignal): Promise<{ ok: boolean; text: string }> {
+  cfg = {...cfg};
   const base = (cfg.baseURL || '').trim().replace(/\/+$/, '');
   if (!base) return { ok: false, text: '未配置 API 地址（baseURL）' };
   if (!cfg.apiKey.trim()) return { ok: false, text: '未配置 API Key' };
@@ -624,6 +630,7 @@ export async function testConnection(cfg: ModelConfig, signal?: AbortSignal): Pr
       },
       body: JSON.stringify({
         model: cfg.model.trim(),
+        ...(cfg.reasoningEffort ? {reasoning_effort: cfg.reasoningEffort} : {}),
         messages: [{ role: 'user', content: 'ok' }],
         temperature: 0,
         stream: false,
@@ -717,7 +724,7 @@ export function buildSceneContext(doc: Pick<SceneDocument, 'nodes'|'animation'>,
     animation:doc.animation,
     nodes: doc.nodes.map((n) => {
       const g = n.geometry;
-      const desc = g?.type==='profileSweep'?`profileSweep ${g.params.profile.length}点截面，${g.params.path.length}点${g.params.closed?'闭合':'开放'}路径；局部编辑时再读取轮廓参数`:g?.type==='mesh'?`导入网格，${g.params.positions.length/3}顶点，${g.params.indices.length/3}三角形；可变换/改材质，不要重新输出顶点` : g
+      const desc = g?.type==='sectionLoft'?`sectionLoft ${g.params.shape}，${g.params.sections.length}个连续截面；局部编辑时读取完整sections参数`:g?.type==='profileSweep'?`profileSweep ${g.params.profile.length}点截面，${g.params.path.length}点${g.params.closed?'闭合':'开放'}路径；局部编辑时再读取轮廓参数`:g?.type==='mesh'?`导入网格，${g.params.positions.length/3}顶点，${g.params.indices.length/3}三角形；可变换/改材质，不要重新输出顶点` : g
         ? `${g.type} ${Object.entries(g.params)
             .map(([k, v]) => `${k}=${v}`)
             .join(' ')}`

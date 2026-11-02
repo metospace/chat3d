@@ -9,6 +9,14 @@ try {
   saveModelConfig(config);assert.ok(!memory.get(key).includes(config.apiKey));assert.equal(loadModelConfig().apiKey,'');assert.equal(loadModelConfig().taskBudget.maxRounds,80);
   saveModelConfig({...config,rememberApiKey:true});assert.equal(loadModelConfig().apiKey,config.apiKey);
   saveModelConfig({...config,rememberApiKey:false});assert.ok(!memory.get(key).includes(config.apiKey));
+  for(const reasoningEffort of ['low','medium','high','xhigh']) {
+    saveModelConfig({...config,reasoningEffort});assert.equal(JSON.parse(memory.get(key)).reasoningEffort,reasoningEffort);assert.equal(loadModelConfig().reasoningEffort,reasoningEffort);
+  }
+  saveModelConfig({...config,reasoningEffort:undefined});assert.equal(Object.hasOwn(JSON.parse(memory.get(key)),'reasoningEffort'),false);assert.equal(loadModelConfig().reasoningEffort,undefined);
+  for(const reasoningEffort of ['default','off','minimal','max','invalid',null,0,{}]) {
+    memory.set(key,JSON.stringify({...config,rememberApiKey:true,reasoningEffort}));assert.equal(loadModelConfig().reasoningEffort,undefined);
+  }
+  memory.set(key,JSON.stringify({...config,reasoningEffort:'high'}));assert.equal(loadModelConfig().reasoningEffort,'high');assert.equal(JSON.parse(memory.get(key)).reasoningEffort,'high');assert.ok(!memory.get(key).includes(config.apiKey));
   memory.set(key,JSON.stringify(config));assert.equal(loadModelConfig().apiKey,config.apiKey,'legacy key retained for this session');assert.ok(!memory.get(key).includes(config.apiKey),'legacy durable key removed');
   assert.equal(loadModelConfig().apiKey,'','subsequent load requires entry');
   memory.set(key,JSON.stringify({...config,useMock:true}));assert.equal(loadModelConfig(),null);assert.equal(memory.has(key),false);

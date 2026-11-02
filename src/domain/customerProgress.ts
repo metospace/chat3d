@@ -7,6 +7,27 @@ export function customerText(value:string|undefined,fallback='正在处理模型
  .replace(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g,name=>labels[name]??'模型处理步骤')
  .replace(/主代理|子代理/g,'建模任务').replace(/工具调用|工具执行/g,'处理步骤').replace(/Pi 建模任务/g,'建模任务');
 }
+/** Live status is independent of public explanations and never inferred from elapsed time. */
+export function activityProgress(activity:AgentActivity|undefined|null,active:boolean,now?:number){
+ const phase=active?activity?.phase:undefined;
+ let modelState:'waiting'|'responding'|undefined;
+ if(active){
+  const timings=activity?.timings??[];
+  const toolRunning=timings.some(step=>step.kind==='tool'&&step.endedAt===undefined);
+  if(!toolRunning)for(let i=timings.length-1;i>=0;i--){
+   const step=timings[i];
+   if(step.kind!=='model')continue;
+   if(step.endedAt===undefined)modelState=step.firstContentAt===undefined?'waiting':'responding';
+   break;
+  }
+ }
+ const phaseLabel=phase?{planning:'正在规划',building:'正在构建模型',reviewing:'正在复核模型',repairing:'正在修正模型'}[phase]:'正在处理';
+ const label=phaseLabel+(modelState==='waiting'?' · 等待模型响应':modelState==='responding'?' · 正在接收模型响应':'');
+ const editedAt=activity?.lastModelEditAt;
+ const modelEditAgeSeconds=active&&now!==undefined&&editedAt!==undefined&&Number.isFinite(editedAt)?Math.max(0,Math.floor((now-editedAt)/1000)):undefined;
+ const reviewNote=phase==='reviewing'?'正在检查当前模型与画面；复核本身不会改变模型，画面可能保持不变。':undefined;
+ return {phase,modelState,label,modelEditAgeSeconds,reviewNote};
+}
 export function progressSteps(activity:AgentActivity|undefined|null,active:boolean){
  const groups:Array<{label:string;count:number;completed:number;failed:number;running:boolean;seconds:number}>=[];
  for(const step of activity?.timings??[]){

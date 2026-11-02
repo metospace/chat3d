@@ -6,7 +6,7 @@ import threeLicense from '../../node_modules/three/LICENSE?raw';
 import viewerSource from './htmlViewer.js?raw';
 import * as THREE from 'three';
 import type {SceneDocument} from '../domain/types';
-import {buildExportScene,disposeExportScene,prepareExportMaterials} from './export';
+import {buildHtmlExportScene,disposeExportScene,prepareExportMaterials} from './export';
 
 function jsonForHtml(value:unknown):string {
   return JSON.stringify(value).replace(/[<>&\u2028\u2029]/g,char=>`\\u${char.charCodeAt(0).toString(16).padStart(4,'0')}`);
@@ -23,20 +23,28 @@ function requireEmbeddedImages(value:unknown):void {
     throw new Error('离线导出图片贴图不完整');
   }
 }
+export interface HtmlExportProgress {stage:'geometry'|'textures'|'serialize';completed?:number;total?:number}
+async function yieldToInterface(){const {promise,resolve}=Promise.withResolvers<void>();setTimeout(resolve,0);await promise;}
 
 /** A standalone, static viewer. Only visible scene geometry/materials are serialized. */
-export async function exportHtml(doc:SceneDocument,title:string):Promise<string> {
+export async function exportHtml(doc:SceneDocument,title:string,onProgress?:(progress:HtmlExportProgress)=>void):Promise<string> {
   if(!doc.nodes.some(node=>node.visible)) throw new Error('没有可导出的可见对象');
-  const scene=buildExportScene(doc);
+  onProgress?.({stage:'geometry',completed:0,total:doc.nodes.filter(node=>node.visible).length});
+  await yieldToInterface();
+  const scene=await buildHtmlExportScene(doc,(completed,total)=>onProgress?.({stage:'geometry',completed,total}));
   try {
+    onProgress?.({stage:'textures'});
+    await yieldToInterface();
     await prepareExportMaterials(scene);
     // Export vertex buffers, never constructor parameters: addon geometry types are not
     // registered in ObjectLoader, and regenerated primitives can lose baked transforms.
+    const converted=new Map<THREE.BufferGeometry,THREE.BufferGeometry>();
     scene.traverse(object=>{
       if(object instanceof THREE.Mesh&&object.geometry.type!=='BufferGeometry') {
         const original=object.geometry;
-        object.geometry=new THREE.BufferGeometry().copy(original);
-        original.dispose();
+        let geometry=converted.get(original);
+        if(!geometry){geometry=new THREE.BufferGeometry().copy(original);converted.set(original,geometry);original.dispose();}
+        object.geometry=geometry;
       }
     });
     scene.updateMatrixWorld(true);
@@ -45,6 +53,8 @@ export async function exportHtml(doc:SceneDocument,title:string):Promise<string>
     // Do not carry project IDs, connections, editing metadata or document state into a shareable file.
     scene.userData={};
     scene.traverse(object=>{object.userData={};});
+    onProgress?.({stage:'serialize'});
+    await yieldToInterface();
     const data=scene.toJSON() as THREE.Object3DJSON & {images?:{url:unknown}[];materials?:{attenuationDistance?:number}[]};
     // JSON turns Infinity into null. Omitting the physical material's default
     // restores Infinity in MaterialLoader instead of dividing by zero in glass.

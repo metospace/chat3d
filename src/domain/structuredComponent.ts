@@ -3,23 +3,46 @@ import {assemblyBounds} from './assemblyEditing';
 import {Matrix4,Quaternion,Vector3,Euler} from 'three';
 import {nodeMatrix} from './assetContract';
 import {matchesGeometryApproach} from './geometryApproach';
-import {buildAssembly,type AssemblyDefinition} from './assembly';
+import {AssemblyValidationError,buildAssembly,type AssemblyDefinition} from './assembly';
 import {validateBlueprints,validateFeatureBindings,type ObjectBlueprint,type FeatureBinding} from './objectBlueprint';
 import type {SceneDocument,SceneNode} from './types';
 export interface FeatureParts {key:string;partNames:string[]}
-export function validateBlueprintDimensions(plan:ObjectBlueprint,nodes:SceneNode[],frame?:{origin:[number,number,number];yaw:number}):void{
- if(!plan.dimensions)return;
+export interface BlueprintDimensionCheck {axis:string;expected:number;actual:number;tolerance:number;source:'user'|'estimated';matches:boolean;blocksCompletion:boolean}
+export type StructuredValidationStage='parts'|'structure'|'dimensions';
+export class StructuredValidationError extends AssemblyValidationError {
+ constructor(issues:string[],public stage:StructuredValidationStage,public stageIssueCount:number){super(issues);this.name='StructuredValidationError';}
+}
+export function inspectBlueprintDimensions(plan:ObjectBlueprint,nodes:SceneNode[],frame?:{origin:[number,number,number];yaw:number}):BlueprintDimensionCheck[]{
+ if(!plan.dimensions)return [];
  let local=nodes;
  if(frame){const inverse=new Matrix4().compose(new Vector3(...frame.origin),new Quaternion().setFromEuler(new Euler(0,frame.yaw*Math.PI/180,0)),new Vector3(1,1,1)).invert();local=nodes.map(n=>{const p=new Vector3(),q=new Quaternion(),scale=new Vector3();nodeMatrix(n).premultiply(inverse).decompose(p,q,scale);return {...n,transform:{position:p.toArray() as [number,number,number],rotationQuaternion:q.toArray() as [number,number,number,number],scale:scale.toArray() as [number,number,number]}};});}
- const size=assemblyBounds(local).getSize(new Vector3()).toArray();for(const [axis,expected] of Object.entries(plan.dimensions)){const actual=size[['x','y','z'].indexOf(axis)];if(!Number.isFinite(actual)||Math.abs(actual-expected)>Math.max(.002,expected*.02))throw Error(`整体${axis}轴尺寸${actual.toFixed(4)}m与声明${expected}m不符（容差2%或2mm）；请调整真实几何，不要仅修改验收文字`);}
+ const size=assemblyBounds(local).getSize(new Vector3()).toArray(),source=plan.dimensionsSource??'user';
+ return Object.entries(plan.dimensions).map(([axis,expected])=>{const actual=size[['x','y','z'].indexOf(axis)],tolerance=Math.max(.002,expected*.02),matches=Number.isFinite(actual)&&Math.abs(actual-expected)<=tolerance;return {axis,expected,actual,tolerance,source,matches,blocksCompletion:source==='user'&&!matches};});
+}
+export function validateBlueprintDimensions(plan:ObjectBlueprint,nodes:SceneNode[],frame?:{origin:[number,number,number];yaw:number}):void{
+ const issues=inspectBlueprintDimensions(plan,nodes,frame).filter(check=>check.blocksCompletion).map(check=>`整体${check.axis}轴尺寸${check.actual.toFixed(4)}m与用户声明${check.expected}m不符（容差2%或2mm）；请调整真实几何，不要仅修改验收文字`);
+ if(issues.length)throw new StructuredValidationError(issues,'dimensions',issues.length);
 }
 export function validateStructuredRecipe(plan:ObjectBlueprint,definition:AssemblyDefinition,features:FeatureParts[],requiredKeys?:string[]):void{
- validateBlueprints([plan]);if(!Array.isArray(definition.parts)||!definition.parts.length||definition.parts.length>100)throw Error('单体需1–100条部件定义');let expanded=0,bytes=0;for(const p of definition.parts){const n=p.repeat?.count??1;if(!Number.isSafeInteger(n)||n<1||n>STRUCTURED_PART_LIMIT)throw Error('repeat.count需为1–1000整数');expanded+=n;bytes+=new TextEncoder().encode(JSON.stringify(p)).length*n;if(expanded>STRUCTURED_PART_LIMIT||bytes>STRUCTURED_BYTES_LIMIT)throw Error('单体展开超过1000零件或20MB预算，保留要求的数量，按真实组件分批生成；不要截断或减少数量');}const nodes=buildAssembly(definition);if(!requiredKeys)validateBlueprintDimensions(plan,buildAssembly({...definition,position:[0,0,0],yaw:0}));if(nodes.length>STRUCTURED_PART_LIMIT)throw Error('单体结构生成最多1000个展开部件');
- if(new Set(definition.parts.map(p=>p.name)).size!==definition.parts.length)throw Error('部件名称必须唯一，重复件请使用repeat');
- const required=requiredKeys??plan.features.map(f=>f.key);if(!required.length||new Set(required).size!==required.length||required.some(k=>!plan.features.some(f=>f.key===k)))throw Error('待修复特征不存在或重复');
- if(!Array.isArray(features)||features.length!==required.length||features.some(f=>!required.includes(f.key))||new Set(features.map(f=>f.key)).size!==features.length)throw Error('必须覆盖全部规划特征，不能遗漏或重复');
- const lookup=new Map<string,SceneNode[]>();let cursor=0;for(const part of definition.parts){const count=part.repeat?.count??1;lookup.set(part.name,nodes.slice(cursor,cursor+count));cursor+=count;}
- for(const feature of features){const spec=plan.features.find(f=>f.key===feature.key);if(!spec||!Array.isArray(feature.partNames)||!feature.partNames.length||feature.partNames.length>100||new Set(feature.partNames).size!==feature.partNames.length||feature.partNames.some(n=>!lookup.has(n)))throw Error('特征必须引用本单体真实且不重复的部件名称');const linked=feature.partNames.flatMap(n=>lookup.get(n)!);if(linked.length>STRUCTURED_PART_LIMIT)throw Error('每项特征最多关联1000个展开部件');if(!matchesGeometryApproach(spec.geometryApproach,linked))throw Error(`特征“${spec.name}”规划为${spec.geometryApproach}，实际造型方法不匹配；请修改几何，或根据真实用途明确修订方案，不能只改标签`);}
+ validateBlueprints([plan]);if(!Array.isArray(definition.parts)||!definition.parts.length||definition.parts.length>100)throw Error('单体需1–100条部件定义');let expanded=0,bytes=0;for(const p of definition.parts){const n=p.repeat?.count??1;if(!Number.isSafeInteger(n)||n<1||n>STRUCTURED_PART_LIMIT)throw Error('repeat.count需为1–1000整数');expanded+=n;bytes+=new TextEncoder().encode(JSON.stringify(p)).length*n;if(expanded>STRUCTURED_PART_LIMIT||bytes>STRUCTURED_BYTES_LIMIT)throw Error('单体展开超过1000零件或20MB预算，保留要求的数量，按真实组件分批生成；不要截断或减少数量');}
+ const issues:string[]=[],partIssues:string[]=[],dimensionIssues:string[]=[];let localNodes:SceneNode[]|undefined;
+ // Bindings and method compatibility do not depend on successful mesh construction.
+ if(new Set(definition.parts.map(p=>p.name)).size!==definition.parts.length)issues.push('部件名称必须唯一，重复件请使用repeat');
+ const required=requiredKeys??plan.features.map(f=>f.key);
+ if(!required.length||new Set(required).size!==required.length||required.some(k=>!plan.features.some(f=>f.key===k)))issues.push('待修复特征不存在或重复');
+ if(!Array.isArray(features)||features.length!==required.length||features.some(f=>!required.includes(f.key))||new Set(features.map(f=>f.key)).size!==features.length)issues.push('必须覆盖全部规划特征，不能遗漏或重复');
+ const lookup=new Map(definition.parts.map(part=>[part.name,part]));
+ for(const feature of Array.isArray(features)?features:[]){
+  const spec=plan.features.find(f=>f.key===feature.key);
+  if(!spec||!Array.isArray(feature.partNames)||!feature.partNames.length||feature.partNames.length>100||new Set(feature.partNames).size!==feature.partNames.length||feature.partNames.some(name=>!lookup.has(name))){issues.push('特征必须引用本单体真实且不重复的部件名称');continue;}
+  const linked=feature.partNames.flatMap(name=>{const part=lookup.get(name)!;return Array.from({length:part.repeat?.count??1},()=>({geometry:part.geometry} as SceneNode));});
+  if(linked.length>STRUCTURED_PART_LIMIT){issues.push('每项特征最多关联1000个展开部件');continue;}
+  if(!matchesGeometryApproach(spec.geometryApproach,linked))issues.push(`特征“${spec.name}”规划为${spec.geometryApproach}，实际造型方法不匹配（关联${linked.length}件：${[...new Set(linked.map(node=>node.geometry?.type))].join('、')}）；${spec.geometryApproach==='assembly'?'assembly表示至少两个真实独立零件；若实际为一个连续实体，请用plan_object_structure保持特征key/name/role，明确改为匹配的profile/lathe/sweep/mesh方案，再重新调用构建。':'请修改实际几何，或按真实用途明确修订方案，不能只改标签。'}`);
+ }
+ try{localNodes=buildAssembly({...definition,position:[0,0,0],yaw:0});}catch(error){partIssues.push(...(error instanceof AssemblyValidationError?error.issues:[error instanceof Error?error.message:String(error)]));}
+ if(localNodes&&!requiredKeys){try{validateBlueprintDimensions(plan,localNodes);}catch(error){dimensionIssues.push(...(error instanceof AssemblyValidationError?error.issues:[error instanceof Error?error.message:String(error)]));}}
+ const all=[...partIssues,...issues,...dimensionIssues];
+ if(all.length){const stage:StructuredValidationStage=partIssues.length?'parts':issues.length?'structure':'dimensions';throw new StructuredValidationError([...all,...(partIssues.length&&plan.dimensions?['整体尺寸须在部件几何修正后测量；当前尚未执行，不代表已符合声明。']:[])],stage,stage==='parts'?partIssues.length:stage==='structure'?issues.length:dimensionIssues.length);}
 }
 export function structuredFeatureBinding(doc:SceneDocument,beforeIds:Set<string>,plan:ObjectBlueprint,definition:AssemblyDefinition,features:FeatureParts[]):FeatureBinding{
  const nodes=doc.nodes.filter(n=>!beforeIds.has(n.id));if(nodes.length!==definition.parts.reduce((n,p)=>n+(p.repeat?.count??1),0)||new Set(nodes.map(n=>n.assemblyId)).size!==1)throw Error('生成结果与单体结构数量或分组不一致');

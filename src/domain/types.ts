@@ -1,3 +1,4 @@
+import {validateSectionLoft,type SectionLoftParams} from './sectionLoft';
 import {validateProfileSweep,type ProfileSweepParams} from './profileSweep';
 import {physicalMaterialErrors} from './physicalMaterial';
 import {poseRigSchema,type PoseRig} from './poseRig';
@@ -26,7 +27,7 @@ export interface Transform {
 }
 
 // 类型白名单（方案 MVP：box、sphere、cylinder、cone、plane）
-export type GeometryType = 'profileSweep' | 'loft' | 'sweepTube' | 'mesh' | 'lathe' | 'profile' | 'box' | 'sphere' | 'cylinder' | 'cone' | 'plane' | 'roundedPlate' | 'capsule' | 'frame' | 'tube' | 'trapezoid';
+export type GeometryType = 'sectionLoft' | 'profileSweep' | 'loft' | 'sweepTube' | 'mesh' | 'lathe' | 'profile' | 'box' | 'sphere' | 'cylinder' | 'cone' | 'plane' | 'roundedPlate' | 'capsule' | 'frame' | 'tube' | 'trapezoid';
 
 export interface BoxParams {
   bevelRadius?: number;
@@ -58,6 +59,7 @@ export interface PlaneParams {
 }
 
 export type Geometry =
+  | {type:'sectionLoft';params:SectionLoftParams}
   | {type:'profileSweep';params:ProfileSweepParams}
   | {type:'loft';params:{rings:{center:Vec3;radiusX:number;radiusZ:number}[];segments:number}}
   | {type:'sweepTube';params:{points:Vec3[];radius:number;segments:number;radialSegments:number}}
@@ -189,6 +191,7 @@ export function validateQuaternion(q: Quaternion, field: string): Error[] {
 // 几何参数校验：有限、非负、超预算细分拒绝
 export function validateGeometry(g: Geometry): Error[] {
   const errs: Error[] = [];
+  if(g?.type==='sectionLoft')return validateSectionLoft(g.params);
   if(g?.type==='profileSweep')return validateProfileSweep(g.params);
   if(g?.type==='loft'){
     const p=g.params;if(!p||!Array.isArray(p.rings)||p.rings.length<2||p.rings.length>32||!Number.isInteger(p.segments)||p.segments<8||p.segments>64)return [new Error('放样需要2–32个截面及8–64环向分段')];
@@ -214,7 +217,9 @@ export function validateGeometry(g: Geometry): Error[] {
     const p=g.params?.points;
     if(!Array.isArray(p)||p.length<(g.type==='lathe'?2:3)||p.length>(g.type==='profile'?64:32)||p.some(v=>!Array.isArray(v)||v.length!==2||v.some(n=>typeof n!=='number'||!Number.isFinite(n)||Math.abs(n)>100)))return [new Error('旋转轮廓需2–32点，挤出轮廓需3–64点；有限米制二维坐标绝对值不超过100')];
     if(g.type==='lathe'){
-      if(p.some(v=>v[0]<0)||!p.some(v=>v[0]>0)||p.some((v,i)=>i>0&&v[1]<=p[i-1][1])||!Number.isInteger(g.params.segments)||g.params.segments<8||g.params.segments>64)errs.push(new Error('旋转轮廓半径非负、高度严格递增，分段8–64'));
+      for(const [i,point] of p.entries()){if(point[0]<0)errs.push(new Error(`lathe.points[${i}][0]=${point[0]}：旋转轮廓半径必须非负`));if(i>0&&point[1]<=p[i-1][1])errs.push(new Error(`lathe.points[${i}][1]=${point[1]}未大于前点高度${p[i-1][1]}：按高度严格递增；同高度台阶请用相近但不同的高度，不能只改变分段数`));}
+      if(!p.some(v=>v[0]>0))errs.push(new Error('旋转轮廓至少有一个正半径'));
+      if(!Number.isInteger(g.params.segments)||g.params.segments<8||g.params.segments>64)errs.push(new Error('lathe.segments必须为8–64整数'));
       for(const key of ['capStart','capEnd','smooth'] as const)if(g.params[key]!==undefined&&typeof g.params[key]!=='boolean')errs.push(new Error('旋转体端盖与平滑开关必须为布尔值'));
       const wall=g.params.wallThickness;if(wall!==undefined&&(!Number.isFinite(wall)||wall<=0||p.some(v=>v[0]<=wall)))errs.push(new Error('旋转壳壁厚必须为正且小于每个轮廓半径'));
       if(wall!==undefined&&(g.params.capStart||g.params.capEnd))errs.push(new Error('旋转薄壳两端保留开口并自动连接壁厚端缘，不能同时填实心端盖'));
@@ -230,7 +235,7 @@ export function validateGeometry(g: Geometry): Error[] {
     return errs;
   }
   const required: Record<GeometryType, string[]> = {
-    profileSweep:[],loft:[],sweepTube:[],mesh:[],lathe:[],profile:[],capsule:['radius','length'],frame:['width','height','depth','thickness'],tube:['outerRadius','innerRadius','height'],trapezoid:['widthTop','widthBottom','height','depth'],
+    sectionLoft:[],profileSweep:[],loft:[],sweepTube:[],mesh:[],lathe:[],profile:[],capsule:['radius','length'],frame:['width','height','depth','thickness'],tube:['outerRadius','innerRadius','height'],trapezoid:['widthTop','widthBottom','height','depth'],
     roundedPlate: ['width','height','depth','cornerRadius'], box: ['width', 'height', 'depth'], sphere: ['radius'],
     cylinder: ['radiusTop', 'radiusBottom', 'height'], cone: ['radius', 'height'], plane: ['width', 'depth'],
   };

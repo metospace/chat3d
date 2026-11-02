@@ -20,6 +20,19 @@ try {
  await test('invalid or empty transform patches rejected',()=>{for(const transform of [{},{position:[1,2]},{scale:[0,1,1]},{rotationQuaternion:[0,0,0,0]}])assert.throws(()=>provider.parseModelResponse(JSON.stringify({operations:[{op:'setTransform',targetId:'a',transform}]})))});
  const cfg={baseURL:'https://example.invalid/v1',apiKey:'test-only',model:'test',useMock:false};
  await test('connection test accepts plain-text ok without DSL commands',async()=>{const r=await provider.testConnection(cfg);assert.equal(r.ok,true)});
+ await test('connection test sends only explicit reasoning effort in the actual request body',async()=>{
+  const wire=[];response=(_url,init)=>{wire.push(JSON.parse(init.body));return new Response(JSON.stringify({choices:[{message:{content:'ok'}}]}));};
+  for(const reasoningEffort of [undefined,'low','medium','high','xhigh']) {
+   assert.equal((await provider.testConnection({...cfg,reasoningEffort})).ok,true);
+   const body=wire.at(-1);assert.equal(body.reasoning_effort,reasoningEffort);assert.equal(Object.hasOwn(body,'reasoning_effort'),reasoningEffort!==undefined);
+   assert.deepEqual(body.messages,[{role:'user',content:'ok'}]);assert.equal(body.stream,false);assert.equal(body.temperature,0);
+  }
+  assert.equal(wire.length,5);
+ });
+ await test('unsupported connection reasoning effort is reported without retry or parameter downgrade',async()=>{
+  const before=calls;response=(_url,init)=>{assert.equal(JSON.parse(init.body).reasoning_effort,'xhigh');return new Response('reasoning_effort xhigh is not supported',{status:400});};
+  const result=await provider.testConnection({...cfg,reasoningEffort:'xhigh'});assert.equal(result.ok,false);assert.equal(calls,before+1);
+ });
  await test('connection test rejects HTTP401 and empty success',async()=>{response=()=>new Response('denied',{status:401});assert.equal((await provider.testConnection(cfg)).ok,false);response=()=>new Response(JSON.stringify({choices:[]}));assert.equal((await provider.testConnection(cfg)).ok,false)});
  await test('missing model prevents request',async()=>{const before=calls;assert.equal((await provider.testConnection({...cfg,model:''})).ok,false);assert.equal(calls,before)});
  const project=await server.ssrLoadModule('/src/domain/project.ts');

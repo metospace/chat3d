@@ -1,4 +1,4 @@
-import {Type} from '@earendil-works/pi-ai';
+import {Type} from 'typebox';
 import {STRUCTURED_PART_LIMIT} from '../domain/structureLimits';
 import {SCENE_ROLES} from '../domain/types';
 import {structuredGeometrySchema} from './structuredGeometrySchema';

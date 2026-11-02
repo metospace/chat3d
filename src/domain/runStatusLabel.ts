@@ -1,7 +1,8 @@
 import type {MessageRun} from '../store';
 import type {AgentActivity} from '../ai/modelingAgent';
+import {activityProgress} from './customerProgress';
 export function runStatusLabel(run:MessageRun,activity:AgentActivity|undefined|null=run.activity){
- if(run.status==='running')return '正在处理';
+ if(run.status==='running')return activityProgress(activity,true).label;
  if(run.status==='failed')return '处理未完成';
  if(run.status==='stopped')return '已停止';
  if(activity?.outcome==='partial'||activity?.outcome==='budget-exhausted')return '未完成，已保留草稿';

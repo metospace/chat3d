@@ -123,6 +123,11 @@ try {
       assert.deepEqual(source,snapshot);
     }finally{if(restored)release(restored);output.window.close();}
   });
+  await test('repeated shapes share one exact vertex buffer while preserving names transforms and materials',async()=>{
+    const repeated=documentFor([node({id:'a',name:'first'}),node({id:'b',name:'second',transform:{position:[-2,1,0],rotationQuaternion:[0,0,0,1],scale:[1,2,1]}})]);
+    const phases=[];const {dom:output,data}=parse(await exportHtml(repeated,'重复构件',progress=>phases.push(progress.stage)));let scene;
+    try{assert.equal(data.geometries.length,1);assert.equal(data.object.children.length,2);scene=await new THREE.ObjectLoader().parseAsync(data);assert.equal(scene.children[0].geometry,scene.children[1].geometry);assert.deepEqual(scene.children.map(mesh=>mesh.name),['first','second']);assert.deepEqual(scene.children[1].position.toArray(),[-2,1,0]);assert.deepEqual(scene.children[1].scale.toArray(),[1,2,1]);assert.equal(scene.children[0].geometry.attributes.position.count,scene.children[1].geometry.attributes.position.count);assert.ok(phases.includes('geometry')&&phases.includes('textures')&&phases.includes('serialize'));}finally{if(scene)release(scene);output.window.close();}
+  });
   await test('embedded runtime resolves to a full Three namespace with its retained license, without external imports',async()=>{
     const {dom:output}=parse(html);
     try{

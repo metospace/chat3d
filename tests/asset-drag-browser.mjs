@@ -10,7 +10,7 @@ let browser,page;const report={checks:[],errors:[]};const check=async(name,fn)=>
 try{
  await server.listen();browser=await chromium.launch({headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe'});page=await browser.newPage({viewport:{width:1440,height:960}});page.setDefaultTimeout(25000);
  const base='http://127.0.0.1:'+server.httpServer.address().port;page.on('pageerror',error=>report.errors.push(error.stack));await page.route('**/*',route=>route.request().url().startsWith(base)?route.continue():route.abort());
- await page.goto(base);await page.getByRole('heading',{name:'项目工作台',exact:true}).waitFor();
+ await page.goto(base);await page.getByLabel('新项目描述',{exact:true}).waitFor();
  const fixture=await page.evaluate(async()=>{
   const {createInitialDoc}=await import('/src/store.ts'),{applyBatch}=await import('/src/domain/commands.ts'),{createModelAsset}=await import('/src/domain/modelAssets.ts'),storage=await import('/src/domain/modelAssetStorage.ts'),{saveLibraryCategory}=await import('/src/domain/libraryCategories.ts');
   const parent=await saveLibraryCategory('拖放分类'),child=await saveLibraryCategory('工位子类',undefined,{parentValue:parent.value});const part=(name,width,height,depth,position)=>({op:'createPrimitive',name,parentId:null,materialId:'mat_blue',geometry:{type:'box',params:{width,height,depth}},transform:{position,scale:[1,1,1],rotationQuaternion:[0,0,0,1]}});

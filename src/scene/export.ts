@@ -5,22 +5,31 @@ import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { SceneDocument } from '../domain/types';
 import { buildPrimitiveGeometry } from './geometry';
 
-export function buildExportScene(doc: SceneDocument): THREE.Scene {
-  const scene=new THREE.Scene();scene.name='Scenivo';scene.userData={unit:doc.unit,projectId:doc.projectId};
-  const materialCache=new Map<string,THREE.MeshStandardMaterial>();
-  try {
-    for (const n of doc.nodes) {
-      if (!n.visible) continue;
-      if (n.kind!=='primitive'||!n.geometry||n.parentId!==null) throw new Error('当前场景导出仅支持无分组的基础模型');
-      const m=doc.materials.find((v)=>v.id===n.materialId);
-      const geometry=buildPrimitiveGeometry(n.geometry);
-      let material:THREE.MeshStandardMaterial;
-      try { const key=JSON.stringify([n.materialId,n.label]);material=materialCache.get(key)??createSceneMaterial(m,n.label);materialCache.set(key,material); } catch (error) { geometry.dispose();throw error; }
-      const mesh=new THREE.Mesh(geometry,material);
-      mesh.name=n.name;mesh.userData={connection:n.connection,nodeId:n.id,assemblyId:n.assemblyId,assemblyName:n.assemblyName,label:n.label,sceneRole:n.sceneRole,planKey:n.planKey,zone:n.zone};mesh.position.fromArray(n.transform.position);mesh.quaternion.fromArray(n.transform.rotationQuaternion);mesh.scale.fromArray(n.transform.scale);scene.add(mesh);
-    }
-  } catch (error) { disposeExportScene(scene);throw error; }
-  return scene;
+function* exportSceneParts(doc:SceneDocument,scene:THREE.Scene,shareGeometry:boolean){
+  const materialCache=new Map<string,THREE.MeshStandardMaterial>(),geometryCache=new Map<string,THREE.BufferGeometry>();
+  const materials=new Map(doc.materials.map(material=>[material.id,material]));
+  for(const n of doc.nodes){
+    if(!n.visible)continue;
+    if(n.kind!=='primitive'||!n.geometry||n.parentId!==null)throw new Error('当前场景导出仅支持无分组的基础模型');
+    const key=shareGeometry?JSON.stringify(n.geometry):undefined;
+    const cached=key===undefined?undefined:geometryCache.get(key),geometry=cached??buildPrimitiveGeometry(n.geometry);
+    let material:THREE.MeshStandardMaterial;
+    try{const key=JSON.stringify([n.materialId,n.label]);material=materialCache.get(key)??createSceneMaterial(n.materialId?materials.get(n.materialId):undefined,n.label);materialCache.set(key,material);}catch(error){if(!cached)geometry.dispose();throw error;}
+    if(key!==undefined&&!cached)geometryCache.set(key,geometry);
+    const mesh=new THREE.Mesh(geometry,material);
+    mesh.name=n.name;mesh.userData={connection:n.connection,nodeId:n.id,assemblyId:n.assemblyId,assemblyName:n.assemblyName,label:n.label,sceneRole:n.sceneRole,planKey:n.planKey,zone:n.zone};mesh.position.fromArray(n.transform.position);mesh.quaternion.fromArray(n.transform.rotationQuaternion);mesh.scale.fromArray(n.transform.scale);scene.add(mesh);
+    yield;
+  }
+}
+function exportSceneRoot(doc:SceneDocument){const scene=new THREE.Scene();scene.name='Scenivo';scene.userData={unit:doc.unit,projectId:doc.projectId};return scene;}
+export function buildExportScene(doc:SceneDocument):THREE.Scene{
+  const scene=exportSceneRoot(doc);
+  try{for(const _ of exportSceneParts(doc,scene,false)){/* Synchronous GLB/export callers. */}return scene;}catch(error){disposeExportScene(scene);throw error;}
+}
+/** HTML shares immutable buffers for identical shapes and yields between construction batches. */
+export async function buildHtmlExportScene(doc:SceneDocument,onProgress?:(completed:number,total:number)=>void):Promise<THREE.Scene>{
+  const scene=exportSceneRoot(doc),total=doc.nodes.filter(node=>node.visible).length;let completed=0,last=performance.now();
+  try{for(const _ of exportSceneParts(doc,scene,true)){completed++;if(performance.now()-last>=12){onProgress?.(completed,total);const {promise,resolve}=Promise.withResolvers<void>();setTimeout(resolve,0);await promise;last=performance.now();}}onProgress?.(completed,total);return scene;}catch(error){disposeExportScene(scene);throw error;}
 }
 export async function prepareExportMaterials(scene:THREE.Scene):Promise<void> {
   const pending:Promise<void>[]=[];
