@@ -423,7 +423,7 @@ await test('renderer recovery on the next task restores required capture and lat
   const f=fake([[edit,capture],[bad],'暂时提交这个版本',()=>[{name:'edit_scene',args:{summary:'修正配色',operations:[{op:'setAppearance',targetId:current.nodes[0].id,baseColor:'#123456'}]}},capture],[review,submit]]);const o=opts(f);o.onPreview=doc=>current=doc;const r=await runModelingAgent(o);assert.equal(f.calls,5);assert.equal(r.batch.taskStatus,'submitted');assert.ok(r.activity.timings.some(t=>t.failed&&t.detail.includes('不能作为完成预览提交')));assert.equal(r.batch.operations.length,2);assert.equal(o.document.nodes.length,0);
  });
  await test('unimplemented workflow cannot be submitted and repeated refusal ends as an incomplete draft',async()=>{
-  const bad={name:'review_model',args:{observations:'当前只有诊断短程运动',issues:[],completion:{summary:'局部诊断完成',remainingIssues:['取货与放货动作尚未恢复','整车同步及穿插尚未完整验证']}}};const f=fake([[edit,capture],[bad],'先交付','先交付','先交付']);const r=await runModelingAgent(opts(f));assert.equal(f.calls,5);assert.equal(r.batch.taskStatus,'partial');assert.equal(r.activity.outcome,'partial');assert.ok(r.batch.qualityIssues.some(issue=>issue.includes('尚未恢复')));assert.match(r.batch.summary,/仍未解决/);assert.ok(!r.activity.events.some(event=>event.includes('预览已提交')));
+  const bad={name:'review_model',args:{observations:'当前只有诊断短程运动',issues:[],completion:{summary:'局部诊断完成',remainingIssues:['取货与放货动作尚未恢复','整车同步及穿插尚未完整验证']}}};const f=fake([[edit,capture],[bad],'先交付','先交付','先交付']);const r=await runModelingAgent(opts(f));assert.equal(f.calls,6);assert.equal(r.batch.taskStatus,'partial');assert.equal(r.activity.outcome,'partial');assert.ok(r.batch.qualityIssues.some(issue=>issue.includes('尚未恢复')));assert.match(r.batch.summary,/仍未解决/);assert.ok(!r.activity.events.some(event=>event.includes('预览已提交')));
  });
  await test('clearing issue lists without changed model or evidence cannot erase a known defect',async()=>{
   const bad={name:'review_model',args:{observations:'背面存在明显缺失',issues:['背面未还原']}};const f=fake([[edit,capture],[bad],[review,submit]]);const r=await runModelingAgent(opts(f));assert.equal(r.batch.taskStatus,'partial');assert.ok(r.activity.timings.some(t=>t.failed&&t.detail.includes('不能只清空问题列表')));assert.ok(r.batch.qualityIssues.some(issue=>issue.includes('背面未还原')));
@@ -431,6 +431,52 @@ await test('renderer recovery on the next task restores required capture and lat
  await test('animation review accepts chosen phase times and a less occluded camera view',async()=>{
   const doc=applyBatch(createInitialDoc(),{operations:[create]}).doc,track={id:'move',name:'phase move',targetIds:[doc.nodes[0].id],channel:'position',keyframes:[{time:0,value:[0,0,0]},{time:10,value:[3,0,0]}]},samples=[];
   const f=fake([[plan,{name:'configure_animation',args:{summary:'生成往返运动检查',name:'move',duration:10,loop:false,tracks:[track]}},{name:'preview_animation',args:{times:[0,2,4,6,8,10],view:'side'}}],[review,submit]]);const o=opts(f,doc);o.text='创建运动动画';o.capture=async(d,view,ids,time)=>{samples.push({view,time});return picture;};const r=await runModelingAgent(o);assert.equal(r.batch.taskStatus,'submitted');assert.deepEqual(samples.map(s=>s.time),[0,2,4,6,8,10]);assert.ok(samples.every(s=>s.view==='side'));
+ });
+ await test('animation reads paginate exact tracks, preserve current pages in context and never edit the scene',async()=>{
+  const doc=applyBatch(createInitialDoc(),{operations:[create,{...create,name:'untouched'}]}).doc;
+  doc.animation={version:1,name:'existing',duration:4,loop:false,tracks:Array.from({length:18},(_,i)=>({id:'track-'+i,name:'track '+i,targetIds:[doc.nodes[i%2].id],channel:'position',keyframes:[{time:0,value:[0,0,0]},{time:4,value:[i+1,0,0]}]}))};
+  const before=structuredClone(doc),read={name:'read_animation',args:{limit:16}};
+  const f=fake([[read],ctx=>{const page=JSON.parse(ctx.messages.find(m=>m.role==='toolResult'&&m.toolName==='read_animation').content[0].text);assert.equal(page.animation.tracks.length,16);assert.equal(page.nextOffset,16);assert.deepEqual(page.animation.tracks[0],doc.animation.tracks[0]);return [{name:'read_animation',args:{offset:16,limit:16}}];},ctx=>{const pages=ctx.messages.filter(m=>m.role==='toolResult'&&m.toolName==='read_animation').map(m=>JSON.parse(m.content[0].text));assert.equal(pages[0].animation.tracks.length,16);assert.equal(pages[1].animation.tracks.length,2);assert.equal(pages[1].nextOffset,null);return [{name:'read_animation',args:{targetIds:[doc.nodes[1].id]}}];},ctx=>{const page=JSON.parse(ctx.messages.filter(m=>m.role==='toolResult'&&m.toolName==='read_animation').at(-1).content[0].text);assert.equal(page.matchedTracks,9);assert.ok(page.animation.tracks.every(t=>t.targetIds[0]===doc.nodes[1].id));return '已读取真实动画';}]);
+  const r=await runModelingAgent(opts(f,doc));assert.equal(r.batch.operations.length,0);assert.deepEqual(r.result.doc,before);assert.deepEqual(doc,before);
+ });
+ await test('unsupported animation read command rejects the entire edit with executable recovery guidance',async()=>{
+  const doc=applyBatch(createInitialDoc(),{operations:[create]}).doc;
+  const f=fake([[{name:'edit_scene',args:{summary:'错误读取动画',operations:[{op:'rename',targetId:doc.nodes[0].id,name:'should-not-apply'},{op:'getAnimation'}]}}],ctx=>{const error=ctx.messages.find(m=>m.role==='toolResult'&&m.isError);assert.match(JSON.stringify(error),/read_animation/);assert.match(JSON.stringify(error),/configure_animation/);return [{name:'read_animation',args:{}}];},ctx=>{assert.equal(JSON.parse(ctx.messages.find(m=>m.role==='toolResult'&&m.toolName==='read_animation').content[0].text).animation,null);return '尚未配置动画';}]);
+  const r=await runModelingAgent(opts(f,doc));assert.deepEqual(r.result.doc,doc);assert.equal(r.batch.operations.length,0);
+ });
+ await test('completion repair plan selects editing, motion sampling and evidence review without claiming issues are fixed',async()=>{
+  const {completionRecoveryPlan}=await server.ssrLoadModule('/src/ai/completionRecovery.ts');
+  const issues=['托盘未随车搬运','完整流程未恢复'],state={animation:true,changed:false,sampled:false,captured:false,reviewed:false,lastError:'getAnimation不可用'};
+  let p=completionRecoveryPlan(issues,state);assert.equal(p.stage,'repair');assert.match(p.next,/read_animation/);assert.equal(p.issues[0].status,'unresolved');assert.match(p.toolError,/getAnimation/);
+  p=completionRecoveryPlan(issues,{...state,changed:true});assert.equal(p.stage,'sample');assert.match(p.next,/preview_animation/);
+  p=completionRecoveryPlan(issues,{...state,changed:true,sampled:true,captured:true});assert.equal(p.stage,'review');assert.match(p.next,/review_model/);
+  p=completionRecoveryPlan(['主体配色不符合要求'],{...state,animation:false,changed:true});assert.equal(p.stage,'capture');assert.match(p.next,/capture_view/);
+  p=completionRecoveryPlan(['主体配色不符合要求'],{...state,animation:false});assert.match(p.next,/edit_scene/);assert.doesNotMatch(p.next,/configure_animation/);
+ });
+ await test('animation defect recovery survives three text stops then edits the real program and samples before submission',async()=>{
+  const doc=applyBatch(createInitialDoc(),{operations:[create,{...create,name:'load'}]}).doc;
+  const body=doc.nodes[0].id,load=doc.nodes[1].id,track={id:'body',name:'整车',targetIds:[body],channel:'position',keyframes:[{time:0,value:[0,0,0]},{time:4,value:[2,0,0]}]},animation={version:1,name:'transport',duration:4,loop:false,tracks:[track]};
+  const bad={name:'review_model',args:{observations:'托盘未与整车同步运动',issues:['托盘未随车搬运'],completion:{summary:'尚有缺陷',remainingIssues:['托盘未随车搬运']}}};
+  const f=fake([[{name:'edit_scene',args:{summary:'创建运输动画',operations:[{op:'setAnimation',animation}]}},{name:'preview_animation',args:{}}],[bad],'先交付','先交付','先交付',ctx=>{assert.match(JSON.stringify(ctx),/当前缺陷修复单/);return [{name:'read_animation',args:{}}];},ctx=>{const program=JSON.parse(ctx.messages.find(m=>m.role==='toolResult'&&m.toolName==='read_animation').content[0].text).animation;assert.deepEqual(program.tracks,[track]);return [{name:'configure_animation',args:{summary:'补齐托盘随车绑定',...program,tracks:[...program.tracks,{...track,id:'load',name:'载荷',targetIds:[load]}]}}];},ctx=>{assert.ok(ctx.messages.some(m=>m.role==='system'&&typeof m.content==='string'&&m.content.includes('"stage":"sample"')));return [{name:'preview_animation',args:{times:[0,2,4],view:'side'}}];},[review,submit]]);
+  const options=[],fn=f.fn;f.fn=(model,context,opts)=>{options.push(opts);return fn(model,context,opts);};
+  const o=opts(f,doc);o.text='修复搬运动画';const r=await runModelingAgent(o);
+  assert.equal(r.batch.taskStatus,'submitted',r.batch.summary);assert.equal(f.calls,9);assert.equal((await options[3].onPayload({},null)).tool_choice,'required');assert.equal((await options[5].onPayload({},null)).tool_choice,'required');assert.equal(r.result.doc.animation.tracks.length,2);assert.deepEqual(r.result.doc.animation.tracks[0],track);assert.equal(doc.animation,undefined);
+ });
+ await test('task round budget still stops compulsory repair without silently starting a new budget',async()=>{
+  const bad={name:'review_model',args:{observations:'当前配色明显不符合要求',issues:['主体配色不符合要求'],completion:{summary:'未完成',remainingIssues:[]}}};
+  const f=fake([[edit,capture],[bad],'先交付','先交付']);const o=opts(f);o.config={...cfg,taskBudget:{maxRounds:3}};const r=await runModelingAgent(o);assert.equal(f.calls,3);assert.equal(r.batch.taskStatus,'partial');assert.match(r.batch.summary,/3.*轮上限/);
+ });
+ await test('production adapter requires a native tool call after a known-defect text stop',async()=>{
+  const previous=globalThis.fetch,wire=[];let bodyId;
+  const bad={name:'review_model',args:{observations:'主体配色不符合明确要求',issues:['主体配色不符合要求'],completion:{summary:'局部已完成',remainingIssues:['主体配色不符合要求']}}};
+  const actions=[[edit,capture],[bad],'先保留',()=>[{name:'edit_scene',args:{summary:'修复配色',operations:[{op:'setAppearance',targetId:bodyId,baseColor:'#123456'}]}},capture],[review,submit]];
+  globalThis.fetch=async(url,init)=>{
+   const payload=JSON.parse(init.body);wire.push(payload);const step=actions[wire.length-1];const values=typeof step==='function'?step():step;
+   const delta=Array.isArray(values)?{role:'assistant',tool_calls:values.map((a,i)=>({index:i,id:`repair_wire_${wire.length}_${i}`,type:'function',function:{name:a.name,arguments:JSON.stringify(a.args)}}))}:{role:'assistant',content:values};
+   const finish=Array.isArray(values)?'tool_calls':'stop';
+   return new Response('data: '+JSON.stringify({id:'repair',object:'chat.completion.chunk',choices:[{index:0,delta,finish_reason:null}]})+'\n\ndata: '+JSON.stringify({id:'repair',object:'chat.completion.chunk',choices:[{index:0,delta:{},finish_reason:finish}],usage:{prompt_tokens:20,completion_tokens:10,total_tokens:30}})+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
+  };
+  try{const {stream}=await import('@earendil-works/pi-ai/api/openai-completions');const o=opts(fake([]));o.streamFn=(model,context,options)=>stream(model,context,{...options,apiKey:'mock-only',fetch:globalThis.fetch,maxRetries:0});o.onPreview=doc=>bodyId=doc.nodes[0].id;const r=await runModelingAgent(o);assert.equal(r.batch.taskStatus,'submitted',r.batch.summary);assert.equal(wire.length,5);assert.equal(wire[3].tool_choice,'required');assert.notEqual(wire[0].tool_choice,'required');assert.ok(wire[3].tools.some(t=>t.function.name==='read_animation'));assert.equal(r.result.doc.nodes[0].materialId!==undefined,true);}finally{globalThis.fetch=previous;}
  });
  console.log(`${passed} Pi agent loop checks passed; model and rendering mocked`);
 }finally{await server.close()}

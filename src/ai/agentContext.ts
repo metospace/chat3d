@@ -37,7 +37,7 @@ export function targetedSceneContext(doc:SceneDocument,selection:string[],nodeId
 
 // Prune only obsolete tool snapshots. Keep call IDs, errors, latest scene and reference images intact.
 export function compactAgentContext(messages: AgentMessage[]): AgentMessage[] {
-  const sceneReads=new Set(['read_scene','find_scene_parts','find_scene_parts_batch','prepare_local_edit','read_pose_rig']);
+  const sceneReads=new Set(['read_scene','read_animation','find_scene_parts','find_scene_parts_batch','prepare_local_edit','read_pose_rig']);
   const sceneEdits=new Set(['retry_structured_component','bind_object_features','repair_structured_features','build_structured_component','align_saved_instances','add_saved_assets','retry_scene_edit','define_pose_rig','pose_with_rig','bend_existing_mesh','pose_existing_parts','pose_bimanual_interaction','pose_arm_interaction','create_hand_pose','edit_scene','configure_animation','configure_process_route','add_reference_component','add_mesh_component','add_mesh_components','connect_scene_parts','remove_connection','set_surface_detail','set_surfaces_batch','build_components_parallel','prepare_surface_uv','move_components']);
   let latestScene=-1, latestEdit=-1, latestInspection=-1, latestAudit=-1, latestCaptureRevision='',latestCaptureScope='';
   const auditedScopes=new Set<string>();
