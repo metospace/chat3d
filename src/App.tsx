@@ -220,6 +220,7 @@ export default function App() {
           {active?.assetSource&&<Tag color={(active.assetCatalogVersion??active.assetSource.version)>active.assetSource.version?'warning':'default'}>编辑 v{active.assetSource.version}{(active.assetCatalogVersion??0)>active.assetSource.version?` · 库内最新 v${active.assetCatalogVersion}，当前草稿未替换`:''}</Tag>}
           <span className="editor-save-state">{active?.snapshot.pendingBatch?'待确认':!active?.librarySavedAt?'草稿':active.savedRevision===useEditorStore.getState().doc.revision?'已保存到库':'未保存到库'}</span></div>}><Button type="text" aria-label="项目状态" title={active?.title} icon={<LayersIcon/>}/></Popover>
           <Button type="text" className="workbench-assistant-toggle" title={assistantOpen?'收起 AI 助手':'打开 AI 助手'} aria-expanded={assistantOpen} aria-label={assistantOpen?'收起 AI 助手':'打开 AI 助手'} onClick={toggleAssistant} icon={<ChatBubbleIcon/>}/>
+          <Button type="text" aria-label="模型配置" icon={<GearIcon/>} onClick={()=>setShowSettings(true)}/>
           <Dropdown trigger={['click']} menu={{items:exportItems}} disabled={locked||!workspace.ready}><Button className="workbench-export" aria-label="导出与更多" disabled={locked||!workspace.ready}>导出 <ChevronDownIcon/></Button></Dropdown>
           <Button className="workbench-save" type="primary" aria-label={librarySaving?'正在保存…':active?.moduleKind==='asset'?'保存资产':'保存场景'} disabled={locked||librarySaving||!workspace.ready} onClick={()=>{if(active?.moduleKind==='asset'&&!useEditorStore.getState().doc.nodes.length){setProjectNotice('还没有可保存的模型。请先创建或导入模型，再保存到资产库。');setAssistantOpen(true);return;}setShowLibrarySave(true);}}>{librarySaving?'保存中…':active?.moduleKind==='asset'?'保存资产':'保存场景'}</Button>
           </div>
@@ -231,7 +232,8 @@ export default function App() {
         <div className="editor-upper"><aside className="editor-objects canvas-surface" hidden={!structureOpen}><div className="editor-panel-heading">场景结构<Button type="text" aria-label="收起场景结构" icon={<Cross1Icon/>} onClick={()=>setStructureOpen(false)}/></div><ObjectTree/><PanelResize label="调整对象面板宽度" width={objectsWidth} min={200} max={360} side="right" onChange={setObjectsWidth}/></aside>
           <main className="scene-region">
             <div className="scene-stage"><ViewportPanel/></div>
-        {nodeCount>0&&<div className="canvas-transform-tools canvas-surface" role="group" aria-label="场景编辑工具">
+        <div className="canvas-transform-tools canvas-surface" role="group" aria-label="场景编辑工具">
+          {nodeCount>0&&<>
           <ToolbarAction label="浏览场景" help="左键拖动旋转视角，右键平移，滚轮缩放；单击选择不切换编辑模式" pressed={compositionMode==='orbit'&&!selectionBox} onPress={()=>{useSelectionTool.setState({box:false});useCompositionTool.setState({mode:'orbit'});}}><span>浏览</span></ToolbarAction>
           <ToolbarAction label="选择对象" help="打开场景结构，从列表中选择要编辑的对象" onPress={()=>structureOpen?setStructureOpen(false):openEditorPanel('structure')}><CursorArrowIcon/><span>选择</span></ToolbarAction>
           <ToolbarAction pressed={selectionBox} label={selectionBox?'退出框选':'框选对象'} help="默认按可见表面框选；Shift / Ctrl / ⌘ 追加，Esc 取消。本次选择可在旁边开启穿透" disabled={!viewportReady||locked} disabledReason={!viewportReady?'三维视图不可用，可在结构列表中多选':'请先结束生成或处理预览'} onPress={()=>useSelectionTool.setState({box:!selectionBox})}><span aria-hidden="true">▧</span></ToolbarAction>
@@ -243,8 +245,9 @@ export default function App() {
           <ToolbarAction label="适应场景" help="完整显示当前场景" disabled={!nodeCount||!viewportReady} onPress={()=>focusSceneObjects(useEditorStore.getState().doc.nodes.map(n=>n.id))}><span>适应</span></ToolbarAction>
           <ToolbarAction label="聚焦选中对象" help="把镜头移动到选中内容附近，方便查看" disabled={!selection.length||!viewportReady} disabledReason={!selection.length?'请先选中一个或多个对象':'当前三维视图不可用'} onPress={()=>focusSceneObjects(selection)}><EnterFullScreenIcon/></ToolbarAction><span/>
           <DeleteSelectionAction active={workspace.ready&&modulePage==='workbench'} onNotice={setProjectNotice}/>
+          </>}
           <ToolbarAction label={focusScene?'恢复工作台':'专注场景'} help={focusScene?'恢复对话与编辑面板':'暂时收起周边面板，放大模型画布'} onPress={()=>setFocusScene(!focusScene)}><EnterFullScreenIcon/></ToolbarAction>
-        </div>}
+        </div>
 
             <div className="workbench-review-slot"/>{nodeCount>0&&<div className="canvas-context-label"><LayersIcon/>{previewing?'修改预览':locked?'正在处理草稿':active?.title??'三维视图'}<small>{nodeCount} 个零件 · m</small>{locked&&!previewing?<CanvasDraftStatus/>:<Tag color={previewing?'warning':undefined}>{previewing?'待确认预览':compositionMode==='move'?'移动对象':compositionMode==='rotate'?'旋转对象':compositionMode==='scale'?'缩放对象':selectionBox?'框选对象':'浏览场景'}</Tag>}</div>}
             {nodeCount===0&&!previewing&&viewportReady&&!placingAsset&&!draggingAsset&&<CanvasEmptyState busy={locked} asset={active?.moduleKind==='asset'} onConversation={focusComposer} onAssets={()=>openEditorPanel('asset')} onImport={()=>modelFileRef.current?.click()} onTask={()=>setTaskDetailsOpen(true)}/>}
