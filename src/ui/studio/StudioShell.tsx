@@ -36,7 +36,7 @@ export function StudioShell({activePage,onNavigate,disabled,taskQueueRequest,onT
    menuExtraRender={()=>collapsed?null:<span className="pro-studio-caption">本地工作空间</span>}
    menuFooterRender={()=> <div className="studio-sidebar-footer pro-studio-footer" data-collapsed={collapsed}><Button type="text" aria-label="设置" className="pro-settings-link" aria-current={activePage==='settings'?'page':undefined} disabled={disabled} onClick={()=>onNavigate('settings')}><GearIcon/>{!collapsed&&<span>设置</span>}{updatePending&&<Badge status="error" className="studio-settings-update" title="有新版本可用"/>}</Button>{account}</div>}
    headerContentRender={()=> <Breadcrumb items={[{title:'本地工作空间'},{title:LABELS[activePage]}]}/>}
-   actionsRender={()=>[utilities]} avatarProps={false} footerRender={false}
+   actionsRender={workbench?undefined:()=>[utilities]} avatarProps={false} footerRender={false}
    token={{header:{heightLayoutHeader:56},sider:{menuHeight:42,paddingInlineLayoutMenu:12,paddingBlockLayoutMenu:8,colorTextMenu:'var(--sc-ink-muted)',colorTextMenuSelected:'var(--sc-accent)',colorTextMenuItemHover:'var(--sc-ink)',colorBgMenuItemSelected:'var(--sc-accent-soft)'}}}
    contentStyle={{padding:0,minWidth:0,height:workbench?'100%':undefined}}>
    {children}

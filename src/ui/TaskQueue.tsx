@@ -6,6 +6,8 @@ import {getSessionEditor,switchSession,useWorkspaceStore,type WorkspaceSession} 
 import {conversationController} from '../runtime/conversationController';
 import './task-queue.css';
 
+let handledTaskQueueRequest=0;
+
 export function taskSummary(session:WorkspaceSession){
  const live=getSessionEditor(session.id)?.getState(),s=session.snapshot;
  const run=[...s.messages].reverse().find(m=>m.run)?.run;
@@ -20,14 +22,14 @@ export function TaskQueue({onOpen,onHistory,disabled=false,openRequest=0}:{onOpe
  const w=useWorkspaceStore();
  const [open,setOpen]=useState(false),[query,setQuery]=useState(''),[error,setError]=useState('');
  const [filter,setFilter]=useState<'all'|'running'|'review'|'ended'>('all');
- useEffect(()=>{if(openRequest){setOpen(true);setError('');}},[openRequest]);
+ useEffect(()=>{if(openRequest>handledTaskQueueRequest){handledTaskQueueRequest=openRequest;setOpen(true);setError('');}},[openRequest]);
  const [stop,setStop]=useState<{id:string;title:string;runId:string|null}|null>(null);
  const tasks=w.sessions.filter(s=>!s.deletedAt).map(s=>({session:s,...taskSummary(s)})).filter(t=>t.visible);
  const running=tasks.filter(t=>t.group==='running').length,review=tasks.filter(t=>t.group==='review').length;
  const shown=tasks.filter(t=>t.session.title.toLowerCase().includes(query.trim().toLowerCase())&&(filter==='all'||t.group===filter));
  const close=()=>{setOpen(false);setError('');};
  return <><Button type="text" className="global-task-trigger" aria-label="任务" title={`${running} 个运行中，${review} 个待确认`} disabled={disabled} onClick={()=>setOpen(true)}><ActivityLogIcon/><span className="global-task-label">任务</span>{running>0&&<span className="global-task-count" aria-label={`${running} 个运行中`}>{running}</span>}</Button>
-  <Drawer open={open} onClose={close} placement="right" size={440} className="global-task-drawer" closable={false} title="任务队列" extra={<Button type="text" aria-label="关闭任务队列" icon={<Cross1Icon/>} onClick={close}/>} styles={{body:{display:'flex',flexDirection:'column',gap:14,padding:'18px 20px'},header:{padding:'18px 20px 10px'}}}>
+  <Drawer open={open} onClose={close} destroyOnHidden placement="right" size={440} className="global-task-drawer" closable={false} title="任务队列" extra={<Button type="text" aria-label="关闭任务队列" icon={<Cross1Icon/>} onClick={close}/>} styles={{body:{display:'flex',flexDirection:'column',gap:14,padding:'18px 20px'},header:{padding:'18px 20px 10px'}}}>
    <p className="global-task-summary">{running} 个运行中 · {review} 个待确认</p>
    <Input aria-label="搜索任务" placeholder="搜索任务名称" value={query} onChange={e=>setQuery(e.target.value)}/>
    <div className="global-task-filters" role="group" aria-label="筛选任务">{([['all','全部'],['running','运行中'],['review','待确认'],['ended','已结束']] as const).map(([value,label])=><Button key={value} type="text" aria-pressed={filter===value} onClick={()=>setFilter(value)}>{label}</Button>)}</div>
