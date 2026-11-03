@@ -264,7 +264,8 @@ try{
    return '整批没有应用，等待修正';
   }]);
   const previews=[];
-  await assert.rejects(()=>runModelingAgent({...agentOptions(transport,document),onPreview:doc=>previews.push(clone(doc))}));
+  const result=await runModelingAgent({...agentOptions(transport,document),onPreview:doc=>previews.push(clone(doc))});
+  assert.equal(result.batch.operations.length,0);assert.equal(result.result.applied.length,0);assert.deepEqual(result.result.doc,before);
   assert.deepEqual(previews,[]);assert.deepEqual(document,before);
  });
 
@@ -313,7 +314,9 @@ try{
   const transport=fakeTransport([[{name:'edit_scene',args:{summary:'bad',operations:[{op:'rename',targetId:id}]}}],'模型暂未纠正',context=>{assert.ok(JSON.stringify(context).includes('内部自动恢复'));return [{name:'retry_scene_edit',args:{failedId:'call_1_0',patches:[{path:['operations',0,'name'],value:'restored'}]}}];},[{name:'submit_data_preview',args:{summary:'已恢复的数据草稿'}}]]);
   const result=await runModelingAgent(agentOptions(transport,document));assert.equal(result.result.doc.nodes[0].name,'restored');assert.equal(result.batch.operations.length,1);assert.equal(document.nodes[0].name,'selected');
   const stopped=fakeTransport([[{name:'edit_scene',args:{summary:'bad',operations:[{op:'rename',targetId:id}]}}],'停止','停止','停止','不应再次请求']);
-  await assert.rejects(()=>runModelingAgent(agentOptions(stopped,document)));assert.equal(stopped.calls,4);assert.equal(document.nodes[0].name,'selected');
+  const stoppedResult=await runModelingAgent(agentOptions(stopped,document));
+  assert.equal(stoppedResult.batch.operations.length,0);assert.equal(stoppedResult.result.applied.length,0);assert.equal(stoppedResult.result.doc.nodes[0].name,'selected');
+  assert.equal(stopped.calls,4);assert.equal(document.nodes[0].name,'selected');
  });
  console.log(`${passed} command contract checks passed; synthetic Pi transport, no network`);
 }finally{await server.close();}
