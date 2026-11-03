@@ -125,7 +125,7 @@ try {
   await test('geometry validation and atomic rejection are unchanged in both modes', async () => {
     for(const quality of ['fast','fine']) {
       const f=fake([[{name:'edit_scene',args:{summary:'拒绝非法尺寸',operations:[create,{...create,name:'非法',tempId:'bad',geometry:{type:'box',params:{width:-1,height:1,depth:1}}}]}}],'参数无效']),o=opts(f,quality);
-      const r=await runModelingAgent(o);assert.equal(r.result.doc.nodes.length,0);assert.equal(r.batch.operations.length,0);assert.match(errorsIn(r),/整组拒绝/);
+      const r=await runModelingAgent(o);assert.equal(r.result.doc.nodes.length,0);assert.equal(r.batch.operations.length,0);assert.match(errorsIn(r),/整批未执行|No operations applied|Command validation failed/);
     }
   });
   await test('explicit-selection and position locks apply equally to fast and fine', async () => {

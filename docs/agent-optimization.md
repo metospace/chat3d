@@ -13,6 +13,7 @@ Keep pi-agent-core and the canonical scene document. Reduce redundant model cont
 - Long scene reads and the initial scene context preserve every node ID, name and transform while omitting large shape descriptions. Explicit node-ID reads retain precise shape descriptions. This is a description budget, not a token guarantee or hard total-context cap.
 - Asset and connection tool schemas are loaded on demand, or automatically for existing asset/connection state or relevant intent. Editing and verification tools remain available; omitted groups can be enabled explicitly.
 - Existing atomic batches, failed-batch correction, revision-bound duplicate checks, scoped editing, pose preservation, evidence freshness and bounded component parallelism remain in place.
+- When command-parameter recovery exhausts its two automatic continuation turns, the agent emits a stopped-correction notice, clears recovery state, and ends normally while preserving prior valid results and the atomic tool-failure event. An entirely rejected batch returns zero operations rather than throwing solely because correction stopped; unknown numeric values are not guessed.
 
 ## Reproducible offline checks
 

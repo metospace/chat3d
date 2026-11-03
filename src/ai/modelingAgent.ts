@@ -660,7 +660,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
       if(answeredSteering)return {action:'end'};
       if(message.stopReason==='stop'&&!message.content.some(c=>c.type==='toolCall')){
         if(pendingCommandRecovery&&pendingCommandRecovery.revision===draft.revision&&pendingCommandRecovery.scope===executionTexts.join('\n')&&!questionOnly&&automaticCorrectionTurns<2){automaticCorrectionTurns++;emit('正在自动修正这次调整，原有结果保持不变');return {action:'continue'};}
-        if(pendingCommandRecovery&&pendingCommandRecovery.revision===draft.revision&&pendingCommandRecovery.scope===executionTexts.join('\n')&&!questionOnly){pauseReason='自动参数修正未能完成，已停止重复尝试；原有有效结果保留';emit(pauseReason,true);return {action:'end'};}
+        if(pendingCommandRecovery&&pendingCommandRecovery.revision===draft.revision&&pendingCommandRecovery.scope===executionTexts.join('\n')&&!questionOnly){emit('自动参数修正未能完成，已停止重复尝试；原有有效结果保留',true);pendingCommandRecovery=undefined;automaticCorrectionTurns=0;}
         if(operations.length&&completionBlockers.length&&visualAvailable()&&completionRecoveryTurns<2){completionRecoveryTurns++;emit('仍有未修复问题，继续完成当前任务',true);return {action:'continue'};}
         if(completionBlockers.length)pauseReason='已确认的问题仍未解决，模型未继续修复；已暂停并保留未完成草稿：'+completionBlockers.join('；');
         emit(completionBlockers.length?pauseReason:'模型已结束文字回复，本轮不再自动续问；已有修改仅保留为待确认草稿',true);return {action:'end'};
