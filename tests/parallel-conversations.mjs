@@ -63,7 +63,8 @@ try{
  });
  await test('failure stays in its session; stale result cannot commit across project/revision boundary',async()=>{
   B.setState({composerText:'B fails'});const run=cb.send();await wait(()=>requests.length===3);requests[2].stream.error(new Error('provider failed SECRET-B-NOT-IN-SNAPSHOTS'));await run;
-  assert.equal(B.getState().aiStatus,'error');assert.match(B.getState().aiError,/provider failed/);assert.equal(C.getState().aiError,null);assert.doesNotMatch(JSON.stringify(B.getState().messages),/SECRET-B/);
+  assert.equal(B.getState().aiStatus,'error');assert.match(B.getState().aiError,/本次调整未成功|场景未修改/);assert.doesNotMatch(B.getState().aiError,/SECRET-B/);assert.equal(C.getState().aiError,null);assert.doesNotMatch(JSON.stringify(B.getState().messages),/SECRET-B/);
+  assert.ok(B.getState().lastRun.events.some(event=>/provider failed/.test(event)),'failure diagnostics retain the provider reason');
   const old=A.getState().doc;A.setState({composerText:'A stale'});const stale=ca.send();await wait(()=>requests.length===4);A.setState({doc:createInitialDoc()});reply(requests[3],output('STALE'));await stale;
   assert.notEqual(A.getState().doc.projectId,old.projectId);assert.equal(A.getState().doc.nodes.length,0);assert.equal(A.getState().pendingResult,null);
  });
