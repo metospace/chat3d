@@ -72,7 +72,7 @@ try{
   assert.notEqual(runStatusLabel({status:'running'},review),runStatusLabel({status:'running'},{...review,phase:'building'}));
   assert.equal(runStatusLabel({status:'stopped'},review),'已停止');assert.equal(runStatusLabel({status:'failed'},review),'处理未完成');
  });
- await test('496 second review renders current waiting phase and real edit age despite unchanged explanation',async()=>{
+ await test('long reviews retain public prose and elapsed status without synthesizing timing events',async()=>{
   const realNow=Date.now,realSet=globalThis.setInterval,realClear=globalThis.clearInterval;
   let now=1_000_000,nextId=0;const timers=new Map();
   Date.now=()=>now;globalThis.setInterval=(fn,delay)=>{assert.equal(delay,1000);const id=++nextId;timers.set(id,fn);return id;};globalThis.clearInterval=id=>timers.delete(id);
@@ -82,13 +82,14 @@ try{
    const review={...activity,phase:'reviewing',lastModelEditAt:now-240_000,lastEventAt:now,explanations:[explanation],timings:[{id:'waiting',kind:'model',label:'secret_model_tool',startedAt:now-100_000}]};
    const run={status:'running',startedAt:now-496_000,mode:'pi',activity:review};let stopped=0;
    const ui=render(React.createElement(ChatRunTrace,{run,onStop:()=>stopped++}));
-   const section=ui.getByRole('region',{name:'思考与执行摘要'});
+   const section=ui.getByRole('region',{name:'工作时间线'});
    assert.equal(section.dataset.phase,'reviewing');assert.equal(section.dataset.modelState,'waiting');
-   assert.ok(ui.getByText('496 秒'));assert.match(ui.getByLabelText('距上次模型修改').textContent,/240/);assert.ok(ui.getByText(explanation.text));
-   assert.ok(ui.getByLabelText('当前模型处理状态').textContent.length>0);assert.equal(ui.container.textContent.includes('secret_model_tool'),false);
-   assert.equal(timers.size,1);now+=1000;act(()=>{for(const tick of timers.values())tick();});assert.match(ui.getByLabelText('距上次模型修改').textContent,/241/);
+   assert.ok(ui.getByText('496 秒'));assert.ok(ui.getByText(explanation.text));
+   assert.equal(ui.queryByLabelText('当前模型处理状态'),null);assert.equal(ui.queryByLabelText('距上次模型修改'),null);assert.equal(ui.container.textContent.includes('secret_model_tool'),false);
+   assert.equal(ui.container.querySelectorAll('.adx-work-entry').length,1);assert.equal(ui.container.querySelector('.adx-work-entry').dataset.kind,'explanation');
+   assert.equal(timers.size,1);now+=1000;act(()=>{for(const tick of timers.values())tick();});assert.ok(ui.getByText('497 秒'));
    ui.rerender(React.createElement(ChatRunTrace,{run:{...run,activity:{...review,phase:'repairing',lastEventAt:now}},onStop:()=>stopped++}));
-   assert.equal(section.dataset.phase,'repairing');assert.ok(ui.getByText(explanation.text));assert.match(ui.getByLabelText('距上次模型修改').textContent,/241/);
+   assert.equal(section.dataset.phase,'repairing');assert.ok(ui.getByText(explanation.text));assert.equal(ui.queryByLabelText('距上次模型修改'),null);
    fireEvent.click(ui.getByRole('button',{name:'停止生成'}));assert.equal(stopped,1);
    ui.rerender(React.createElement(ChatRunTrace,{run:{...run,status:'stopped',endedAt:now},onStop:()=>stopped++}));
    assert.equal(timers.size,0);assert.equal(section.dataset.phase,undefined);assert.equal(ui.queryByLabelText('距上次模型修改'),null);assert.equal(ui.queryByRole('button',{name:'停止生成'}),null);ui.unmount();

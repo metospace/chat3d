@@ -67,11 +67,23 @@
 .adx-link{padding:0;border:0;background:none;color:var(--adx-accent);font:inherit;font-size:11px;cursor:pointer;text-underline-offset:3px;text-decoration:underline}
 .adx-link:hover{opacity:.75}
 
-/* Think keeps its native icon, disclosure and single content rule. */
+/* Public explanations are grouped by phase beneath a native disclosure button. */
 .conversation-region .conversation-process.adx-run,.adx-run{margin:12px 0;border:0;background:transparent;min-width:0;color:var(--adx-ink);font-size:14px}
-.adx-run-think{min-width:0;flex:1}
-.adx-run-think [role="button"]:focus-visible{outline:2px solid var(--adx-accent);outline-offset:3px}
+.adx-run-heading{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin:0 0 12px;padding:0;border:0;background:transparent;color:var(--adx-ink);font:inherit;font-size:12px;text-align:left;cursor:pointer}
+.adx-run-heading:focus-visible{outline:2px solid var(--adx-accent);outline-offset:4px;border-radius:2px}
 .adx-run-elapsed{margin-left:8px;font-size:11px;font-variant-numeric:tabular-nums;color:var(--adx-muted)}
+.adx-work-timeline{list-style:none;margin:0;padding:0;min-width:0}
+.adx-work-entry{position:relative;display:grid;grid-template-columns:minmax(0,1fr);gap:2px;padding:0 0 16px 14px;border-left:1px solid var(--adx-line)}
+.adx-work-entry:last-child{padding-bottom:0}
+.adx-work-entry::before{content:'';position:absolute;top:7px;left:-4px;width:7px;height:7px;border-radius:50%;background:var(--adx-muted)}
+.adx-work-entry.is-running::before{background:var(--adx-accent);box-shadow:0 0 0 3px var(--adx-accent-soft)}
+.adx-work-entry.is-interrupted::before{background:#b4761c}
+.adx-work-time{font-size:11px;font-variant-numeric:tabular-nums;color:var(--adx-muted);white-space:nowrap;padding-top:2px}
+.adx-work-content{min-width:0}
+.adx-work-heading{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;color:var(--adx-ink);font-size:13px;line-height:1.7}
+.adx-work-status{font-size:11px;color:var(--adx-muted)}
+.adx-work-entry.is-running .adx-work-status{color:var(--adx-accent)}
+.adx-work-entry .adx-run-text{margin-top:4px}
 .adx-run-text{margin:0 0 10px;font:inherit;white-space:pre-wrap;overflow-wrap:anywhere}
 .adx-run-text:last-child{margin-bottom:0}
 .adx-run-actions{justify-content:flex-end;margin-top:4px}
@@ -179,7 +191,6 @@
 .adx-composer-controls .quality-picker-trigger svg,.adx-composer-controls .model-picker-trigger svg{flex:none}
 .adx-chat .adx-send-cluster{flex:none;gap:6px}
 .adx-chat .adx-send-cluster .ant-btn{width:34px;height:34px;min-width:34px;border-radius:50%;padding:0}
-.adx-reference-controls{width:260px;max-width:75vw;margin:0;padding:0;border:0;display:flex;flex-direction:column;gap:10px;font-size:13px}
 .adx-scope-options p{margin:0;color:var(--sc-ink-muted);font-size:12px;line-height:1.65}
 
 .adx-scope-options{width:260px;max-width:75vw;padding:12px 8px 8px;border-top:1px solid var(--sc-border-subtle,#e5e7eb);font-size:13px}

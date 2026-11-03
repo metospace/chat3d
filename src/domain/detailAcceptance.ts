@@ -39,7 +39,7 @@ export function validateDetailReview(doc:SceneDocument,review:DetailReview):stri
  if(review.revision!==doc.revision)errors.push('细节检查版本已过期');
  if(review.reusedCriteria?.length&&(!Number.isInteger(review.evidenceRevision)||review.evidenceRevision!>=review.revision||review.reusedCriteria.some(k=>!DETAIL_CRITERIA.some(c=>c.key===k))))errors.push('复用证据来源版本或项目无效');
  if(review.criterionEvidence&&Object.entries(review.criterionEvidence).some(([key,revision])=>!DETAIL_CRITERIA.some(c=>c.key===key)||!Number.isInteger(revision)||revision<0||revision>review.revision||(review.reusedCriteria?.includes(key as DetailCriterion)&&revision>=review.revision)))errors.push('逐项证据版本无效');
- const keys=review.checks.map(c=>c.criterion);if(keys.length!==DETAIL_CRITERIA.length||new Set(keys).size!==DETAIL_CRITERIA.length||DETAIL_CRITERIA.some(c=>!keys.includes(c.key)))errors.push('每个对象必须覆盖全部六项标准');
+ const keys=review.checks.map(c=>c.criterion),missing=DETAIL_CRITERIA.filter(c=>!keys.includes(c.key));if(keys.length!==DETAIL_CRITERIA.length||new Set(keys).size!==DETAIL_CRITERIA.length||missing.length)errors.push('每个对象必须覆盖全部六项标准'+(missing.length?'；缺少：'+missing.map(c=>c.key+'（'+c.name+'）').join('、'):''));
  const ids=new Set(members.map(n=>n.id));
  const offSurface=inspectContactSurfaces(doc,doc.nodes.filter(n=>n.connection&&(ids.has(n.id)||ids.has(n.connection.targetId))).map(n=>n.id)).filter(c=>c.status==='off_surface');
  const materials=new Map(doc.materials.map(m=>[m.id,m]));

@@ -70,8 +70,8 @@ function createConversationController(editor:EditorStore) {
   const release=()=>{reservations.delete(editor);ui.setState({running:false});useConversationRuns.setState({activeCount:reservations.size});};
   const markSteering=(id:string,status:'queued'|'received'|'interrupted')=>editor.setState(state=>({messages:state.messages.map(m=>m.id===id?{...m,steering:{runId:runMessageId.current??'',status}}:m)}));
   const clearControl=()=>{controlRef.current=null;setCanSteer(false);editor.setState(state=>({messages:state.messages.map(m=>m.steering?.runId===runMessageId.current&&m.steering.status==='queued'?{...m,steering:{...m.steering,status:'interrupted' as const}}:m)}));};
-  const finishRun=(status:'preview'|'completed'|'failed'|'stopped')=>{if(runMessageId.current)store().updateMessageRun(runMessageId.current,{status,endedAt:Date.now(),activity:store().lastRun??undefined});};
-  const fail = (msg: string) => { finishRun('failed'); setAgentActivity(a=>a?{...a,timings:a.timings.map(t=>({...t,endedAt:t.endedAt??Date.now()}))}:a); store().setPreviewDoc(null); store().setPendingBatch(null); store().setPendingResult(null); store().setAiError(msg); store().setAiStatus('error'); store().addAssistantMessage(msg, undefined, msg); };
+  const finishRun=(status:'preview'|'completed'|'failed'|'stopped')=>{const latest=queuedActivity??ui.getState().agentActivity??store().lastRun;if(latest)store().setLastRun(latest);if(runMessageId.current)store().updateMessageRun(runMessageId.current,{status,endedAt:Date.now(),activity:latest??undefined});};
+  const fail = (msg: string) => {setAgentActivity(a=>a?{...a,timings:a.timings.map(t=>t.endedAt===undefined?{...t,endedAt:Date.now(),failed:true,detail:'执行中断，操作未完成'}:t)}:a);finishRun('failed');store().setPreviewDoc(null);store().setPendingBatch(null);store().setPendingResult(null);store().setAiError(msg);store().setAiStatus('error');store().addAssistantMessage(msg,undefined,msg);};
   const finalize = (batch: CommandBatch, prepared?: ExecutionResult) => {
     store().setAiStatus('validating');
     if (store().doc.revision !== batch.baseRevision || store().doc.projectId !== batch.projectId) { fail('场景已变化，本次结果未应用。请重新发送'); return; }
@@ -91,7 +91,7 @@ function createConversationController(editor:EditorStore) {
     if(!cp&&parentDraft.current&&parentDraft.current.batch.baseRevision===store().doc.revision&&parentDraft.current.batch.projectId===store().doc.projectId){const parent=parentDraft.current;store().setPendingBatch(parent.batch);store().setPendingResult(parent.result);store().setPreviewDoc(parent.result.doc);store().setAiStatus('previewing');finishRun('stopped');store().addAssistantMessage('本次调整未完成，之前的预览已保留。'+reason);return true;}
     if(!cp || cp.batch.baseRevision!==store().doc.revision || cp.batch.projectId!==store().doc.projectId)return false;
     const batch={...cp.batch,summary:cp.batch.summary+'\n中断原因：'+reason};
-    const activity={...cp.activity,timings:cp.activity.timings.map(t=>({...t,endedAt:t.endedAt??Date.now()}))};
+    const latest=queuedActivity??ui.getState().agentActivity??cp.activity;const activity={...latest,timings:latest.timings.map(t=>t.endedAt===undefined?{...t,endedAt:Date.now(),failed:true,detail:'执行中断，操作未完成'}:t)};
     setAgentActivity(activity);store().setLastRun(activity);finalize(batch,cp.result);return true;
   };
   const send = async (sendMode:'guide'|'question'|'later'='guide',options:SendOptions={}) => {
@@ -193,7 +193,7 @@ function createConversationController(editor:EditorStore) {
   };
   const cancel = () => {
     if(!runningRef.current)return;
-    setAgentActivity(a=>a?{...a,timings:a.timings.map(t=>({...t,endedAt:t.endedAt??Date.now()}))}:a);
+    setAgentActivity(a=>a?{...a,timings:a.timings.map(t=>t.endedAt===undefined?{...t,endedAt:Date.now(),failed:true,detail:'用户停止，操作未完成'}:t)}:a);
     runRef.current++; runningRef.current=false; clearControl();abortRef.current?.abort(); abortRef.current=null;
     if(timeoutRef.current) clearTimeout(timeoutRef.current);release();
     if(preserveCheckpoint('你已停止生成；保留草稿不会继续调用模型')){setNotice('已停止，阶段草稿仍可查看。继续生成需另行发送指令');return;}

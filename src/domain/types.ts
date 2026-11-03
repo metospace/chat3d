@@ -116,6 +116,7 @@ export type SceneRole=typeof SCENE_ROLES[number];
 export type SceneNodeKind = 'primitive' | 'asset' | 'group';
 
 export interface SceneNode {
+  modelingProgram?:{source:string;createdAt:number;stage?:'silhouette'|'detailed'};
   poseRig?:PoseRig;
   modelStructure?:{blueprintKey:string;featureKeys:string[];localTransform?:Transform;blueprint?:ObjectBlueprint};
   modelAsset?:{id:string;version:number;instanceId:string;sourceNodeId?:string};
@@ -301,6 +302,8 @@ export function validateNode(node: SceneNode): Error[] {
     errs.push(new Error(`节点 id 非法：${node?.id ?? '?'}`));
   }
   for(const key of ['assemblyName','zone','label','planKey'] as const)if(node[key]!==undefined&&(typeof node[key]!=='string'||node[key]!.length>200))errs.push(new Error('场景标注或分组名称无效'));
+  if(node.modelingProgram&&(typeof node.modelingProgram.source!=='string'||!node.modelingProgram.source.trim()||node.modelingProgram.source.length>80000||!Number.isFinite(node.modelingProgram.createdAt)||node.modelingProgram.createdAt<0))errs.push(new Error('参数化建模源码或记录时间无效'));
+  if(node.modelingProgram?.stage!==undefined&&!['silhouette','detailed'].includes(node.modelingProgram.stage))errs.push(new Error('参数化构建阶段无效'));
   if(node.modelStructure){const s=node.modelStructure;if(typeof s.blueprintKey!=='string'||!s.blueprintKey.trim()||s.blueprintKey.length>80||!Array.isArray(s.featureKeys)||s.featureKeys.length>16||new Set(s.featureKeys).size!==s.featureKeys.length||s.featureKeys.some(k=>typeof k!=='string'||!k.trim()||k.length>80))errs.push(new Error('单体结构关联元数据无效'));if(s.localTransform){errs.push(...validateVec3(s.localTransform.position,'结构局部位置'),...validateVec3(s.localTransform.scale,'结构局部缩放'),...validateQuaternion(s.localTransform.rotationQuaternion,'结构局部旋转'));if(Array.isArray(s.localTransform.scale)&&s.localTransform.scale.some(n=>n<=0))errs.push(new Error('结构局部缩放必须为正'));}if(s.blueprint){try{validateBlueprints([s.blueprint]);if(s.blueprint.key!==s.blueprintKey||s.featureKeys.some(k=>!s.blueprint!.features.some(f=>f.key===k)))throw Error('结构方案引用不匹配');}catch(e){errs.push(e instanceof Error?e:new Error('结构方案无效'));}}}
   if(node.poseRig){try{poseRigSchema(node.poseRig);}catch(e){errs.push(e instanceof Error?e:new Error('关节记录无效'));}}
   if(node.modelAsset&&(!isValidId(node.modelAsset.id)||!isValidId(node.modelAsset.instanceId)||(node.modelAsset.sourceNodeId!==undefined&&!isValidId(node.modelAsset.sourceNodeId))||!Number.isSafeInteger(node.modelAsset.version)||node.modelAsset.version<1))errs.push(new Error('模型资产来源标识或版本无效'));

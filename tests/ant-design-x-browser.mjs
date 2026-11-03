@@ -52,7 +52,7 @@ try{
  });
  await page.evaluate(async()=>{
   const {useEditorStore:s}=await import('/src/store.ts');const now=Date.now();
-  const activity={title:'正在接收模型回复',turn:1,toolCalls:1,characters:0,inputTokens:0,outputTokens:0,usageReported:false,lastEventAt:now,plan:[],events:[],explanations:[{text:'保留原有布局，检查货架层间距。'}],timings:[{kind:'tool',label:'检查场景结构',startedAt:now-3000,endedAt:now-2000}]};
+  const activity={title:'第9轮模型响应',turn:9,toolCalls:2,characters:0,inputTokens:0,outputTokens:0,usageReported:false,lastEventAt:now,plan:[],events:[],explanations:[{id:'design-note',phase:'planning',text:'保留原有布局，检查货架层间距。',createdAt:now-3500},{id:'build-note',phase:'building',text:'先调整货架高度。',createdAt:now-1800},{id:'build-detail',phase:'building',text:'保留原有列距，再核对横梁位置。',createdAt:now-1000},{id:'legacy-note',text:'旧记录没有时间。'}],timings:[{id:'model-9',kind:'model',label:'第9轮模型响应',startedAt:now-4000,endedAt:now-3000},{id:'build',kind:'tool',toolName:'build_modeling_program',label:'build_modeling_program',phase:'building',summary:'工具摘要不能显示。',startedAt:now-2000},{id:'read',kind:'tool',label:'检查场景结构',phase:'reviewing',detail:'Error: private raw failure',startedAt:now-3000,endedAt:now-2500}]};
   // Production attaches run metadata to the user request, not the assistant reply.
   s.setState({aiConfig:{baseURL:'https://fixture.invalid/v1',apiKey:'fixture-never-used',model:'UI fixture',agentMode:'single'},aiStatus:'generating',messages:[{id:'fixture-user',role:'user',text:'调整仓库货架的高度',createdAt:now-5000,run:{status:'running',startedAt:now-4000,activity}},{id:'fixture-response',role:'assistant',text:'正在检查货架结构。',createdAt:now}]});
   const {conversationController}=await import('/src/runtime/conversationController.ts');const {activeConversationStore}=await import('/src/conversationStores.ts');
@@ -64,20 +64,26 @@ try{
   assert.ok(boxes[0].bottom<=boxes[1].top+1);assert.ok(boxes[1].bottom<=boxes[2].top+1);
   assert.ok(Math.abs(boxes[1].left-boxes[2].left)<=1,'process aligns with assistant, independent of user bubble');
  });
- for(const reducedMotion of ['no-preference','reduce'])await check('native processing spinner rotates with '+reducedMotion,async()=>{
-  await page.emulateMedia({reducedMotion});const spinner=page.locator('.adx-run.is-active .anticon-loading');
-  await spinner.waitFor();const before=await spinner.evaluate(el=>({transform:getComputedStyle(el).transform,animation:getComputedStyle(el).animationName}));
-  await page.waitForTimeout(180);const after=await spinner.evaluate(el=>getComputedStyle(el).transform);
-  assert.notEqual(before.animation,'none');assert.notEqual(before.transform,after,'running indicator must visibly rotate');
- });
- await check('Think uses plain paragraphs and keyboard disclosure without tool nodes',async()=>{
-  await page.locator('.adx-run .ant-think').waitFor();assert.equal(await page.locator('.adx-run .ant-thought-chain').count(),0);assert.equal(await page.locator('.adx-run .ant-think-content p').textContent(),'保留原有布局，检查货架层间距。');
-  const toggle=page.getByRole('button',{name:/正在处理.*收起摘要/});await toggle.focus();await page.keyboard.press('Enter');
-  await page.getByRole('button',{name:/正在处理.*查看摘要/}).waitFor();
-  await page.getByRole('button',{name:/正在处理.*查看摘要/}).press('Enter');
-  await page.getByRole('button',{name:/正在处理.*收起摘要/}).waitFor();
+ await check('work timeline groups public explanations without tool or model round rows',async()=>{
+  await page.locator('.adx-run .adx-work-timeline').waitFor();
+  const entries=page.locator('.adx-work-timeline .adx-work-entry');assert.equal(await entries.count(),3);
+  assert.deepEqual(await entries.evaluateAll(rows=>rows.map(row=>row.dataset.phase??null)),['planning','building',null]);
+  assert.deepEqual(await entries.locator('.adx-run-text').allTextContents(),['保留原有布局，检查货架层间距。','先调整货架高度。\n\n保留原有列距，再核对横梁位置。','旧记录没有时间。']);
+  assert.deepEqual(await entries.evaluateAll(rows=>rows.map(row=>row.dataset.kind)),['explanation','explanation','explanation']);
+  const visible=await page.locator('.adx-run').textContent();for(const hidden of ['第9轮','build_modeling_program','检查场景结构','工具摘要不能显示','private raw failure'])assert.equal(visible.includes(hidden),false);
+  for(const text of await entries.locator('time').allTextContents())assert.match(text,/^\d{2}:\d{2}:\d{2}$/);
+  assert.equal(await entries.last().locator('.adx-work-time').textContent(),'时间未记录');
+  assert.equal(await entries.nth(1).locator('time').count(),2);
+  const heading=page.locator('.adx-run-heading');assert.equal(await heading.getAttribute('aria-expanded'),'true');assert.equal(await heading.evaluate(el=>el.tagName),'BUTTON');
+  assert.equal(await page.locator('.adx-run-record-count').count(),0);assert.equal(visible.includes('工作记录 '),false);assert.equal(await heading.locator('svg').count(),0);
+  const controlledId=await heading.getAttribute('aria-controls');assert.ok(controlledId);assert.equal(await heading.evaluate(el=>document.getElementById(el.getAttribute('aria-controls')).hidden),false);
+  await heading.click();assert.equal(await heading.getAttribute('aria-expanded'),'false');assert.equal(await page.locator('.adx-work-timeline').isVisible(),false);
+  await page.waitForTimeout(1100);assert.equal(await heading.getAttribute('aria-expanded'),'false');
+  await heading.press('Enter');assert.equal(await heading.getAttribute('aria-expanded'),'true');assert.equal(await entries.first().isVisible(),true);
+  await heading.press('Space');assert.equal(await heading.getAttribute('aria-expanded'),'false');assert.equal(await entries.first().isVisible(),false);
+  await heading.press('Space');assert.equal(await heading.getAttribute('aria-expanded'),'true');assert.equal(await entries.count(),3);
   await page.getByLabel('建模指令',{exact:true}).click();
-  await page.screenshot({path:join(output,'workbench-think-attachments.png')});
+  await page.screenshot({path:join(output,'workbench-timeline-attachments.png')});
  });
  await check('native Sender cancel keeps unsent references and draft',async()=>{
   await page.getByLabel('建模指令',{exact:true}).fill('把高度改为 3 米');
@@ -85,10 +91,9 @@ try{
   assert.equal(await page.getByLabel('建模指令',{exact:true}).inputValue(),'把高度改为 3 米');
   assert.equal(await page.locator('.adx-sender .ant-file-card').count(),3);
  });
- await check('official-style Think and single-row Sender stay clean at narrow widths',async()=>{
+ await check('completed timeline remains visible and Sender stays clean at narrow widths',async()=>{
   await page.evaluate(async()=>{const {useEditorStore:s}=await import('/src/store.ts');s.setState({composerImages:[],composerText:'把货架高度调整为 3 米',aiStatus:'idle',messages:s.getState().messages.map(m=>m.run?{...m,run:{...m.run,status:'completed'}}:m)});});
-  await page.getByRole('button',{name:/处理完成.*查看摘要/}).click();
-  await page.locator('.adx-run .ant-think-content p').waitFor();
+  await page.locator('.adx-run .adx-work-timeline').waitFor();assert.equal(await page.getByRole('button',{name:'参考附件设置',exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'添加参考附件',exact:true}).count(),1);
   assert.equal(await page.locator('.adx-sender .ant-sender-prefix').count(),0);
   assert.equal(await page.locator('.adx-sender .ant-sender-suffix').count(),0);
   assert.equal(await page.locator('.adx-sender .adx-composer-toolbar').count(),1);
@@ -98,7 +103,7 @@ try{
   const reopen=page.getByRole('button',{name:'打开 AI 助手',exact:true});if(await reopen.isVisible())await reopen.click();
   await page.getByLabel('建模指令',{exact:true}).waitFor({state:'visible'});
   await page.waitForFunction(()=>{const el=document.querySelector('.adx-composer-toolbar');return el&&el.clientWidth>0&&el.scrollWidth<=el.clientWidth+1;});
-  const type=await page.locator('.adx-run .ant-think-content p').evaluate(el=>({size:parseFloat(getComputedStyle(el).fontSize),line:getComputedStyle(el).lineHeight}));assert.ok(type.size>=14);
+  const type=await page.locator('.adx-run .adx-work-entry .adx-run-text').first().evaluate(el=>({size:parseFloat(getComputedStyle(el).fontSize),line:getComputedStyle(el).lineHeight}));assert.ok(type.size>=14);
   await page.getByLabel('建模指令',{exact:true}).focus();
   await page.mouse.move(600,150);
   const modelStyle=await page.locator('.adx-composer-controls .model-picker-trigger').evaluate(el=>getComputedStyle(el).backgroundColor);assert.equal(modelStyle,'rgba(0, 0, 0, 0)');
@@ -107,11 +112,10 @@ try{
   assert.equal(await page.locator('.ant-bubble-list').count(),1);
   assert.equal(await page.locator('.is-assistant .ant-bubble-footer').count(),0,'no empty response action footer');
   assert.equal(await page.getByRole('button',{name:'复制回复',exact:true}).count(),0);
-  assert.equal(await page.locator('.adx-run .anticon-loading').count(),0,'completed process has no running indicator');
  });
  await check('running conversation keeps request first and native stop in footer',async()=>{
   await page.evaluate(async()=>{const {useEditorStore:s}=await import('/src/store.ts');const now=Date.now();s.setState({aiStatus:'generating',composerText:'',messages:s.getState().messages.map(m=>m.run?{...m,run:{...m.run,status:'running',startedAt:now-5000}}:m)});const {conversationController}=await import('/src/runtime/conversationController.ts');const {activeConversationStore}=await import('/src/conversationStores.ts');conversationController(activeConversationStore()).ui.setState({started:now-5000,runMessageId:'fixture-user',agentActivity:s.getState().messages[0].run.activity});});
-  await page.getByRole('button',{name:/正在处理.*收起摘要/}).waitFor();
+  await page.locator('.adx-run.is-active .adx-work-timeline').waitFor();
   await page.getByRole('button',{name:'停止生成',exact:true}).waitFor();
   await page.locator('.conversation-region').screenshot({path:join(output,'conversation-running.png')});
  });

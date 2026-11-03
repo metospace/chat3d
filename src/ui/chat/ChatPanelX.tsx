@@ -5,7 +5,7 @@ import {focusSceneObjects} from '../../scene/focus';
 import {prepareReference,MAX_ATTACHMENT_BYTES,isReferenceImage} from '../../domain/referenceAttachments';
 import {REFERENCE_IMAGE_JPEG_QUALITY,REFERENCE_IMAGE_MAX_SIDE} from '../../domain/referenceImageLimits';
 import {PlusIcon,DotsHorizontalIcon,Pencil1Icon,TrashIcon,EnterIcon,ListBulletIcon} from '@radix-ui/react-icons';
-import {Button,Dropdown,Popover,Select,Checkbox} from 'antd';
+import {Button,Dropdown,Select,Checkbox} from 'antd';
 import {Attachments,Bubble,Sender} from '@ant-design/x';
 import {ReferenceAttachments,MessageAttachments} from './ReferenceAttachments';
 import {useSenderLabel} from './useSenderLabel';
@@ -82,14 +82,12 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
   const setAttachments=(value:string[]|((previous:string[])=>string[]))=>store().setComposerImages(typeof value==='function'?value(store().composerImages):value);
   const [lockPlacement,setLockPlacement]=useState(false);
   const [scopeMode,setScopeMode]=useState<'scene'|'selection'>('scene');
-  const [referenceOpen,setReferenceOpen]=useState(false);
   const [reviewHost,setReviewHost]=useState<HTMLElement|null>(null);
   useEffect(()=>{setReviewHost(canvasMode?document.querySelector<HTMLElement>('.workbench-review-slot'):null);},[canvasMode,doc.projectId]);
   useEffect(()=>{setScopeMode('scene');setLockPlacement(false);},[doc.projectId]);
   const [compareBefore,setCompareBefore]=useState(false);
   const [imageBusy, setImageBusy] = useState(false);
   const [now, setNow] = useState(Date.now());
-  const [reuseReference, setReuseReference] = useState(true);
   const [newMessages, setNewMessages] = useState(false);
   const imageBusyRef = useRef(false);
   const aliveRef = useRef(true);
@@ -138,7 +136,7 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
   const send=async(mode:'guide'|'question'|'later'='guide')=>{
     if(imageBusyRef.current)return;
     const previousMessages=store().messages;
-    setReferenceOpen(false);stickRef.current=true;scrollAfterSend.current=true;setNewMessages(false);await runtime.send(mode,{scopeMode,lockPlacement,reuseReference});
+    stickRef.current=true;scrollAfterSend.current=true;setNewMessages(false);await runtime.send(mode,{scopeMode,lockPlacement,reuseReference:true});
     if(store().messages===previousMessages)scrollAfterSend.current=false;
     if(aliveRef.current)focusComposer();
   };
@@ -207,7 +205,7 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
       footerPlacement:m.role==='user'?'outer-end' as const:'outer-start' as const,
       ...(!hasContent?{styles:{content:{display:'none'}}}:{})};
     const activity=busy&&m.id===runMessageId.current?agentActivity:m.run?.activity;
-    const showProcess=!!m.run&&(m.run.status==='running'||!!activity?.explanations?.some(item=>item.text.trim()));
+    const showProcess=!!m.run;
     const processItems=showProcess?[{key:`${m.id}-process`,role:'process',className:'adx-process-message',streaming:busy&&m.id===runMessageId.current,
       content:<RunTrace run={m.run!} activity={activity}/>}]:[];
     // Runtime stores run metadata on the user request. It must follow that request,
@@ -265,9 +263,6 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
           <div className="adx-composer-controls">
             <Button type="text" shape="circle" aria-label="添加参考附件" title="添加参考附件（单文件100MB以内）" disabled={imageBusy}
               icon={<PlusIcon/>} onClick={()=>attachmentsRef.current?.select({multiple:true})}/>
-            {!attachments.length&&messages.some(m=>m.images?.length)&&<Popover trigger="click" placement="topLeft" open={referenceOpen} onOpenChange={setReferenceOpen} title="参考附件" content={
-              <fieldset disabled={busy} className="adx-reference-controls"><Checkbox checked={reuseReference} onChange={event=>setReuseReference(event.target.checked)}>沿用最近参考附件</Checkbox></fieldset>
-            }><Button type="text" size="small" disabled={busy} aria-label="参考附件设置" title="沿用最近参考附件">参考⌄</Button></Popover>}
             {configured&&<QualityPicker onConfigure={onConfigure}/>}
             <ModelPicker onConfigure={onConfigure}/>
           </div>

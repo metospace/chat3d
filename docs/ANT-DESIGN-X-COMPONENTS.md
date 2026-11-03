@@ -8,7 +8,7 @@ Reviewed against the official [component introduction](https://x.ant.design/comp
 | Submit and cancel | Sender's supported SendButton / LoadingButton render API; keyboard submission remains owned by Sender |
 | Input references | Sender.Header + controlled Attachments; library selection, cards, removal and image preview |
 | Sent references | FileCard.List; names and metadata for files, built-in preview for images |
-| Public explanations | Think's single-rule paragraph layout; live loading, controlled disclosure, saved explanations |
+| Public work timeline | Native button header toggles grouped public explanations; no work-record counter, arrows, tool or model-round rows |
 | Message list and reading position | Bubble.List; stable role configuration, native scroll anchoring, explicit streaming completion |
 | Tool history / task record steps | ThoughtChain; actual loading, success, error and unfinished states |
 | Result / queue actions | Actions with supported actionRender for semantic buttons, disabled state and keyboard support |
@@ -19,11 +19,11 @@ Reviewed against the official [component introduction](https://x.ant.design/comp
 
 The same local reference pipeline still compresses images and retains the existing 100 MB per-file limit and no four-file cap. Attachments.beforeUpload returns Upload.LIST_IGNORE to prevent all automatic uploading; one batch is processed once. Persisted string references and runtime/model request behavior remain unchanged. Arbitrary files retain the explicit notice that only metadata is available; their bytes are not passed to vision models.
 
-Installed and applied the official Chinese `x-components` skill (2.10.0) from `ant-design/x/packages/x-skill/skills-zh`. Its COMPONENTS/PATTERNS guidance is used for the message list, thinking and sender composition. Think shows public explanations as plain paragraphs; tool nodes remain in task records. Sender uses a white input area and one bottom toolbar; scope/reference options open in a Popover, and the keyboard hint and inner divider are removed.
+Public explanations are grouped by phase and exact repeats deduplicate. A native button status header controls one content region with aria-expanded/aria-controls, supports click/Enter/Space, and preserves user choice through live updates and completion. No count or arrow icon is displayed. Tool calls, model rounds, raw errors and synthesized technical progress stay hidden. Explanation timestamps are factual; ended prose is not accepted quality. Sender retains uploads, paste/drop, automatic reuse and scope controls without Reference settings.
 
-Process entries have a separate left-aligned Bubble.List role. Production run metadata belongs to the user request, so presentation explicitly orders request → process → assistant response; older assistant-owned run records remain supported. Reduced-motion rules retain the native Think task-status spinner while suppressing decorative animation. Browser checks verify changing rotation transforms with both motion preferences.
+Process entries retain the left-aligned Bubble.List role in request → process → assistant order. The disclosure is implemented directly instead of nesting Think and a second button, so one click actually hides or shows the content. Stop remains independently reachable.
 
-X 2.10's removal icons and Think disclosure need small accessibility additions: names and keyboard activation on the library's existing controls. Sender's exposed inputElement is named directly because this version forwards aria attributes to both its root and default input. No replacement textarea or send/stop implementation is needed.
+X 2.10's attachment removal icons need accessible names and keyboard activation on the library's existing controls. Sender's exposed inputElement is named directly because this version forwards aria attributes to both its root and default input. No replacement textarea or send/stop implementation is needed.
 
 Navigation, inspector editing and project operations use Ant Design. Sources requires actual source records; Suggestion requires a shortcut/mention model; audio/video controls require their respective capabilities. These do not currently have matching application data or behavior. Browser notifications are not enabled by this UI migration. The existing safe message text renderer keeps its established no-model-authored-HTML/remote-image behavior; X Markdown is a separate package.
 
