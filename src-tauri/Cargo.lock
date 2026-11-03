@@ -488,7 +488,7 @@ dependencies = [
 
 [[package]]
 name = "chat3d"
-version = "0.2.31"
+version = "0.2.32"
 dependencies = [
  "serde",
  "serde_json",
