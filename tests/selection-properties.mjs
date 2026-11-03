@@ -35,7 +35,9 @@ try{
   store.setState({aiStatus:'previewing'});assert.equal(store.getState().applyCommandBatch(selectionPropertyCommands(large,largeIds,{kind:'size',value:2}),'locked').ok,false);assert.equal(store.getState().doc,large);store.setState({aiStatus:'idle'});
  });
  test('AI/general command budget remains 200 and aggregate is absent from AI whitelist',()=>{
-  assert.throws(()=>parseModelResponse(JSON.stringify({summary:'not allowed',operations:selectionPropertyCommands(large,largeIds,{kind:'size',value:2})})),/不支持.*editSelection/);
+  const ops=selectionPropertyCommands(large,largeIds,{kind:'size',value:2});
+  assert.equal(ops[0]?.op,'editSelection');
+  assert.throws(()=>parseModelResponse(JSON.stringify({summary:'not allowed',operations:ops})),err=>{assert.equal(err.name,'CommandContractError');assert.match(err.message,/Unsupported operation name/);assert.doesNotMatch(err.message,/Expected:[^\n]*\beditSelection\b/);return true;});
   assert.match(applyBatch(large,{operations:Array.from({length:201},()=>({op:'translate',targetId:largeIds[0],value:[0,0,0],space:'world',mode:'delta'}))}).errors[0].message,/预算 200/);
  });
  console.log(count+' large selection property checks passed');
