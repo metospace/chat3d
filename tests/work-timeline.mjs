@@ -56,6 +56,30 @@ try{
   {id:'json',text:'{"private":"payload"}',createdAt:started}
  ]});
  assert.equal(safe.length,1);assert.equal(safe[0].text,'公开记录：保持原有尺寸。');
+ const technical=[
+  {id:'failure',text:'保留原有结构。\n工具调用失败：edit_scene node-abc123 {"operations":[]} Error: invalid materialId',createdAt:started},
+  {id:'legacy-json',text:'继续检查比例。\n{\n"nodeIds": ["node-secret"],\n"private": "payload"\n}',createdAt:started+1}
+ ];
+ const sanitized=workTimeline({status:'failed'},{explanations:technical,timings});
+ assert.equal(sanitized[0].text,'保留原有结构。\n\n继续检查比例。');
+ for(const hidden of ['edit_scene','node-abc123','operations','Error','materialId','node-secret','payload'])assert.equal(JSON.stringify(sanitized).includes(hidden),false,hidden);
+ assert.equal(technical[0].text.includes('edit_scene'),true,'rendering never rewrites saved explanations');
+ const {generationFailureMessage,sanitizeGenerationText}=await server.ssrLoadModule('/src/domain/generationFailure.ts');
+ for(const [raw,expected] of [
+  ['HTTP 401 Unauthorized {"error":"invalid key"}',/检查访问凭证/],
+  ['体验页访问验证未通过（HTTP 401）',/重新登录体验页/],
+  ['TypeError: Failed to fetch https://secret.example/v1',/检查网络连接/],
+  ['等待超过 3 分钟，已停止本次接收',/恢复输入后手动重试/],
+  ['PROXY_UPSTREAM_DENIED https://private.example',/检查模型配置/],
+  ['HTTP 503 Bad gateway',/模型服务暂时不可用/],
+  ['unknown command edit_scene node-abc123 materialId {"operations":[]}',/你可以继续描述要修改的地方/]
+ ])for(const previewRetained of [false,true]){
+  const message=generationFailureMessage(raw,{previewRetained});assert.match(message,expected);assert.match(message,previewRetained?/已保留之前的预览/:/场景未修改/);
+  for(const hidden of ['HTTP','401','503','JSON','edit_scene','node-abc123','materialId','operations','secret.example','private.example','PROXY_UPSTREAM_DENIED'])assert.equal(message.includes(hidden),false,hidden);
+  assert.equal(sanitizeGenerationText(message,{failed:true,previewRetained}),message,'safe messages retain their recovery guidance');
+ }
+ assert.equal(sanitizeGenerationText('主体已保留。\nsetNodeTransform invalid materialId node-123'), '主体已保留。');
+ console.log('PASS technical failure blocks stay diagnostic-only and recovery guidance remains actionable');
  const many=Array.from({length:60},(_,index)=>({id:String(index),phase:'building',text:`公开说明 ${index}`,createdAt:started+index}));
  const merged=workTimeline({status:'completed'},{explanations:many});assert.equal(merged.length,1);assert.deepEqual(merged[0].text.split('\n\n'),many.map(item=>item.text));
  console.log('PASS private payloads stay hidden and merging preserves every distinct public explanation');

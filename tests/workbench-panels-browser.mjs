@@ -21,7 +21,7 @@ try {
  await page.route('**/*',route=>route.request().url().startsWith(base)?route.continue():route.abort());
  await page.goto(base);await page.getByRole('button',{name:'新建项目',exact:true}).click();
  await page.getByRole('menuitem',{name:'新建空白资产',exact:true}).click();
- await page.getByLabel('建模指令',{exact:true}).fill('保留货架结构，只调整层板高度');
+ await page.getByLabel('建模描述',{exact:true}).fill('保留货架结构，只调整层板高度');
  await page.evaluate(async()=>{
   const {useEditorStore:s}=await import('/src/store.ts');
   const {applyBatch}=await import('/src/domain/commands.ts');
@@ -41,7 +41,7 @@ try {
   await page.getByRole('button',{name:'收起对话区',exact:true}).click();assert.equal(await inspector.isVisible(),true);
   await page.getByRole('button',{name:'打开 AI 助手',exact:true}).click();assert.equal(await inspector.isVisible(),true);
   assert.equal(await page.getByRole('spinbutton',{name:'画布位移 X',exact:true}).inputValue(),'0.2');
-  assert.equal(await page.getByLabel('建模指令',{exact:true}).inputValue(),'保留货架结构，只调整层板高度');
+  assert.equal(await page.getByLabel('建模描述',{exact:true}).inputValue(),'保留货架结构，只调整层板高度');
  });
  for(const theme of ['light','dark'])await check('control focus and native select in '+theme,async()=>{
   await page.evaluate(theme=>{localStorage.setItem('chat3d.appearance.v1',theme);window.dispatchEvent(new StorageEvent('storage',{key:'chat3d.appearance.v1',newValue:theme}));},theme);
@@ -69,7 +69,7 @@ try {
  });
  await check('closing properties leaves the assistant and current draft intact',async()=>{
   await page.getByRole('button',{name:'关闭属性面板',exact:true}).click();assert.equal(await assistant.isVisible(),true);
-  assert.equal(await page.getByLabel('建模指令',{exact:true}).inputValue(),'保留货架结构，只调整层板高度');
+  assert.equal(await page.getByLabel('建模描述',{exact:true}).inputValue(),'保留货架结构，只调整层板高度');
  });
  assert.deepEqual(report.errors,[]);report.passed=true;
 } catch(error){if(page)await page.screenshot({path:join(output,'pro-v6-migration-failure.png')});throw error;} finally {await browser?.close();await server.close();await writeFile(join(output,'panels-report.json'),JSON.stringify(report,null,2));}

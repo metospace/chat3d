@@ -38,7 +38,9 @@ export function validateReferenceProportions(plan:ObjectBlueprint):void{
  if(!Array.isArray(ratios)||!ratios.length||ratios.length>16||new Set(ratios.map(r=>r?.key)).size!==ratios.length)throw Error('参考比例需1–16项不重复声明');
  for(const r of ratios){
   if(!r||!nonemptyText(r.key,80)||!nonemptyText(r.name,160)||!nonemptyText(r.observation,360)||!referenceViews.includes(r.view)||!['estimated','user'].includes(r.source))throw Error('参考比例需名称、estimated或user来源、观察视角及说明；不可见或透视不确定时expected用null');
-  for(const side of [r.numerator,r.denominator])if(!side||!plan.features.some(f=>f.key===side.featureKey)||!['x','y','z'].includes(side.axis))throw Error('参考比例必须引用当前方案特征及世界包围盒x/y/z轴');
+  const referenceErrors:string[]=[];
+  for(const [field,side] of [['numerator',r.numerator],['denominator',r.denominator]] as const){const path=`objects[${plan.key}].referenceProportions[${r.key}].${field}`;if(!side){referenceErrors.push(path+'缺失');continue;}if(!plan.features.some(f=>f.key===side.featureKey))referenceErrors.push(path+'.featureKey='+JSON.stringify(side.featureKey)+'无效；本对象合法features[].key='+JSON.stringify(plan.features.map(f=>f.key)));if(!['x','y','z'].includes(side.axis))referenceErrors.push(path+'.axis='+JSON.stringify(side.axis)+'无效；仅允许x（世界宽向）、y（高度）、z（世界深向）');}
+  if(referenceErrors.length)throw Error('参考比例必须引用当前方案特征及世界包围盒x/y/z轴：'+referenceErrors.join('；')+'。只纠正引用和轴，不删除比例、不把已知expected改成null来绕过校验；未知整体范围先声明对应真实form特征并绑定全部相关部件。');
   if(r.expected!==null&&(typeof r.expected!=='number'||!Number.isFinite(r.expected)||r.expected<=0))throw Error('参考比例expected必须为有限正数或null（unknown）');
   if(typeof r.relativeTolerance!=='number'||!Number.isFinite(r.relativeTolerance)||r.relativeTolerance<0||r.relativeTolerance>1)throw Error('参考比例relativeTolerance必须为0–1的相对容差');
  }

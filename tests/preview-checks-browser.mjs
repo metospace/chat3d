@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import {createServer} from 'vite';
+import {chromium} from 'playwright-core';
+import {existsSync} from 'node:fs';
+import {mkdtemp,mkdir,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+const cacheDir=await mkdtemp(join(tmpdir(),'scenivo-preview-checks-'));
+const server=await createServer({cacheDir,server:{host:'127.0.0.1',port:0,hmr:false}});
+const executablePath=[process.env.CHAT3D_BROWSER_PATH,chromium.executablePath(),'C:/Program Files/Google/Chrome/Application/chrome.exe','/usr/bin/chromium'].find(p=>p&&existsSync(p));
+let browser;
+try{
+ await server.listen();browser=await chromium.launch({headless:true,executablePath});const page=await browser.newPage({viewport:{width:1440,height:960}});page.setDefaultTimeout(25000);
+ await page.goto('http://127.0.0.1:'+server.httpServer.address().port);await page.getByLabel('新项目描述',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'新建项目',exact:true}).click();await page.getByRole('menuitem',{name:'新建空白资产',exact:true}).click();await page.getByLabel('建模描述',{exact:true}).waitFor();
+ await page.evaluate(async()=>{const {useEditorStore:s}=await import('/src/store.ts'),{applyBatch}=await import('/src/domain/commands.ts');const old=s.getState().doc;
+ const result=applyBatch(old,{operations:[{op:'createAssembly',name:'防静电服工作人员',parts:[{name:'人物主体',geometry:{type:'box',params:{width:.4,height:1.7,depth:.25}},transform:{position:[0,.85,0],rotationQuaternion:[0,0,0,1],scale:[1,1,1]}}]}]});const n=result.doc.nodes[0],evidence='人物头颈比例仍不符合参考，面部和衣褶仍简化';
+ const qualityIssues=[evidence,n.assemblyId+'：'+evidence,n.assemblyName+'：外形与比例不符合，'+evidence,'面部和衣褶仍简化','厂房边界与绝对尺寸在参考中未知，背景结构仍为估计','厂房边界与绝对尺寸在参考中未知'];
+ const activity={title:'当前复核',turn:2,toolCalls:2,characters:0,inputTokens:0,outputTokens:0,usageReported:false,lastEventAt:Date.now(),plan:[],events:[],timings:[],detailAcceptance:{revision:result.doc.revision,status:'needs_work',targets:[{id:n.assemblyId,name:n.assemblyName}],reviews:[{componentId:n.assemblyId,revision:result.doc.revision,visualEvidence:true,checks:[{criterion:'silhouette',status:'fail',evidence,nodeIds:[n.id]}]}],issues:qualityIssues},referenceRepairs:[]};
+ const batch={requestId:'dedupe-browser',projectId:old.projectId,baseRevision:old.revision,selectedIds:[],summary:'保留阶段草稿',taskStatus:'partial',qualityIssues,operations:[]};
+ s.setState({aiStatus:'previewing',pendingBatch:batch,pendingResult:result,previewDoc:result.doc,lastRun:activity});const {conversationController}=await import('/src/runtime/conversationController.ts');const {activeConversationStore}=await import('/src/conversationStores.ts');conversationController(activeConversationStore()).ui.setState({agentActivity:activity});window.previewDedupeFixture={activity,result};});
+ const card=page.getByRole('region',{name:'预览确认',exact:true});await card.getByRole('button',{name:'待核对项 · 1',exact:true}).click();const drawer=page.getByRole('dialog',{name:'本次修改检查',exact:true});await drawer.waitFor();
+ assert.equal(await drawer.locator('.preview-check-group li').count(),1);assert.equal(await drawer.locator('.preview-limitations li').count(),1);assert.equal(await drawer.getByText('无法验证',{exact:true}).count(),1);
+ assert.ok(!(await drawer.locator('.preview-check-group').textContent()).match(/[0-9a-f]{8}-[0-9a-f-]{27}/));
+ await page.evaluate(async()=>{const {useEditorStore:s}=await import('/src/store.ts');const a=structuredClone(window.previewDedupeFixture.activity);a.detailAcceptance.reviews[0].checks[0].evidence='人物颈部衔接仍需修正，衣褶已改善';s.setState({lastRun:a,pendingBatch:{...s.getState().pendingBatch,qualityIssues:[a.detailAcceptance.reviews[0].checks[0].evidence,'厂房边界与绝对尺寸在参考中未知']}});const {conversationController}=await import('/src/runtime/conversationController.ts'),{activeConversationStore}=await import('/src/conversationStores.ts');conversationController(activeConversationStore()).ui.setState({agentActivity:a});});
+ await drawer.getByText(/人物颈部衔接仍需修正/).waitFor();assert.equal(await drawer.locator('.preview-check-group li').count(),1);
+ await drawer.getByRole('button',{name:'准备核对要求',exact:true}).click();await drawer.waitFor({state:'hidden'});const input=await page.getByLabel('建模描述',{exact:true}).inputValue();assert.equal((input.match(/人物颈部衔接/g)||[]).length,1);assert.match(input,/资料限制/);assert.match(input,/不要反复/);
+ await card.getByRole('button',{name:'待核对项 · 1',exact:true}).click();await drawer.waitFor();await mkdir('artifacts/preview-checks',{recursive:true});await page.screenshot({path:'artifacts/preview-checks/deduplicated.png'});
+ console.log('PASS actual preview drawer merges repeated text, replaces current criterion prose, separates unverifiable limits and prepares non-repeating targeted followup');
+}finally{await browser?.close();await server.close();await rm(cacheDir,{recursive:true,force:true});}

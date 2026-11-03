@@ -1,3 +1,4 @@
+import {validateCommandOperations,CommandContractError,commandContractGuide} from './commandContract';
 import {sanitizeSectionLoftParams} from '../domain/sectionLoft';
 import {generationStylePrompt, normalizeGenerationStyle, type GenerationStyle} from './generationStyle';
 import {PHYSICAL_MATERIAL_KEYS, PHYSICAL_MATERIAL_LIMITS} from '../domain/physicalMaterial';
@@ -10,11 +11,11 @@ import {instructionContract,referenceReconstructionContract} from './instruction
 // 真实模型适配器（方案 P2，提前到本轮实现）
 // OpenAI 兼容协议：POST {baseURL}/chat/completions
 // - 系统提示词把 Scene DSL 讲清楚，模型输出结构化 JSON 命令批
-// - 响应解析带容错与清洗：模型输出不可信，未知 op/坏参数一律丢弃并报错
+// - 命令契约统一校验全部操作；任一不合法则整组拒绝，不静默丢弃
 // - 同一批次内模型可用 tempId 引用前面创建的节点（commands.applyBatch 负责映射）
 import { Geometry, Transform, SceneDocument, SCENE_ROLES, type SceneRole, validateGeometry } from '../domain/types';
 import {buildAssembly,type AssemblyPart} from '../domain/assembly';
-import { EXTRA_MATERIALS, SCENE_ROLE_MATERIALS } from '../domain/materials';
+import { SCENE_ROLE_MATERIALS } from '../domain/materials';
 import { Euler, Quaternion } from 'three';
 import { Command } from '../domain/commands';
 import { GenerationProgress, readChatResponse } from './stream';
@@ -56,20 +57,9 @@ export type ChatMessage = {
   content: string | ContentPart[];
 };
 
-// P0 已实现的命令集；模型若输出其他 op（rotate/scale 等），解析层拦截
-const IMPLEMENTED_OPS = new Set([
-  'setAnimation','clearAnimation','transformAssembly','appendAssemblyParts','replaceAssemblyParts','createPrimitive', 'createAssembly', 'duplicateAssembly', 'translateAssembly',
-  'updateParameters',
-  'setTransform',
-  'translate',
-  'rename',
-  'setVisibility','delete',
-  'setMaterial','setAppearance','setAssemblyMetadata',
-]);
 
 const GEOMETRY_TYPES:Record<string,true> = {sectionLoft:true,profileSweep:true,loft:true,sweepTube:true,lathe:true,profile:true,box:true,sphere:true,cylinder:true,cone:true,plane:true,roundedPlate:true,capsule:true,frame:true,tube:true,trapezoid:true};
 
-const KNOWN_MATERIALS = new Set([...EXTRA_MATERIALS.map(m=>m.id),'mat_gray', 'mat_blue', 'mat_dark', 'mat_metal', 'mat_white', 'mat_rubber', 'mat_yellow', 'mat_red', 'mat_cyan', 'mat_black','mat_glass','mat_screen','mat_pcb','mat_green']);
 
 const DEFAULT_TRANSFORM = {
   position: [0, 0, 0] as [number, number, number],
@@ -228,6 +218,9 @@ duplicateAssembly：{"op":"duplicateAssembly","targetId":"组件任意零件id�
 # 当前版本不支持
 独立 rotate/scale 命令、单零件 duplicate、分组（reparent）及模板/资产命令尚不支持。旋转和缩放请使用 setTransform；四元数必须归一化。历史对话仅用于理解意图，不要重复执行先前创建操作；以当前场景上下文为准。
 
+# 统一命令契约
+${commandContractGuide()}
+
 # 场景上下文
 ${nodeLines}
 ${sel}
@@ -285,27 +278,22 @@ export function parseModelResponse(raw: string): GeneratedBatch {
   const obj = parsed as Record<string, unknown>;
   const summary = typeof obj.summary === 'string' && obj.summary.trim() ? obj.summary.trim() : '模型生成的命令批';
   const operations: Command[] = [];
-  const warns: string[] = [];
 
   if (!Array.isArray(obj.operations)) throw new Error('模型返回的 operations 不是数组');
+  const contractIssues=validateCommandOperations(obj.operations);
+  if(contractIssues.length)throw new CommandContractError(contractIssues);
 
-  for (const rawOp of obj.operations) {
-    if (!rawOp || typeof rawOp !== 'object') continue;
-    const op = rawOp as Record<string, unknown>;
-    const opType = typeof op.op === 'string' ? op.op : '';
-    if (!IMPLEMENTED_OPS.has(opType)) {
-      warns.push(`跳过不支持的命令「${opType || '(空)'}」`);
-      continue;
-    }
-    const diagnostics:string[]=[];const cleaned = cleanCommand(opType, op,diagnostics);
-    if (cleaned) operations.push(cleaned);
-    else warns.push(`跳过参数不合法的命令「${opType}」${diagnostics.length?'：'+diagnostics.join('；'):''}`);
+  for(const [index,rawOp] of obj.operations.entries()){
+    const op=rawOp as Record<string,unknown>,opType=String(op.op);
+    const diagnostics:string[]=[];const cleaned=cleanCommand(opType,op,diagnostics);
+    if(!cleaned)throw new CommandContractError([{path:['operations',index],code:'semantic',message:diagnostics.join('；')||'命令未通过几何/组合关系校验；按契约纠正当前操作，整批未执行'}]);
+    operations.push(cleaned);
   }
 
   if (operations.length === 0 && (obj.operations.length > 0 || !obj.summary || typeof obj.summary !== 'string')) {
-    throw new Error(warns.length ? `没有可执行的命令：${warns.join('；')}` : '模型没有生成任何命令');
+    throw new Error('模型没有生成任何命令');
   }
-  return { summary: warns.length ? `${summary}（${warns.join('；')}）` : summary, operations };
+  return {summary,operations};
 }
 
 function toNum(v: unknown): number | null {
@@ -398,7 +386,7 @@ function cleanCommand(opType: string, op: Record<string, unknown>,diagnostics:st
   switch (opType) {
     case 'createAssembly': {
       if(!Array.isArray(op.parts))return null;const position=op.position===undefined?[0,0,0] as [number,number,number]:toVec3(op.position),yaw=op.yaw===undefined?0:toNum(op.yaw);if(!position||yaw===null||typeof op.name!=='string')return null;
-      const parts:AssemblyPart[]=[];for(const value of op.parts){if(!value||typeof value!=='object')return null;const p=value as Record<string,unknown>,geometry=cleanGeometry(p.geometry);if(!geometry||typeof p.name!=='string')return null;let repeat:AssemblyPart['repeat'];if(p.repeat!==undefined){const r=p.repeat as {count?:unknown;step?:unknown};if(!r||typeof r!=='object')return null;const count=toNum(r.count),step=toVec3(r.step);if(count===null||!step)return null;repeat={count,step};}if(p.label!==undefined&&(typeof p.label!=='string'||p.label.length>80))return null;parts.push({name:p.name,...(typeof p.label==='string'?{label:p.label}:{}),geometry,transform:cleanTransform(p.transform),materialId:typeof p.materialId==='string'&&KNOWN_MATERIALS.has(p.materialId)?p.materialId:(p.materialId===undefined&&typeof op.sceneRole==='string'?SCENE_ROLE_MATERIALS[op.sceneRole as SceneRole]??'mat_gray':'mat_gray'),...(repeat?{repeat}:{})});}
+      const parts:AssemblyPart[]=[];for(const value of op.parts){if(!value||typeof value!=='object')return null;const p=value as Record<string,unknown>,geometry=cleanGeometry(p.geometry);if(!geometry||typeof p.name!=='string')return null;let repeat:AssemblyPart['repeat'];if(p.repeat!==undefined){const r=p.repeat as {count?:unknown;step?:unknown};if(!r||typeof r!=='object')return null;const count=toNum(r.count),step=toVec3(r.step);if(count===null||!step)return null;repeat={count,step};}if(p.label!==undefined&&(typeof p.label!=='string'||p.label.length>80))return null;parts.push({name:p.name,...(typeof p.label==='string'?{label:p.label}:{}),geometry,transform:cleanTransform(p.transform),materialId:typeof p.materialId==='string'?p.materialId:(p.materialId===undefined&&typeof op.sceneRole==='string'?SCENE_ROLE_MATERIALS[op.sceneRole as SceneRole]??'mat_gray':'mat_gray'),...(repeat?{repeat}:{})});}
       if(op.sceneRole!==undefined&&(typeof op.sceneRole!=='string'||!SCENE_ROLES.includes(op.sceneRole as SceneRole)))return null;
       const definition={name:op.name,position,yaw,parts,...(typeof op.sceneRole==='string'?{sceneRole:op.sceneRole as SceneRole}:{}),...(typeof op.planKey==='string'?{planKey:op.planKey}:{}),...(typeof op.zone==='string'?{zone:op.zone}:{} )};try{buildAssembly(definition);}catch(error){diagnostics.push(error instanceof Error?error.message:'组合参数无效');return null;}return {op:'createAssembly',...definition,tempId:typeof op.tempId==='string'?op.tempId:undefined};
     }
@@ -426,7 +414,7 @@ function cleanCommand(opType: string, op: Record<string, unknown>,diagnostics:st
       const geometry = cleanGeometry(op.geometry);
       if (!geometry) return null;
       const name = typeof op.name === 'string' && op.name.trim() ? op.name.trim() : '未命名';
-      const materialId = typeof op.materialId === 'string' && KNOWN_MATERIALS.has(op.materialId) ? op.materialId : 'mat_gray';
+      const materialId = typeof op.materialId === 'string' ? op.materialId : 'mat_gray';
       const transform = cleanTransform(op.transform);
       const cmd: Command = {
         op: 'createPrimitive',
@@ -459,7 +447,7 @@ function cleanCommand(opType: string, op: Record<string, unknown>,diagnostics:st
       const value = toVec3(op.value);
       if (!value) return null;
       const mode = op.mode === 'set' ? 'set' : 'delta';
-      return { op: 'translate', targetId, space: 'world', mode, value };
+      return { op: 'translate', targetId, space: op.space==='local'?'local':'world', mode, value };
     }
     case 'rename': {
       const targetId = cleanTargetId(op);
@@ -481,7 +469,7 @@ function cleanCommand(opType: string, op: Record<string, unknown>,diagnostics:st
     case 'setVisibility': {
       const targetId = cleanTargetId(op);
       if (!targetId) return null;
-      return { op: 'setVisibility', targetId, visible: op.visible !== false };
+      return { op: 'setVisibility', targetId, visible: op.visible as boolean };
     }
     case 'setAnimation': {
       if(!op.animation||typeof op.animation!=='object'||JSON.stringify(op.animation).length>300000)return null;return {op:'setAnimation',animation:structuredClone(op.animation) as AnimationProgram};
@@ -507,7 +495,7 @@ function cleanCommand(opType: string, op: Record<string, unknown>,diagnostics:st
     case 'setMaterial': {
       const targetId = cleanTargetId(op);
       if (!targetId) return null;
-      const materialId = typeof op.materialId === 'string' && KNOWN_MATERIALS.has(op.materialId) ? op.materialId : 'mat_gray';
+      const materialId = typeof op.materialId === 'string' ? op.materialId.trim() : '';
       return { op: 'setMaterial', targetId, materialId };
     }
     default:
@@ -566,10 +554,10 @@ export async function generateBatch(
     } catch (e) {
       lastErr = e instanceof Error ? e : new Error(String(e));
       if (attempt === 0) {
-        messages.push({ role: 'assistant', content: content.slice(0, 400) });
+        messages.push({ role: 'assistant', content });
         messages.push({
           role: 'user',
-          content: '上一条回复无法解析为 JSON 命令批。请严格只输出一个 JSON 对象：{"summary":"一句话说明做了什么","operations":[...] 同系统提示词的命令格式}，不要 markdown 代码块、不要任何解释或其他文字。',
+          content: '上一条命令批未通过统一契约，整批未执行。请一次纠正以下全部字段，不删减用户需求，也不要改用不相关构建路线。\n'+lastErr.message+'\n仅输出合法JSON命令批，不要markdown或解释。',
         });
       }
     }

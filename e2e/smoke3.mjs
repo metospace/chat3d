@@ -91,23 +91,6 @@ const out = await page.evaluate(async (baseUrl) => {
     eq(r.operations[0].name, 'B');
   });
 
-  // 4. 跳过未实现的 op（rotate / reparent）
-  t('未实现命令被丢弃且摘要附警告', () => {
-    const r = parse(
-      '{"summary":"转一下","operations":[{"op":"rotate","targetId":"n1","euler":[1,0,0]},{"op":"rename","targetId":"n1","name":"C"}]}',
-    );
-    eq(r.operations.length, 1);
-    eq(r.operations[0].op, 'rename');
-    if (!r.summary.includes('rotate')) throw new Error('摘要未附警告');
-  });
-
-  // 5. 全部命令非法 → 抛错
-  t('全部命令非法：抛错', () => {
-    throwsWith(
-      () => parse('{"summary":"x","operations":[{"op":"reparent","targetId":"n1","parentId":null}]}'),
-      '没有可执行的命令',
-    );
-  });
 
   // 6. 空返回
   t('空字符串：抛错', () => throwsWith(() => parse('   '), '为空'));
@@ -117,14 +100,6 @@ const out = await page.evaluate(async (baseUrl) => {
   // 8. 完全没有 JSON
   t('纯文字无 JSON：抛错', () => throwsWith(() => parse('我无法理解'), '找不到 JSON'));
 
-  // 9. 字符串数字参数容错（模型常把数字写成字符串）
-  t('字符串数字参数：转成数值', () => {
-    const r = parse(
-      '{"summary":"s","operations":[{"op":"createPrimitive","tempId":"t1","name":"盒","parentId":null,"geometry":{"type":"box","params":{"width":"2","height":"0.5","depth":"0.8"}},"materialId":"mat_gray"}]}',
-    );
-    eq(r.operations[0].geometry.params.width, 2);
-    eq(r.operations[0].geometry.params.height, 0.5);
-  });
 
   // 10. createPrimitive 缺 transform → 默认（原点 + 单位四元数 + 缩放 1）
   t('缺 transform：填默认值', () => {
@@ -136,32 +111,6 @@ const out = await page.evaluate(async (baseUrl) => {
     eq(r.operations[0].transform.scale, [1, 1, 1]);
   });
 
-  // 11. 非法 materialId → 降级 mat_gray
-  t('非法材质名：降级 mat_gray', () => {
-    const r = parse(
-      '{"summary":"s","operations":[{"op":"createPrimitive","tempId":"t1","name":"盒","parentId":null,"geometry":{"type":"box","params":{"width":1,"height":1,"depth":1}},"materialId":"mat_nonexistent"}]}',
-    );
-    eq(r.operations[0].materialId, 'mat_gray');
-  });
-
-  // 12. setMaterial 非法 → 降级
-  t('setMaterial 非法材质：降级 mat_gray', () => {
-    const r = parse('{"summary":"s","operations":[{"op":"setMaterial","targetId":"n1","materialId":"red"}]}');
-    eq(r.operations[0].materialId, 'mat_gray');
-  });
-
-  // 13. translate：字符串数值 + 缺省 mode 为 delta
-  t('translate：字符串数值与默认 mode', () => {
-    const r = parse('{"summary":"s","operations":[{"op":"translate","targetId":"n1","value":["0.5","0","-1"]}]}');
-    eq(r.operations[0].value, [0.5, 0, -1]);
-    eq(r.operations[0].mode, 'delta');
-  });
-
-  // 14. setVisibility 缺 visible → 默认 true
-  t('setVisibility 缺 visible：默认 true', () => {
-    const r = parse('{"summary":"s","operations":[{"op":"setVisibility","targetId":"n1"}]}');
-    eq(r.operations[0].visible, true);
-  });
 
   // 15. summary 缺失 → 默认文本
   t('summary 缺失：默认摘要', () => {
@@ -169,13 +118,6 @@ const out = await page.evaluate(async (baseUrl) => {
     if (!r.summary) throw new Error('摘要为空');
   });
 
-  // 16. updateParameters 无 geometry 无 name → 命令被清洗 → 整批无有效命令 → 抛错
-  t('updateParameters 空内容：整批作废抛错', () => {
-    throwsWith(
-      () => parse('{"summary":"s","operations":[{"op":"updateParameters","targetId":"n1"}]}'),
-      '没有可执行的命令',
-    );
-  });
 
   // 17. applyBatch：同批次 tempId 引用映射（第二条命令引用第一条创建的节点）
   t('applyBatch：tempId 引用前序创建节点', () => {

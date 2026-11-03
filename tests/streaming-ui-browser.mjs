@@ -32,19 +32,19 @@ try{
  await page.route('**/api/model/**',()=>assert.fail('UI stress test must not call a model endpoint'));
  await page.goto(base);await page.getByLabel('新项目描述',{exact:true}).waitFor();
  await page.getByRole('button',{name:'新建项目',exact:true}).click();await page.getByRole('menuitem',{name:'新建空白资产',exact:true}).click();
- await page.getByLabel('建模指令',{exact:true}).waitFor();
+ await page.getByLabel('建模描述',{exact:true}).waitFor();
  await page.evaluate(async()=>{
   const {useEditorStore:s}=await import('/src/store.ts'),{activeConversationStore}=await import('/src/conversationStores.ts'),{conversationController}=await import('/src/runtime/conversationController.ts');
   s.setState({aiConfig:{baseURL:'https://fixture.invalid/v1',apiKey:'test-only-never-sent',model:'fixture',agentMode:'pi'},messages:Array.from({length:12},(_,i)=>[{id:'u-'+i,role:'user',text:'调整仓储模型 '+i,createdAt:Date.now()},{id:'a-'+i,role:'assistant',text:'保留原有布局，调整货架尺寸与连接。'.repeat(6),createdAt:Date.now()}]).flat()});
   window.progressUpdates=0;conversationController(activeConversationStore()).ui.subscribe((state,previous)=>{if(state.agentActivity!==previous.agentActivity)window.progressUpdates++;});
  });
- await page.getByLabel('建模指令',{exact:true}).fill('创建立体仓库货架');await page.getByRole('button',{name:'发送',exact:true}).click();
+ await page.getByLabel('建模描述',{exact:true}).fill('创建立体仓库货架');await page.getByRole('button',{name:'发送',exact:true}).click();
  await page.getByRole('region',{name:'预览确认',exact:true}).waitFor();
  const completed=await page.evaluate(async()=>{const {useEditorStore:s}=await import('/src/store.ts');return {updates:window.progressUpdates,status:s.getState().aiStatus,characters:s.getState().lastRun.characters,original:s.getState().doc.nodes.length,preview:s.getState().pendingResult.doc.nodes.length};});
  assert.ok(completed.updates<80,JSON.stringify(completed));assert.equal(completed.status,'previewing');assert.equal(completed.characters,2000);assert.equal(completed.original,0);assert.equal(completed.preview,8);
  report.checks.push('2000 buffered progress events complete with bounded UI notifications and intact preview');console.log('PASS',report.checks.at(-1),JSON.stringify(completed));
  await page.getByRole('button',{name:'应用修改',exact:true}).click();
- await page.getByLabel('建模指令',{exact:true}).fill('继续调整货架');await page.getByRole('button',{name:'发送',exact:true}).click();
+ await page.getByLabel('建模描述',{exact:true}).fill('继续调整货架');await page.getByRole('button',{name:'发送',exact:true}).click();
  await page.getByRole('button',{name:'停止生成',exact:true}).click();await page.waitForTimeout(250);
  const stopped=await page.evaluate(async()=>{const {useEditorStore:s}=await import('/src/store.ts');return {status:s.getState().aiStatus,nodes:s.getState().doc.nodes.length};});
  assert.ok(['previewing','cancelled'].includes(stopped.status));assert.equal(stopped.nodes,8);

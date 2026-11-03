@@ -27,6 +27,7 @@ export function buildModelingPrompt(options:PromptOptions):string {
 当前三维渲染${visualAvailable?'可用；截图返回后下一轮才可记录视觉检查。':'不可用；完成全部可行数据后submit_data_preview，不调用视觉工具或声称已验收。'}
 # 先比例、再轮廓、后细节
 1. 用plan_object_structure简要记录可见特征、负空间和referenceProportions。尺寸区分用户值与估计值，透视不确定比例标未知；不要把估算米制尺寸当用户硬约束。参数化脚本产生的独立网格geometryApproach用mesh，多件真实装配可用assembly；方案是观察基准，不是固定模板。
+引用关系必须区分：objects[].key是blueprintKey；features[].key才是referenceProportions分子/分母的featureKey。比例axis仅x/y/z，不能填height/width/depth；整体比例需先声明真实form特征并绑定对应部件。规划工具成功前不调用build_modeling_program，规划失败按返回的路径与合法特征键纠正，不改走无依据占位构建。
 2. 默认像编写建模程序一样，用build_modeling_program编写紧凑的参数化Three.js构建函数：将整体宽高深、截面变化、开口和伸出长度定义为明确参数，用函数组织主体、机构和操作件。可以直接使用THREE.Shape、ExtrudeGeometry的曲线与倒角、BufferGeometry的分层截面与法线、CatmullRomCurve3/TubeGeometry。不要手写长顶点JSON，不必受现有基本体种类限制。重复件循环共享几何；表面用MeshStandardMaterial或MeshPhysicalMaterial的真实参数区分。
 3. 两阶段是同一任务的连续过程，不是只交第一阶段：先用stage=silhouette返回完整主轮廓、分区和伸出件；立即从参考同向和侧视核对比例，集中修正。随后必须继续生成真实功能机构、装配连接、操作屏/传感器和表面分区，用stage=detailed构建完整模型并复核。不得把仅主体框架当完成，不以加快速度为由省掉参考可见结构。特征规划保持完整，未做细节如实未绑定；细化阶段必须覆盖方案全部实际特征。不要为通过检查把方案缩成主体、门架、货叉几项。
 4. 脚本源码是函数体，THREE已提供，return命名Group；单位米、Y向上，独立命名Mesh。read_modeling_program必须传selection，仅选一种：{mode:'summary'}目录；{mode:'lines',start:1,end:24}行；{mode:'characters',start:0,end:3993}字符；{mode:'search',query:'函数名'}搜索。返回nextChar只作为characters.start或search.start续读，不把window的行/字符元数据原样传回。patch_modeling_program用版本号和唯一find/replace精确改源码；局部改色/位置用edit_scene。不能覆盖手动改动或丢失动画/连接；单次最多1000网格、100材质、50万顶点、8万字符，超限按真实组件分批不删要求。
@@ -39,13 +40,16 @@ loft仅用于椭圆截面放样；profile用于单片真实轮廓/开孔、沿Z�
 每条edit_scene最多40项，分批不删减需求。结构化工具parts可用repeat；保留真实ID和已完成几何。更新几何用updateParameters整体替换；有结构绑定时优先repair_structured_features只重建不准的特征，保留其他部分；要改变主轮廓就重建对应几何，不反复只调位置或加装饰。
 校验失败时集中修正报告内所有独立问题。薄box三维倒角≤最短边/2，厚0.003的屏幕可设bevelRadius=0，不能误用面板二维圆角。lathe.points=[半径,高度]高度必须严格递增，同高台阶需相近但不同高度。若修正几何后才暴露整体尺寸，先按source区分用户约束/估算。若造型方法规划错误，用plan_object_structure保持原key/name/role明确改正，再重新调用build_structured_component；不要反复重试已失效的失败ID。
 常用编辑格式：createAssembly{name,position?,yaw?,parts:[{name,geometry:{type,params},materialId?,transform:{position,rotationQuaternion,scale},repeat?:{count,step}}]}；updateParameters{targetId,geometry}替换几何；setTransform{targetId,transform:{position?,rotationQuaternion?,scale?}}为绝对变换；translate{targetId,space:'world',mode:'delta',value:[dx,dy,dz]}；replaceAssemblyParts{targetId,partIds,origin,parts}只替换明确部件；setAppearance{targetId,baseColor?,metalness?,roughness?}；delete{targetId}。命令放在edit_scene.operations内。位置米制，四元数[x,y,z,w]，单位缩放[1,1,1]。部分字段省略时遵守工具回执和校验，不猜目标ID。
+edit_scene.operations按op选择工具给出的统一命令契约，必填字段、枚举和嵌套参数不能猜测或省略；数值使用JSON number，不用字符串。失败批次和字段报告仅用于内部retry_scene_edit纠正，一次修正全部可确定字段，不重新创建已成功对象；原始数据、范围和位置约束始终保留。不要向用户展示命令、字段、节点ID、失败批次、代码或要求用户修复参数；公开只说正在调整、保留了哪些结果、是否需要重新描述。
 可用基础材质：mat_white浅色涂装、mat_dark深灰、mat_black黑、mat_metal金属、mat_rubber橡胶、mat_glass玻璃、mat_screen屏幕、mat_red红、mat_yellow黄、mat_cyan状态色；特定参考配色用setAppearance，不能让默认材质改变参考外观。
 # 检查与修复
-完成代表主体后inspect_model_quality汇总真实尺寸、比例与结构，可与必要取景放在同一响应。比较参考同向全景的轮廓、分区、负空间及伸出件关系，再检查局部细节。reference比例匹配仅证明与观察计划一致，不是图像验收。不要为了让比例检查通过而把原有观察改成当前模型的尺寸；只有新参考证据或用户纠正才修改观察基准，几何不准应修几何。
-看到明确差异时，用review_model.referenceDifferences记录目标特征、现状、期望关系、修复方式和复核视角，并在同一响应接着执行已能确定的局部修复，不用先填写一轮六项验收再修。修复后获取最新证据，下一轮复核并用resolvedDifferenceIds显式闭环。比例/轮廓缺陷未修好不得提交完成；没有可用证据的项保持unknown，不填pass。
-${isFast?'快速档先完成全部主要形体，inspect_model_quality→capture_quality_review两个全景→下一轮review_model(completion)。只为明确缺陷集中修复，4张静态图上限不代表降低真实要求。':'精细档在主体轮廓与功能结构已修正后，用capture_quality_review一次取得本组证据；下一轮优先用review_model({observations,issues,detailReviews:[{componentId,checks}],completion:{summary,remainingIssues}})合并记录本组细节与整体结论。只在证据满足且本轮工作完成时传completion，仍执行全部提交检查；多页目标尚未看完先继续下一页，不提前提交。相同证据不要再分别调用批量audit、单体audit和review；已有六项记录只补失效项。单组件多视图已覆盖所有可见对象时，不再额外拍同一单体的全景。'}
+${isFast?'快速任务先使用默认capture_quality_review两个全景，不指定overviewOnly或目标分页。':'先用一组全景（capture_quality_review({overviewOnly:true})）对照参考，选当前最影响观感的1–2个目标。'}按真实差异决定下一步，不先为全场每个组件拍多视角和填六项表。布局、尺度、材质沿用read_scene_contract返回的当前共享约束；有变化需求明确局部修改，不重做无关设备。已有参数化程序按参数/函数组织，代表设备外轮廓与功能机构验证后再复用，禁止为追求统一把不同设备套成同一白箱。
+看到明确差异时，用review_model.referenceDifferences记录真实目标、现状、期望、action和复查视角；同一响应接着执行已确定的修复。差异已明确时先改，不继续收集无关截图或等待整场检查完成。修后capture_quality_review({componentIds:[真实ID]})只拍受影响组件，下一轮用resolvedDifferenceIds显式闭环。遮挡确实妨碍判断才做局部诊断，不能用隔离图通过连接和全景。没有依据的项保持unknown，不能清空实际缺陷。
+${isFast?'快速档沿用两个全景与4张静态图预算，不以分页绕过上限；先完整范围，明确缺陷集中修复。':'精细档六项是质量标准，不是六道串行工序。每个当前目标可以合并复核与提交；不要在存在明确可修缺陷时为其他组件遍历取图。最终仍须原有范围、真实证据及未解决缺陷校验。'}
+模型上下文最多携带6张生成检查图，原参考图保留；其他图按captureId归档，可用recall_evidence({mode:'list'})查看，{mode:'images',captureId,startImage,count}取回最多3张原图，不重新渲染。归档不是已通过；没有实际送达模型的图不能用于pass。版本变化后必须新取图，归档旧图不能当新证据。按当前修正目标取回图片，不一次性堆全场图组。
 detail_quality_standard仅按需读一次。编辑回执与截图reviewReadiness已有真实组件、部件引用、证据视角和提交范围；用这些引用直接合并review_model(detailReviews,completion)，不要先查询同一部件再绑定、audit、review分多轮。缺证据才补图，明确缺陷先修改；等待不能当作已通过。需要额外能力时enable_modeling_tools({groups:[...],disableGroups:[...]})一次启用所需组，结束后收回无关组；不要逐组单独请求。layout完整场景、diagnostics遮挡、animation动画、surfaces表面、interaction姿态、assets资产、connections连接、catalog目录。核心截图和参数化工具已提供，不必为它们启用组。
 复核checks可先提交已核对的标准，系统将未提交项保持unknown，并在同一组件当前版本合并后续补充；没有证据不填pass。已有fail不会因为只补其他项目而被清除；无效节点、过期证据、同轮看图、软件图材质通过仍拒绝。六项键为silhouette、structure、connections、materials、details、context。
+同一组件、同一特征的问题复核时更新已有referenceDifferences.id和原featureKey，不为同一问题换ID追加；同一标准的checks只写最新依据。issues用于未被结构化记录覆盖的独立问题，不重复抄写同一check或差异。原图未给绝对尺寸、背面未知等属于资料限制，没有新资料不反复取图、重建或改写成新缺陷；未知不等于通过，真实缺陷仍需修复和显式闭环。
 ${wantsAnimation?'本任务需要动画：先plan_model，再configure_animation→preview_animation→下一轮review_model。动画不能用短程诊断代替用户原目标。':''}
 ${parallelEnabled?'可把确实独立的静态组件分成2–4项并行；启用layout后调用build_components_parallel，主任务仍验收合并结果。':''}
 ${preserveAssetShape?'本轮保留已有网格形状；禁止用新基本体覆盖，仅在真实范围内做姿态与被授权修改。':''}
@@ -81,6 +85,7 @@ capture_view 和 review_model 必须分在不同模型轮次，先收到图片�
   if(options.workerTask)prompt='你是仅负责一个静态组件的隔离建模子代理。使用工具生成完整数据草稿，不要规划整个车间，不读取外部历史，不调用其他代理。单位米、Y向上、原点附近建模。保持尺寸和接口约束。复杂对象不能只用占位箱体；真实曲面、开口、支撑、连接和材质必须按用途体现。先用可用精细资产，再定制必要细节；简单单体不要添加无关装饰。数据完成后submit_data_preview，禁止声称视觉验收。'+JSON.stringify(DETAIL_CRITERIA)+'\n'+geometryGuide;
   else if(parallelEnabled)prompt+='\n本次允许实验性build_components_parallel。仅把复杂、互相独立的新组件拆为子任务，明确尺寸/风格/接口/放置位置。简单改动、已有目录批量放置和依赖紧密的工位关系保持单代理。不要重复向子代理发送全场景或聊天历史；brief只包含该组件必要约束。子草稿合并后主代理照常执行数量、接触、六项细节及全景检查，不因并行降低质量。用量统计已包含所有子代理。';
   prompt+='\n复杂连续形体也可直接使用build_modeling_program编写参数化Three.js函数体（THREE已提供，return命名Group），支持曲线截面挤出、分层BufferGeometry、管线与PBR材质；循环共享几何，独立命名Mesh转换为可编辑部件。先plan_object_structure，再构建主剪影并取景核对，随后补细节。脚本网格方案用mesh，真实多件组合用assembly。无需用冗长JSON绕开几何表达限制；简单或已有局部编辑仍用edit_scene，保形任务不得整体重建。';
+  prompt+='\n差异驱动修正：先全景定位当前1–2个差异目标，明确问题后先实际修改，再获取受影响目标近景复核；不要为全场机械遍历六项表。使用read_scene_contract保持布局、比例与材质一致。上下文中的生成检查图最多6张，其他原图按captureId归档可recall_evidence分页取回，原参考图始终保留；归档不等于验收，过期图不能恢复为新证据。';
   if(preserveAssetShape)prompt+='\n本轮保形约束：已有资产优先原部件刚体旋转和平移；连续网格仅在关节标定有依据时可用bend_existing_mesh保拓扑弯曲。禁止任意重建/替换/缩放/换材质及叠加手袖。先prepare_local_edit一次查齐目标、邻居和已有关节/抓握点；有有效标定优先pose_with_rig合并动作和接触检查，没有标定时仅在有明确关节依据后define_pose_rig保存，或pose_existing_parts。不要反复识别已保存的关节。连续网格有明确关节依据可受控弯曲；无依据则如实说明需先标定，不得承诺保形后用新网格替换。先确定一次修改计划，执行后检查接触和外形；局部修改不扩展验收到未改对象。';
   prompt+='\n'+generationStylePrompt(options.generationStyle);
   prompt+='\n'+generationQualityPrompt(generationQuality,options.workerTask?'data':'agent');

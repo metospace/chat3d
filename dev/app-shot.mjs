@@ -15,7 +15,7 @@ for(const appearance of ['dark','light']){
   await page.addInitScript(value=>localStorage.setItem('chat3d.appearance.v1',value),appearance);
   await page.goto(base);
   await page.getByRole('button',{name:'新建空白项目'}).click();
-  await page.getByLabel('建模指令').waitFor({timeout:20000});
+  await page.getByLabel('建模描述').waitFor({timeout:20000});
   await page.evaluate(async()=>{
     const {activeConversationStore}=await import('/src/conversationStores.ts');
     const store=activeConversationStore();

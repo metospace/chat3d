@@ -1,6 +1,7 @@
 import type {AgentActivity,ActivityTiming} from '../../ai/modelingAgent';
 import type {MessageRun} from '../../store';
 import {customerText} from '../../domain/customerProgress';
+import {sanitizeGenerationText} from '../../domain/generationFailure';
 
 type WorkPhase=NonNullable<AgentActivity['phase']>;
 export type WorkTimelineStatus='running'|'ended'|'interrupted'|'recorded';
@@ -23,7 +24,7 @@ function publicText(value:string|undefined):string|undefined{
  if(!value)return undefined;
  const text=value.replace(/<think(?:ing)?\b[^>]*>[\s\S]*?(?:<\/think(?:ing)?>|$)/gi,'').replace(/```[\s\S]*?(?:```|$)/g,'').trim();
  if(!text||/^[\[{]/.test(text))return undefined;
- return customerText(text);
+ return customerText(sanitizeGenerationText(text,{fallback:'本次处理未完成，你可以继续描述要修改的地方。'}));
 }
 
 /** Older records may identify their model response, or fall inside an unambiguous timed phase. */

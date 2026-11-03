@@ -183,7 +183,7 @@ Click-Control '资产库'
  Invoke-EnabledButton '保存配置' 25
  Wait-ControlAbsent '连接并选择模型' 25
  Assert-ControlMissing '连接并选择模型'
- Set-Input '建模指令' 'Create one simple box for the synthetic failure test'
+ Set-Input '建模描述' 'Create one simple box for the synthetic failure test'
  Click-Control '发送'
  Start-Sleep -Seconds 3
  Click-Control '本项目任务记录'

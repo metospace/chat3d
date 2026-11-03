@@ -15,6 +15,7 @@ import {activeConversationStore} from '../../conversationStores';
 import {conversationController} from '../../runtime/conversationController';
 import {sceneChanges} from '../../domain/editScope';
 import {activityProgress} from '../../domain/customerProgress';
+import {generationFailureMessage,sanitizeGenerationText} from '../../domain/generationFailure';
 import {useAppearance} from '../Appearance';
 import {SiteAccessRecovery} from '../SiteAccessRecovery';
 import {MessageText} from '../MessageText';
@@ -97,7 +98,7 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
   const scrollToLatest=()=>{if(listRef.current?.scrollBoxNativeElement)listRef.current.scrollTo({top:'bottom',behavior:'instant'});};
   const senderRef = useRef<ComponentRef<typeof Sender>>(null);
   const attachmentsRef=useRef<ComponentRef<typeof Attachments>>(null);
-  useSenderLabel(senderRef,'建模指令');
+  useSenderLabel(senderRef,'建模描述');
   const focusComposer=()=>senderRef.current?.focus({cursor:'end',preventScroll:true});
   const busy = ['capturing','context','generating','validating','applying'].includes(aiStatus);
   const viewportStatus=useEditorStore(s=>s.viewportStatus);
@@ -156,26 +157,26 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
 
   const restore = () => {
     if(!lastRequest) return;
-    if(input.trim() || attachments.length) { setNotice('请先处理当前草稿，再恢复上一条指令'); return; }
+    if(input.trim() || attachments.length) { setNotice('请先处理当前草稿，再恢复上一条输入'); return; }
     setInput(lastRequest.text); setAttachments(lastRequest.images); setNotice('已恢复，请按需修改后发送'); focusComposer();
   };
 
   const commit = () => {runtime.commit();focusComposer();};
   const discard = () => {runtime.discard();focusComposer();};
 
-  const previewCard=(previewing&&pendingBatch&&<PreviewDecision batch={pendingBatch} changes={changes} document={pendingResult?.doc??doc} before={compareBefore} viewportReady={viewportStatus==='ready'} referenceImages={([...messages].reverse().find(message=>message.role==='user'&&message.images?.some(isReferenceImage))?.images??[]).filter(isReferenceImage)} onCompare={()=>{if(!pendingResult)return;const before=!compareBefore;setCompareBefore(before);store().setPreviewDoc(before?doc:pendingResult.doc);}} onApply={commit} onDiscard={discard} onContinue={()=>{if(!input.trim()&&pendingBatch.continuation)setInput(pendingBatch.continuation);focusComposer();}} onLocate={ids=>{if(compareBefore&&pendingResult){setCompareBefore(false);store().setPreviewDoc(pendingResult.doc);}store().select(ids);requestAnimationFrame(()=>{focusSceneObjects(ids);});}} onPrepareChecks={text=>{if(store().composerText.trim()||store().composerImages.length){setNotice('输入框已有内容，请先处理当前草稿，再生成核对指令');focusComposer();return;}setInput(text);setNotice('核对要求已放入输入框，发送后才会调用模型；当前预览仍保留');focusComposer();}}/>);
+  const previewCard=(previewing&&pendingBatch&&<PreviewDecision activity={agentActivity??store().lastRun} batch={pendingBatch} changes={changes} document={pendingResult?.doc??doc} before={compareBefore} viewportReady={viewportStatus==='ready'} referenceImages={([...messages].reverse().find(message=>message.role==='user'&&message.images?.some(isReferenceImage))?.images??[]).filter(isReferenceImage)} onCompare={()=>{if(!pendingResult)return;const before=!compareBefore;setCompareBefore(before);store().setPreviewDoc(before?doc:pendingResult.doc);}} onApply={commit} onDiscard={discard} onContinue={()=>{if(!input.trim()&&pendingBatch.continuation)setInput(sanitizeGenerationText(pendingBatch.continuation,{fallback:'请继续调整当前预览，保留已完成的部分。'}));focusComposer();}} onLocate={ids=>{if(compareBefore&&pendingResult){setCompareBefore(false);store().setPreviewDoc(pendingResult.doc);}store().select(ids);requestAnimationFrame(()=>{focusSceneObjects(ids);});}} onPrepareChecks={text=>{if(store().composerText.trim()||store().composerImages.length){setNotice('输入框已有内容，请先处理当前草稿，再生成核对要求');focusComposer();return;}setInput(text);setNotice('核对要求已放入输入框，发送后才会生成；当前预览仍保留');focusComposer();}}/>);
 
   const messageFooter=(m:ChatMessage)=>{
     if(!m.steering&&!(m.run&&['failed','stopped'].includes(m.run.status)&&!busy))return null;
     return <>
     {m.steering&&<p className="adx-bubble-note">{m.steering.status==='queued'?'补充要求 · 等待接收':m.steering.status==='received'?'补充要求 · 已送入模型上下文':'补充要求 · 未送达，可重新发送'}{m.steering.status==='interrupted'&&<button type="button" className="adx-link" onClick={()=>{if(input.trim()||attachments.length){setNotice('请先处理输入框中的内容，再恢复补充要求');return;}setInput(m.text);setAttachments(m.images??[]);focusComposer();}}>恢复补充要求</button>}</p>}
-    {m.run&&['failed','stopped'].includes(m.run.status)&&!busy&&<button type="button" className="adx-link" onClick={()=>{if(input.trim()||attachments.length){setNotice('请先处理输入框中的内容');return;}setInput(m.text);setAttachments(m.images??[]);focusComposer();}}>恢复本轮指令</button>}
+    {m.run&&['failed','stopped'].includes(m.run.status)&&!busy&&<button type="button" className="adx-link" onClick={()=>{if(input.trim()||attachments.length){setNotice('请先处理输入框中的内容');return;}setInput(m.text);setAttachments(m.images??[]);focusComposer();}}>恢复本轮输入</button>}
   </>;
   };
 
   const bubbleContent=(m:ChatMessage)=><div className="adx-bubble-body">
     {!!m.images?.length&&<MessageAttachments values={m.images}/>}
-    {m.role==='assistant'&&m.error?<><MessageText text="本次生成未完成，请展开错误详情查看当前未解决的问题。"/>{!(aiError&&m.text.includes(aiError))&&<details className="adx-bubble-error"><summary>错误详情</summary><MessageText text={m.text}/></details>}</>:m.role==='assistant'&&m.batch?<ResultMessage text={m.text}/>:<MessageText text={m.text}/>}
+    {m.role==='assistant'?m.batch?<ResultMessage text={sanitizeGenerationText(m.text,{failed:!!m.error,previewRetained:true})}/>:<MessageText text={sanitizeGenerationText(m.text,{failed:!!m.error})}/>:<MessageText text={m.text}/>}
   </div>;
 
   const configured=!!aiConfig?.baseURL&&!!aiConfig.apiKey&&!aiConfig.useMock;
@@ -189,11 +190,11 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
   ];
   const emptyState=!messages.length&&<div className="adx-empty-state">
     <p>{contextDoc.nodes.length?'描述要调整的地方，修改会先预览。':'描述要创建的模型或场景，也可以添加参考附件。'}</p>
-    <div className="adx-examples" role="group" aria-label="指令示例">
+    <div className="adx-examples" role="group" aria-label="描述示例">
       {examples.map(example=><button type="button" key={example.text} title={example.text} onClick={()=>{setInput(example.text);focusComposer();}}>{example.label}</button>)}
     </div>
   </div>;
-  const errorNotice=(aiStatus==='error' || aiStatus==='cancelled') && <div className="adx-chat-alert" role="status"><span>{aiStatus==='error'?'本次未完成，原场景未修改':'已停止生成'}</span>{lastRequest && <button type="button" className="adx-link" onClick={restore}>恢复指令重试</button>}{aiError && <details><summary>错误详情</summary><p className="adx-selectable">{aiError}</p></details>}</div>;
+  const errorNotice=(aiStatus==='error' || aiStatus==='cancelled') && <div className="adx-chat-alert" role="status"><span>{aiStatus==='error'?generationFailureMessage(aiError):'已停止生成，场景未修改。'}</span>{lastRequest && <button type="button" className="adx-link" onClick={restore}>恢复输入</button>}</div>;
   const messageItems=messages.filter(m=>!m.queuedTask).flatMap(m=>{
     const hasContent=!!(m.text.trim()||m.images?.length||m.batch);
     const footer=messageFooter(m);
@@ -232,7 +233,7 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
     {canvasMode&&!expanded&&previewing&&<div className="adx-compact-strip"><span>修改结果待确认</span><Button size="small" onClick={onExpand}>查看详情</Button><Button size="small" type="primary" disabled={compareBefore} onClick={commit}>应用修改</Button><Button size="small" onClick={discard}>放弃修改</Button></div>}
     {canvasMode&&!expanded&&busy&&<div className="adx-compact-strip"><span>{agentActivity?.phase||progress.modelState?progress.label:`正在处理 · ${{idle:'就绪',capturing:'检查画面',context:'准备上下文',generating:'生成中',validating:'校验修改',applying:'应用修改',previewing:'待确认',error:'失败',cancelled:'已停止'}[aiStatus]}`}</span><Button size="small" onClick={onExpand}>查看过程</Button></div>}
     <div className="adx-composer">
-      {(contextDoc.nodes.length>0||scopeMode==='selection'||lockPlacement)&&<div className="instruction-context" role="group" aria-label="本次指令范围">
+      {(contextDoc.nodes.length>0||scopeMode==='selection'||lockPlacement)&&<div className="instruction-context" role="group" aria-label="本次修改范围">
         <div>{selectedNames.length>0&&<span aria-label="当前选中对象" title={(scopeMode==='selection'?'修改范围已限制为当前选中对象：':'当前选中用于指代；修改范围以右侧设置为准：')+selectedNames.join('、')}>当前选中：{selectedNames.slice(0,2).join('、')}{selectedNames.length>2?' 等':''}</span>}{lockPlacement&&<span>已锁定位置与朝向</span>}</div>
         <label>修改范围<Select aria-label="对话修改范围" size="small" value={scopeMode} disabled={busy} onChange={setScopeMode} popupMatchSelectWidth={false} popupRender={menu=><>{menu}<div className="adx-scope-options" onMouseDown={event=>event.preventDefault()}><Checkbox disabled={busy} checked={lockPlacement} onChange={event=>setLockPlacement(event.target.checked)}>锁定已有对象的位置与朝向</Checkbox><p>选中对象用于指代；选择“仅选中对象”才会限制修改范围。</p></div></>} options={[{value:'scene',label:'全场景'},{value:'selection',label:`仅选中对象（${selection.length}）`}]}/></label>
       </div>}

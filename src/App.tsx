@@ -167,7 +167,7 @@ export default function App() {
     const next=!assistantOpen;setAssistantOpen(next);
 
   }
-  function focusComposer(){setAssistantOpen(true);setFocusScene(false);requestAnimationFrame(()=>document.querySelector<HTMLTextAreaElement>('[aria-label="建模指令"]')?.focus());}
+  function focusComposer(){setAssistantOpen(true);setFocusScene(false);requestAnimationFrame(()=>document.querySelector<HTMLTextAreaElement>('[aria-label="建模描述"]')?.focus());}
   useEffect(()=>{!selection.length&&setInspectorOpen(false)},[selection.join('|')]);
   const [taskDetailsOpen,setTaskDetailsOpen]=useState(false);
   const [focusScene,setFocusScene]=useState(false);

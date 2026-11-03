@@ -36,7 +36,7 @@ try{
   assert.equal(await page.getByLabel('新项目描述',{exact:true}).inputValue(),'保留这个输入');
  });
  await page.getByRole('button',{name:'新建项目',exact:true}).click();await page.getByRole('menuitem',{name:'新建空白资产',exact:true}).click();
- await page.getByLabel('建模指令',{exact:true}).waitFor();
+ await page.getByLabel('建模描述',{exact:true}).waitFor();
  const png=await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=32;canvas.height=32;const ctx=canvas.getContext('2d');ctx.fillStyle='#2563eb';ctx.fillRect(0,0,32,32);return canvas.toDataURL().split(',')[1];});
  const image={name:'reference.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')};
  await check('workbench Sender uploads local references without network requests',async()=>{
@@ -82,13 +82,13 @@ try{
   await heading.press('Enter');assert.equal(await heading.getAttribute('aria-expanded'),'true');assert.equal(await entries.first().isVisible(),true);
   await heading.press('Space');assert.equal(await heading.getAttribute('aria-expanded'),'false');assert.equal(await entries.first().isVisible(),false);
   await heading.press('Space');assert.equal(await heading.getAttribute('aria-expanded'),'true');assert.equal(await entries.count(),3);
-  await page.getByLabel('建模指令',{exact:true}).click();
+  await page.getByLabel('建模描述',{exact:true}).click();
   await page.screenshot({path:join(output,'workbench-timeline-attachments.png')});
  });
  await check('native Sender cancel keeps unsent references and draft',async()=>{
-  await page.getByLabel('建模指令',{exact:true}).fill('把高度改为 3 米');
+  await page.getByLabel('建模描述',{exact:true}).fill('把高度改为 3 米');
   await page.getByRole('button',{name:'停止生成',exact:true}).click();
-  assert.equal(await page.getByLabel('建模指令',{exact:true}).inputValue(),'把高度改为 3 米');
+  assert.equal(await page.getByLabel('建模描述',{exact:true}).inputValue(),'把高度改为 3 米');
   assert.equal(await page.locator('.adx-sender .ant-file-card').count(),3);
  });
  await check('completed timeline remains visible and Sender stays clean at narrow widths',async()=>{
@@ -101,10 +101,10 @@ try{
   await page.setViewportSize({width:1280,height:800});
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   const reopen=page.getByRole('button',{name:'打开 AI 助手',exact:true});if(await reopen.isVisible())await reopen.click();
-  await page.getByLabel('建模指令',{exact:true}).waitFor({state:'visible'});
+  await page.getByLabel('建模描述',{exact:true}).waitFor({state:'visible'});
   await page.waitForFunction(()=>{const el=document.querySelector('.adx-composer-toolbar');return el&&el.clientWidth>0&&el.scrollWidth<=el.clientWidth+1;});
   const type=await page.locator('.adx-run .adx-work-entry .adx-run-text').first().evaluate(el=>({size:parseFloat(getComputedStyle(el).fontSize),line:getComputedStyle(el).lineHeight}));assert.ok(type.size>=14);
-  await page.getByLabel('建模指令',{exact:true}).focus();
+  await page.getByLabel('建模描述',{exact:true}).focus();
   await page.mouse.move(600,150);
   const modelStyle=await page.locator('.adx-composer-controls .model-picker-trigger').evaluate(el=>getComputedStyle(el).backgroundColor);assert.equal(modelStyle,'rgba(0, 0, 0, 0)');
   await page.screenshot({path:join(output,'workbench-simple-think-sender.png')});
