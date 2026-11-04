@@ -1,6 +1,7 @@
 import {isReferenceImage,referenceText} from '../domain/referenceAttachments';
 import {createStore} from 'zustand/vanilla';
 import {buildSceneContext,generateBatch,type ModelConfig} from '../ai/provider';
+import type {ConfirmBlenderScript} from '../scene/blenderModeling';
 import type {AgentActivity,AgentResult,AgentControl} from '../ai/modelingAgent';
 import type {GenerationProgress} from '../ai/stream';
 import {AGENT_LIMITS} from '../ai/agentPolicy';
@@ -25,7 +26,7 @@ export function conversationController(editor:EditorStore) {
   if(!controller){controller=createConversationController(editor);controllers.set(editor,controller);}
   return controller;
 }
-export interface SendOptions {scopeMode?:'scene'|'selection';lockPlacement?:boolean;reuseReference?:boolean;config?:ModelConfig|null}
+export interface SendOptions {scopeMode?:'scene'|'selection';lockPlacement?:boolean;reuseReference?:boolean;blenderModeling?:boolean;confirmBlenderScript?:ConfirmBlenderScript;config?:ModelConfig|null}
 interface RuntimeView {
   removedQueueId:string|null;notice:string;agentActivity:AgentActivity|null;runPi:boolean;canSteer:boolean;
   runMessageId:string|null;started:number;lastRequest:{text:string;images:string[]}|null;running:boolean;
@@ -130,6 +131,7 @@ function createConversationController(editor:EditorStore) {
       setNotice('请先打开顶部“模型配置”，获取并选择模型；输入和附件已保留'); return;
     }
     const usePi = cfg.agentMode !== 'single';
+    if(options.blenderModeling&&!usePi){setNotice('Blender 建模实验需要 Agent 模式；输入和附件已保留');return;}
     if(usePi && cfg.stream === false) { setNotice('当前生成方式需要实时接收结果，请在模型配置中开启实时输出，或选择单次生成；输入和附件已保留'); return; }
     let requestedScope:EditScope;
     try{requestedScope=userEditScope(text,store().pendingResult?.doc??store().doc,[...store().selection],scopeMode,lockPlacement,messages.filter(m=>m.role==='user'));}
@@ -185,7 +187,7 @@ function createConversationController(editor:EditorStore) {
       if(usePi) {
         const {runModelingAgent} = await import('../ai/modelingAgent');
         if(!alive()) return;
-        const generated = await runModelingAgent({text:modelText,config:cfg,document:working,qualityBaseline:parent?original:working,referenceRepairs,selection:selectedIds,images,history,signal:controller.signal,editScope,captureAvailable:isIsolatedCaptureAvailable,captureEvidence:captureIsolatedSceneEvidence,
+        const generated = await runModelingAgent({text:modelText,config:cfg,blenderModeling:options.blenderModeling,confirmBlenderScript:options.confirmBlenderScript,document:working,qualityBaseline:parent?original:working,referenceRepairs,selection:selectedIds,images,history,signal:controller.signal,editScope,captureAvailable:isIsolatedCaptureAvailable,captureEvidence:captureIsolatedSceneEvidence,
           onControl:control=>{if(alive()){controlRef.current=control;setCanSteer(!!control);if(!control)clearControl();}},
           onSteeringApplied:id=>{if(alive()){markSteering(id,'received');setNotice('补充要求已收到，将在后续调整中参考');}},
           onCheckpoint:cp=>{if(alive()){const combined=continueDraft(original,parent,cp.batch,cp.result);checkpointRef.current={...cp,...combined};editor.setState({pendingBatch:combined.batch,pendingResult:combined.result});}},

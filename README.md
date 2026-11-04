@@ -16,6 +16,10 @@
 
 1.5 使用增量工具参数解析，并统一通过 pi-schema 校验 JSON Schema。现有工具定义保留 TypeBox，显式依赖 `typebox@1.3.27`，不再从 Pi 重导出接口导入。工具封装使用 TypeBox `Static` 保留元组和联合参数的完整静态类型；运行时仍由 Pi 校验后执行。结构生成回归覆盖向量长度、数字字符串转换、无效几何及重复数量边界。该升级不改变 Scenivo 的任务预算、缺陷阻断和人工应用流程。
 
+## Blender 建模（实验）
+
+本机 Node 服务可通过 MCP 调用后台 Blender 生成独立模型；生成结果回到 Scenivo 草稿，不会修改正在打开的 Blender 工程。使用条件、启动和验证步骤见 [Blender 本地适配器](server/blender/README.md)。
+
 ## 本地启动
 
 使用 Node.js 24.x，与 Docker 镜像和 CI 一致。`.nvmrc` 提供版本选择，`npm ci` 会提前拒绝不受支持的 Node 版本；切换到 Node 24 后再安装依赖。

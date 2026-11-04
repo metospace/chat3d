@@ -1,6 +1,7 @@
 import {useEffect,useLayoutEffect,useMemo,useRef,useState,type ComponentRef} from 'react';
 import {createPortal} from 'react-dom';
 import {PreviewDecision} from './PreviewDecision';
+import {blenderPythonStatus,type ConfirmBlenderScript} from '../../scene/blenderModeling';
 import {focusSceneObjects} from '../../scene/focus';
 import {prepareReference,MAX_ATTACHMENT_BYTES,isReferenceImage} from '../../domain/referenceAttachments';
 import {REFERENCE_IMAGE_JPEG_QUALITY,REFERENCE_IMAGE_MAX_SIDE} from '../../domain/referenceImageLimits';
@@ -82,6 +83,18 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
   const attachments=useEditorStore(s=>s.composerImages);
   const setAttachments=(value:string[]|((previous:string[])=>string[]))=>store().setComposerImages(typeof value==='function'?value(store().composerImages):value);
   const [lockPlacement,setLockPlacement]=useState(false);
+  const [blenderModeling,setBlenderModeling]=useState(false);
+  const [blenderStatus,setBlenderStatus]=useState<'checking'|'online'|'offline'>('checking');
+  const [blenderProbe,setBlenderProbe]=useState(0);
+  const [blenderReason,setBlenderReason]=useState('');
+  const confirmBlenderScript:ConfirmBlenderScript=async(_request,signal)=>aliveRef.current&&!signal?.aborted;
+  useEffect(()=>{
+    if(!blenderModeling)return;
+    const controller=new AbortController();
+    const signal=AbortSignal.any([controller.signal,AbortSignal.timeout(5000)]);
+    void blenderPythonStatus(signal).then(({available,reason})=>{if(!controller.signal.aborted){setBlenderReason(reason??'');setBlenderStatus(available?'online':'offline');}},()=>{if(!controller.signal.aborted){setBlenderReason('');setBlenderStatus('offline');}});
+    return()=>controller.abort();
+  },[blenderModeling,blenderProbe]);
   const [scopeMode,setScopeMode]=useState<'scene'|'selection'>('scene');
   const [reviewHost,setReviewHost]=useState<HTMLElement|null>(null);
   useEffect(()=>{setReviewHost(canvasMode?document.querySelector<HTMLElement>('.workbench-review-slot'):null);},[canvasMode,doc.projectId]);
@@ -137,7 +150,8 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
   const send=async(mode:'guide'|'question'|'later'='guide')=>{
     if(imageBusyRef.current)return;
     const previousMessages=store().messages;
-    stickRef.current=true;scrollAfterSend.current=true;setNewMessages(false);await runtime.send(mode,{scopeMode,lockPlacement,reuseReference:true});
+    if(!busy&&blenderModeling&&blenderStatus!=='online'){setNotice('Blender 建模服务未连接；请重新检测，或关闭实验模式后使用普通建模。输入已保留。');return;}
+    stickRef.current=true;scrollAfterSend.current=true;setNewMessages(false);await runtime.send(mode,{scopeMode,lockPlacement,reuseReference:true,blenderModeling,confirmBlenderScript});
     if(store().messages===previousMessages)scrollAfterSend.current=false;
     if(aliveRef.current)focusComposer();
   };
@@ -233,6 +247,7 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
     {canvasMode&&!expanded&&previewing&&<div className="adx-compact-strip"><span>修改结果待确认</span><Button size="small" onClick={onExpand}>查看详情</Button><Button size="small" type="primary" disabled={compareBefore} onClick={commit}>应用修改</Button><Button size="small" onClick={discard}>放弃修改</Button></div>}
     {canvasMode&&!expanded&&busy&&<div className="adx-compact-strip"><span>{agentActivity?.phase||progress.modelState?progress.label:`正在处理 · ${{idle:'就绪',capturing:'检查画面',context:'准备上下文',generating:'生成中',validating:'校验修改',applying:'应用修改',previewing:'待确认',error:'失败',cancelled:'已停止'}[aiStatus]}`}</span><Button size="small" onClick={onExpand}>查看过程</Button></div>}
     <div className="adx-composer">
+      <div className="instruction-context"><Checkbox checked={blenderModeling} disabled={busy} onChange={event=>{setBlenderStatus('checking');setBlenderModeling(event.target.checked);setNotice('');}}>Blender Python 建模</Checkbox>{blenderModeling&&<div><span role="status">{blenderStatus==='checking'?'正在检测连接…':blenderStatus==='online'?'已连接 · 自动执行任意 Python（非沙箱）':blenderReason||'服务未连接'}</span><Button size="small" type="text" disabled={busy||blenderStatus==='checking'} onClick={()=>{setBlenderStatus('checking');setBlenderProbe(v=>v+1);}}>重新检测</Button></div>}</div>
       {(contextDoc.nodes.length>0||scopeMode==='selection'||lockPlacement)&&<div className="instruction-context" role="group" aria-label="本次修改范围">
         <div>{selectedNames.length>0&&<span aria-label="当前选中对象" title={(scopeMode==='selection'?'修改范围已限制为当前选中对象：':'当前选中用于指代；修改范围以右侧设置为准：')+selectedNames.join('、')}>当前选中：{selectedNames.slice(0,2).join('、')}{selectedNames.length>2?' 等':''}</span>}{lockPlacement&&<span>已锁定位置与朝向</span>}</div>
         <label>修改范围<Select aria-label="对话修改范围" size="small" value={scopeMode} disabled={busy} onChange={setScopeMode} popupMatchSelectWidth={false} popupRender={menu=><>{menu}<div className="adx-scope-options" onMouseDown={event=>event.preventDefault()}><Checkbox disabled={busy} checked={lockPlacement} onChange={event=>setLockPlacement(event.target.checked)}>锁定已有对象的位置与朝向</Checkbox><p>选中对象用于指代；选择“仅选中对象”才会限制修改范围。</p></div></>} options={[{value:'scene',label:'全场景'},{value:'selection',label:`仅选中对象（${selection.length}）`}]}/></label>

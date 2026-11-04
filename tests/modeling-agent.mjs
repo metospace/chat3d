@@ -21,6 +21,12 @@ try{
  const picture='data:image/jpeg;base64,YWJj';
  const fake=(steps)=>{let n=0;const contexts=[];const fn=async(model,context)=>{contexts.push(structuredClone(context));const step=steps[n++]??'done';const actions=typeof step==='function'?step(context):step;const content=Array.isArray(actions)?actions.map((a,i)=>({type:'toolCall',id:`call_${n}_${i}`,name:a.name,arguments:a.args})):[{type:'text',text:actions}];const message={role:'assistant',content,api:'openai-completions',provider:'mock',model:'mock',stopReason:Array.isArray(actions)?'toolUse':'stop',timestamp:Date.now(),usage:{input:20,output:10,cacheRead:0,cacheWrite:0,totalTokens:30,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}};const stream=createAssistantMessageEventStream();queueMicrotask(()=>{stream.push({type:'start',partial:message});stream.push({type:'done',reason:message.stopReason,message})});return stream};return {fn,contexts,get calls(){return n}}};
  const opts=(transport,document=createInitialDoc())=>({text:'按参考图建模',config:cfg,document,selection:[],images:[picture],streamFn:transport.fn,capture:async()=>picture});
+ await test('Blender full scene reaches script approval without a separate plan',async()=>{
+  const script='import bpy';const f=fake([[{name:'run_blender_python',args:{name:'SMT',script}}],'未执行']);
+  let approvals=0;
+  await assert.rejects(runModelingAgent({...opts(f),text:'按图生成完整车间产线场景',blenderModeling:true,confirmBlenderScript:async request=>{approvals++;assert.equal(request.script,script);return false;}}),/未确认执行/);
+  assert.equal(approvals,1);
+ });
  await test('task budgets normalize invalid input and preserve bounded defaults',async()=>{
   const {normalizeTaskBudget,taskBudgetReason}=await server.ssrLoadModule('/src/ai/taskBudget.ts');
   assert.deepEqual(normalizeTaskBudget(),{maxMinutes:10,maxRounds:24,maxReportedTokens:2000000});

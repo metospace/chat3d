@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+
+const origin=process.env.SCENIVO_TEST_ORIGIN ?? 'http://127.0.0.1:1430';
+const endpoint=origin+'/api/blender/python';
+const untrusted=await fetch(endpoint+'/status',{headers:{'x-chat3d-python':'1',origin:'https://example.invalid'}});
+assert.ok(!(await untrusted.json()).token,'cross-origin status must not disclose a token');
+const status=await fetch(endpoint+'/status',{headers:{'x-chat3d-python':'1'}});
+assert.ok(status.ok);
+const {available,token}=await status.json();
+assert.equal(available,true);
+assert.ok(typeof token==='string' && token.length>=16);
+const script=await readFile(new URL('./blender-agv-fixture.py',import.meta.url),'utf8');
+const build=(source,headers={})=>fetch(endpoint,{method:'POST',headers:{origin,'content-type':'application/json','x-chat3d-python':token,...headers},body:JSON.stringify({script:source})});
+assert.equal((await build(script,{'x-chat3d-python':'invalid'})).status,403);
+assert.equal((await build(script,{origin:'https://example.invalid'})).status,403);
+const response=await build(script);
+assert.equal(response.status,200,response.ok?undefined:await response.text());
+const {scene}=await new GLTFLoader().parseAsync(await response.arrayBuffer(),'');
+const names=[];scene.traverse(object=>{if(object.isMesh)names.push(object.name);});
+assert.equal(names.length,10);
+for(const [name,count] of [['Chassis',1],['Wheel',4],['Mast',2],['Fork',2]]) assert.equal(names.filter(s=>s.startsWith(name)).length,count);
+assert.equal((await build('raise RuntimeError("deliberate test failure")')).ok,false);
+console.log('PASS Blender Python MCP: token and origin checks, 10-part AGV GLB, script error rejection');
