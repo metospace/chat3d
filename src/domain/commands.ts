@@ -1,9 +1,11 @@
 import {remapPoseRig,validatePoseRig,type PoseRig} from './poseRig';
-import {serializeProject} from './project';
+import {PROJECT_SIZE_LIMIT,serializeProject} from './project';
 import {duplicateSelectedNodes,layoutSelectedNodes,wholeObjectIds} from './manualComposition';
 import {editSelectedProperties,type SelectionChange} from './selectionProperties';
 import {persistFeatureBinding} from './structuredComponent';
 import {validateAnimation,remapAnimationForReplacement,type AnimationProgram} from './animation';
+
+const MANUAL_PLACEMENT_OVERFLOW = `本次手动放置将使项目文件超过 ${PROJECT_SIZE_LIMIT}，请简化模型或拆分场景；团队发布请求仍限约 22 MB`;
 // 命令系统（方案第 6 节）
 // - 每个命令有固定参数 schema、目标类型限制、影响集计算、成本估计与逆操作
 // - 一次 AI 批量修改 = 一条历史记录；命令串行提交，原子生效
@@ -449,7 +451,7 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
     case 'importComponentDraft':
     case 'importMeshComponent': {
       if(!Array.isArray(op.nodes)||!op.nodes.length||(op.op!=='importManualComponent'&&op.nodes.length>1000)||!Array.isArray(op.materials)||(op.op!=='importManualComponent'&&op.materials.length>100))return {doc,error:new Error('网格组件数量或材质数量无效')};
-      if(op.op==='importManualComponent'){try{serializeProject({...doc,nodes:[...doc.nodes,...op.nodes],materials:[...doc.materials,...op.materials]});}catch(e){return {doc,error:e instanceof Error?e:new Error('手动放置超过项目序列化预算')};}}
+      if(op.op==='importManualComponent'){try{serializeProject({...doc,nodes:[...doc.nodes,...op.nodes],materials:[...doc.materials,...op.materials]},MANUAL_PLACEMENT_OVERFLOW);}catch(e){return {doc,error:e instanceof Error?e:new Error(MANUAL_PLACEMENT_OVERFLOW)};}}
       const imported:SceneDocument={...doc,nodes:op.nodes,materials:op.materials,assets:[]};delete imported.animation;
       const errors=validateDocument(imported);if(errors.length||op.nodes.some(n=>!n.geometry||n.kind!=='primitive'||(op.op==='importMeshComponent'&&n.geometry.type!=='mesh')||n.parentId!==null))return {doc,error:errors[0]??new Error('网格组件只能包含平级三角网格')};
       const materialMap=new Map(op.materials.map(m=>[m.id,makeId()]));materials=[...materials,...op.materials.map(m=>({...m,id:materialMap.get(m.id)!}))];
@@ -608,7 +610,7 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
     revision: doc.revision + 1,
   };
   if(animation)newDoc.animation=animation;else delete newDoc.animation;
-  if(op.op==='importManualComponent'){try{serializeProject(newDoc);}catch(e){return {doc,error:e instanceof Error?e:new Error('手动放置超过项目序列化预算')};}}
+  if(op.op==='importManualComponent'){try{serializeProject(newDoc,MANUAL_PLACEMENT_OVERFLOW);}catch(e){return {doc,error:e instanceof Error?e:new Error(MANUAL_PLACEMENT_OVERFLOW)};}}
   const errs = validateDocument(newDoc);
   if (errs.length > 0) {
     return { doc, error: new Error(`提交后文档校验失败: ${errs.map((e) => e.message).join('; ')}`) };

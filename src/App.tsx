@@ -48,7 +48,7 @@ import {TaskCenter,StudioSettings} from './ui/StudioPages';
 import {downloadJson} from './util/downloadJson';
 import {exportFile} from './util/exportFile';
 import {initializeWorkspace,useWorkspaceStore,createSession,anySessionRunning,exportWorkspaceBackup} from './workspace';
-import { MAX_PROJECT_BYTES, parseProject, serializeProject } from './domain/project';
+import { MAX_PROJECT_BYTES, PROJECT_SIZE_ERROR, parseProject, serializeProject } from './domain/project';
 import {activityProgress} from './domain/customerProgress';
 
 function CanvasDraftStatus(){
@@ -125,7 +125,7 @@ export default function App() {
   };
   const openProject = async (file: File) => {
     try {
-      if (file.size > MAX_PROJECT_BYTES) throw new Error('项目文件超过 20 MB');
+      if (file.size > MAX_PROJECT_BYTES) throw new Error(PROJECT_SIZE_ERROR);
       const doc = parseProject(await file.text());
       if (!createSession(doc)) throw new Error('请先完成当前操作，或检查会话存储状态');
       setProjectNotice(`已导入新会话，共 ${doc.nodes.length} 个对象`);

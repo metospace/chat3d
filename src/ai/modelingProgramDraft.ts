@@ -5,6 +5,7 @@ import type {Command} from '../domain/commands';
 import type {ObjectBlueprint} from '../domain/objectBlueprint';
 import {validateFeatureBindings} from '../domain/objectBlueprint';
 import {validateBlueprintDimensions} from '../domain/structuredComponent';
+import {STRUCTURED_BYTES_LIMIT} from '../domain/structureLimits';
 import {componentDraftCommand} from './parallelDrafts';
 
 export interface ProgramFeature {key:string;partNames:string[]}
@@ -34,7 +35,7 @@ export function modelingProgramCommands(draft:SceneDocument,generated:SceneDocum
  if(draft.nodes.some(n=>n.connection&&removedIds.has(n.connection.targetId))||removed.some(n=>n.connection||n.poseRig||n.modelAsset))throw Error('目标有连接、关节或资产关联，请用局部编辑保留关系，不能整体重建');
  const imported=componentDraftCommand(doc,{name:args.name,brief:'参数化脚本生成，尚未视觉验收',position:args.position??[0,0,0]});
  if(imported.op!=='importComponentDraft')throw Error('参数化组件导入命令无效');
- serializeProject({...draft,nodes:[...draft.nodes.filter(n=>!removedIds.has(n.id)),...imported.nodes],materials:[...draft.materials,...imported.materials]});
+ serializeProject({...draft,nodes:[...draft.nodes.filter(n=>!removedIds.has(n.id)),...imported.nodes],materials:[...draft.materials,...imported.materials]},undefined,STRUCTURED_BYTES_LIMIT);
  return [...(removed.length?[{op:'delete' as const,targetIds:[...removedIds]}]:[]),imported];
 }
 

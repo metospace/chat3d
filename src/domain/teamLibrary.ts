@@ -1,7 +1,7 @@
 import {buildTeamCopyExport} from './teamCopyExport';
 import {teamFetch} from './teamTransport';
 import {parseModelAsset,type ModelAssetVersion} from './modelAssets';
-import {parseProject,serializeProject} from './project';
+import {MAX_TEAM_SCENE_BYTES,parseProject,serializeProject} from './project';
 import {saveModelAsset} from './modelAssetStorage';
 import {createSession,flushWorkspace,useWorkspaceStore} from '../workspace';
 import {assertLibraryReady} from './libraryNavigation';
@@ -233,7 +233,7 @@ export async function copyTeamVersion(item:TeamVersion){
  if(!createSession(doc,{moduleKind:'scene',title:item.name+' 副本',libraryDescription:item.description,librarySavedAt:Date.now(),savedRevision:doc.revision}))throw Error('无法创建本地副本');
  await flushWorkspace();if(useWorkspaceStore.getState().error)throw Error('副本已创建，但本地保存失败，请先修复存储再继续');return doc.projectId;
 }
-export function scenePublication(doc:Parameters<typeof serializeProject>[0]){const safe=publicSnapshot(doc,{schemaVersion:true,projectId:true,revision:true,unit:true,upAxis:true,nodes:[nodeShape],materials:[materialShape],assets:[],animation:animationShape,viewState:{cameraPosition:vectorShape,cameraTarget:vectorShape,projection:true,displayUnit:true}}) as Parameters<typeof serializeProject>[0];return JSON.parse(serializeProject(safe));}
+export function scenePublication(doc:Parameters<typeof serializeProject>[0]){const safe=publicSnapshot(doc,{schemaVersion:true,projectId:true,revision:true,unit:true,upAxis:true,nodes:[nodeShape],materials:[materialShape],assets:[],animation:animationShape,viewState:{cameraPosition:vectorShape,cameraTarget:vectorShape,projection:true,displayUnit:true}}) as Parameters<typeof serializeProject>[0];return JSON.parse(serializeProject(safe,undefined,MAX_TEAM_SCENE_BYTES));}
 
 export interface TeamLocalSource {id:string;version?:number}
 export interface TeamPublishSource extends TeamLocalSource {name:string;kind:'asset'|'scene'}

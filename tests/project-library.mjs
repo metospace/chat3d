@@ -54,6 +54,42 @@ try{
   fireEvent.click(card);assert.ok(ui.getByRole('complementary',{name:'资产详情'}));
   fireEvent.click(ui.getByRole('button',{name:'关闭详情'}));assert.equal(ui.queryByRole('complementary',{name:'资产详情'}),null);
  });
+ await test('asset draft trash is cancellable and recoverable without touching catalog versions',async()=>{
+  const catalog=await storage.listModelAssets(),version=await storage.readModelAsset(asset.id,2),title='可恢复资产草稿';
+  await act(async()=>{w.createSession(undefined,{moduleKind:'asset',title,assetSource:{id:asset.id,version:2}});s.getState().setComposerText('保留的编辑要求');});
+  const id=w.useWorkspaceStore.getState().activeId,ui=render(React.createElement(ProjectLibrary,{kind:'asset',onOpen:()=>assert.fail('must not open'),onManage:()=>{}}));
+  await waitFor(()=>assert.ok(ui.getByRole('button',{name:`查看资产 ${catalog.find(row=>row.id===asset.id).name}`})));
+  fireEvent.click(ui.getByRole('button',{name:`查看资产 ${catalog.find(row=>row.id===asset.id).name}`}));
+  assert.equal(ui.queryByRole('button',{name:/移至回收站/}),null);
+  fireEvent.click(ui.getByRole('button',{name:'关闭详情'}));fireEvent.click(ui.getByRole('button',{name:'批量整理'}));
+  assert.equal(ui.queryByRole('button',{name:/移至回收站/}),null);
+  fireEvent.click(ui.getByRole('button',{name:/^草稿/}));fireEvent.click(ui.getByRole('button',{name:`查看草稿 ${title}`}));
+  const trash=()=>fireEvent.click(within(ui.getByRole('complementary',{name:'项目详情'})).getByRole('button',{name:'移至回收站'}));
+  const dialog=()=>within(ui.getByRole('alertdialog',{name:'移至回收站？'}));
+  trash();assert.ok(dialog().getByText(/聊天、参考图与场景.*可以恢复/));fireEvent.click(dialog().getByRole('button',{name:/取\s*消/}));
+  assert.equal(w.useWorkspaceStore.getState().sessions.find(row=>row.id===id).deletedAt,null);
+  trash();fireEvent.click(dialog().getByRole('button',{name:'移至回收站'}));
+  assert.equal(ui.queryByRole('button',{name:`查看草稿 ${title}`}),null);assert.equal(ui.queryByRole('complementary',{name:'项目详情'}),null);
+  assert.match(ui.getByRole('status').textContent,/1 项草稿.*会话回收站恢复/);
+  assert.notEqual(w.useWorkspaceStore.getState().activeId,id);
+  await act(async()=>w.flushWorkspace());const stored=await (await server.ssrLoadModule('/src/domain/workspaceStorage.ts')).readWorkspace();
+  assert.ok(stored.sessions.find(row=>row.id===id).deletedAt);
+  await act(async()=>w.restoreSession(id));assert.ok(ui.getByRole('button',{name:`查看草稿 ${title}`}));
+  assert.equal(w.useWorkspaceStore.getState().sessions.find(row=>row.id===id).snapshot.composerText,'保留的编辑要求');
+  assert.deepEqual(await storage.listModelAssets(),catalog);assert.deepEqual(await storage.readModelAsset(asset.id,2),version);
+ });
+ await test('bulk draft trash rejects a running target atomically and clears selection on success',async()=>{
+  const ids=[];await act(async()=>{for(const title of ['批量回收测试 A','批量回收测试 B']){w.createSession(undefined,{moduleKind:'scene',title});ids.push(w.useWorkspaceStore.getState().activeId);}});
+  const ui=render(React.createElement(ProjectLibrary,{kind:'scene',onOpen:()=>assert.fail('must not open'),onManage:()=>{}}));
+  fireEvent.click(ui.getByRole('button',{name:/^草稿/}));fireEvent.change(ui.getByRole('textbox',{name:'搜索库内容'}),{target:{value:'批量回收测试'}});fireEvent.click(ui.getByRole('button',{name:'批量整理'}));fireEvent.click(ui.getByRole('button',{name:'全选结果'}));
+  const bulk=()=>ui.getByRole('button',{name:'批量移至回收站'});
+  const confirm=()=>within(ui.getByRole('alertdialog')).getByRole('button',{name:'移至回收站'});
+  fireEvent.click(bulk());const running=w.getSessionEditor(ids[0]);await act(async()=>running.setState({aiStatus:'generating'}));
+  assert.equal(confirm().disabled,true);const before=w.useWorkspaceStore.getState();assert.equal(w.trashLibraryDrafts(ids,'scene'),false);assert.equal(w.useWorkspaceStore.getState(),before);
+  await act(async()=>running.setState({aiStatus:'idle'}));fireEvent.click(confirm());
+  const deleted=w.useWorkspaceStore.getState().sessions.filter(row=>ids.includes(row.id));assert.equal(deleted.length,2);assert.ok(deleted[0].deletedAt);assert.equal(deleted[0].deletedAt,deleted[1].deletedAt);
+  assert.ok(ui.getByText('已选 0 项'));assert.equal(bulk().disabled,true);assert.match(ui.getByRole('status').textContent,/2 项草稿/);
+ });
  await test('blocked library actions expose recovery guidance and keep detail actions outside the scroll body',async()=>{
   const workspaceStorage=await server.ssrLoadModule('/src/domain/workspaceStorage.ts');
   await act(async()=>w.flushWorkspace());
