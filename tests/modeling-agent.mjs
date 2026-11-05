@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {createServer} from 'vite';
 import {createAssistantMessageEventStream} from '@earendil-works/pi-ai';
+import {Type} from 'typebox';
 const server=await createServer({server:{middlewareMode:true},appType:'custom'});
 let passed=0;let forceTransportError=false;
 const test=async(name,fn)=>{await fn();passed++;console.log('PASS',name)};
@@ -30,6 +31,27 @@ try{
   assert.deepEqual(schema,original);
   assert.notEqual(result.required,schema.required);
   assert.notEqual(result.properties.items.items.anyOf[0],schema.properties.items.items.anyOf[0]);
+ });
+ await test('provider tool parameters strip TypeBox metadata and rewrite optional tuples',async()=>{
+  const {sanitizeToolParametersForProvider}=await server.ssrLoadModule('/src/ai/toolParameters.ts');
+  const schema=Type.Object({position:Type.Optional(Type.Tuple([Type.Number(),Type.Number(),Type.Number()])),points:Type.Array(Type.Tuple([Type.Number(),Type.Number()]),{uniqueItems:true}),choice:Type.Number()},{additionalProperties:false});
+  schema.properties.choice.oneOf=[Type.Number(),Type.String()];
+  schema[Symbol('internal')]='hidden';
+  const original=JSON.stringify(schema);
+  const result=sanitizeToolParametersForProvider(schema);
+  assert.equal(result.type,'object');
+  assert.equal(result.additionalProperties,false);
+  assert.doesNotMatch(JSON.stringify(result),/"(?:~[^"\s]*|oneOf|uniqueItems)"\s*:/);
+  assert.deepEqual(Reflect.ownKeys(result),Object.keys(result));
+  assert.deepEqual(result.properties.position,{type:'array',prefixItems:[{type:'number'},{type:'number'},{type:'number'}],items:false,minItems:3,maxItems:3});
+  assert.deepEqual(result.properties.points.items,{type:'array',prefixItems:[{type:'number'},{type:'number'}],items:false,minItems:2,maxItems:2});
+  for(const maxItems of [1,5]){
+   const tuple=sanitizeToolParametersForProvider({type:'array',items:[Type.Number(),Type.Number()],additionalItems:false,maxItems});
+   assert.equal(tuple.maxItems,Math.min(maxItems,2));
+   assert.equal(tuple.items,false);
+   assert.ok(!Object.hasOwn(tuple,'additionalItems'));
+  }
+  assert.equal(JSON.stringify(schema),original);
  });
  await test('task budgets normalize invalid input and preserve bounded defaults',async()=>{
   const {normalizeTaskBudget,taskBudgetReason}=await server.ssrLoadModule('/src/ai/taskBudget.ts');
@@ -264,13 +286,19 @@ try{
  await test('production Pi OpenAI adapter sends native tool schema and returns screenshot for the next request',async()=>{
    let wire=[];globalThis.fetch=async(url,init)=>{if(forceTransportError)throw new Error('本站模型代理响应异常（HTTP 403）。访问会话已失效');const body=JSON.parse(init.body);wire.push(body);const actions=wire.length===1?[plan,edit,capture]:[review,submit];const tc=actions.map((a,i)=>({index:i,id:`wire_${wire.length}_${i}`,type:'function',function:{name:a.name,arguments:JSON.stringify(a.args)}}));const raw='data: '+JSON.stringify({id:'test',object:'chat.completion.chunk',choices:[{index:0,delta:{role:'assistant',tool_calls:tc},finish_reason:null}]})+'\n\ndata: '+JSON.stringify({id:'test',object:'chat.completion.chunk',choices:[{index:0,delta:{},finish_reason:'tool_calls'}],usage:{prompt_tokens:30,completion_tokens:20,total_tokens:50}})+'\n\ndata: [DONE]\n\n';return new Response(raw,{headers:{'content-type':'text/event-stream'}})};
    const o=opts(fake([]));delete o.streamFn;const r=await runModelingAgent(o);assert.equal(wire.length,2);assert.ok(wire[0].tools.some(t=>t.function.name==='edit_scene'));assert.ok(wire.every(body=>body.tools.every(tool=>tool.type==='function')));assert.equal(wire[0].stream,true);assert.equal(wire[0].max_tokens,8192);assert.ok(JSON.stringify(wire[1].messages).includes('data:image/jpeg;base64,YWJj'));assert.equal(r.result.doc.nodes.length,1);assert.equal(r.activity.outputTokens,40);
-   const unsupportedKeywords=value=>value!==null&&typeof value==='object'&&Object.entries(value).some(([key,child])=>key==='oneOf'||key==='uniqueItems'||unsupportedKeywords(child));
+   const unsupportedKeywords=value=>value!==null&&typeof value==='object'&&Object.entries(value).some(([key,child])=>/^~/.test(key)||key==='oneOf'||key==='uniqueItems'||(key==='items'&&Array.isArray(child))||unsupportedKeywords(child));
    const firstTools=wire[0].tools.map(tool=>tool.function);
    const editScene=firstTools.find(tool=>tool.name==='edit_scene');
+   const program=firstTools.find(tool=>tool.name==='build_modeling_program');
+   assert.ok(program?.parameters,'build_modeling_program must declare parameters');
+   const position=program.parameters.properties.position;
+   assert.ok(position,'build_modeling_program must declare position');
+   assert.equal(position.items,false);
+   assert.deepEqual(position.prefixItems,[{type:'number'},{type:'number'},{type:'number'}]);
    console.log('Pi reference-image tool declarations',JSON.stringify({names:firstTools.map(tool=>tool.name),count:firstTools.length,index25:firstTools[25]?.name??null,editSceneClean:!!editScene?.parameters&&!unsupportedKeywords(editScene.parameters)}));
    for(const body of wire)for(const {function:{name,parameters}} of body.tools){
     assert.ok(parameters,`${name} must declare its parameters`);
-    assert.ok(!unsupportedKeywords(parameters),`${name} parameters contain oneOf or uniqueItems`);
+    assert.ok(!unsupportedKeywords(parameters),`${name} parameters contain TypeBox metadata, oneOf, uniqueItems, or tuple items arrays`);
    }
    assert.ok(wire.every(body=>!Object.hasOwn(body,'reasoning_effort')),'production default never sends off or an SDK-selected effort');
  });

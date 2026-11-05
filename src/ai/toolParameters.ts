@@ -2,10 +2,18 @@
 export function sanitizeToolParametersForProvider<T>(parameters:T):T {
   if(Array.isArray(parameters))return parameters.map(value=>sanitizeToolParametersForProvider(value)) as T;
   if(parameters===null||typeof parameters!=='object')return parameters;
-  const result:Record<PropertyKey,unknown>={};
+  const result:Record<string,unknown>={};
   for(const key of Reflect.ownKeys(parameters)){
-    if(key==='oneOf'||key==='uniqueItems')continue;
+    if(typeof key!=='string'||key.startsWith('~')||key==='oneOf'||key==='uniqueItems')continue;
     Object.defineProperty(result,key,{value:sanitizeToolParametersForProvider(Reflect.get(parameters,key)),enumerable:true,writable:true,configurable:true});
+  }
+  if(Array.isArray(result.items)){
+    // Replace draft-07 tuple validation with draft 2020-12 keywords.
+    const prefixItems=result.items;
+    result.prefixItems=prefixItems;
+    result.items=false;
+    result.maxItems=typeof result.maxItems==='number'?Math.min(result.maxItems,prefixItems.length):prefixItems.length;
+    delete result.additionalItems;
   }
   if(Object.prototype.hasOwnProperty.call(parameters,'oneOf')){
     const alternatives=sanitizeToolParametersForProvider(Reflect.get(parameters,'oneOf'));
