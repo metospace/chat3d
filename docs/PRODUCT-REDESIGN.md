@@ -15,9 +15,9 @@ This change is based on `feat/ant-design-x-chat` at `0b280fb37852fd7880c45b31c9b
 
 ## Canvas controls
 
-Every session starts in Browse. Left drag rotates the camera, right drag pans, wheel zooms; clicking selects without switching modes. Explicit Move/Rotate/Scale actions display a blue handle above the selection. Object surfaces and empty canvas remain available for camera navigation in those modes.
+Every session starts in Browse. Left drag rotates the camera, right drag pans, wheel zooms; clicking selects without switching modes. Move/Rotate/Scale display a blue handle above the selection. Drag the selected object body or the handle to transform it. Drag elsewhere to orbit.
 
-The move handle edits the horizontal plane, rotation edits yaw, and scale is uniform. The property panel provides numeric XYZ movement/rotation and scale. Handle previews never mutate the saved document; release creates one undo transaction. Escape/cancellation restores the original transforms. New project IDs reframe the viewport, including tiny, large and offset geometry. Compatibility previews clearly identify that they cannot rotate in real time.
+Move edits the horizontal plane, rotation edits yaw, and scale is uniform. The property panel provides numeric XYZ movement/rotation and scale. Drag previews never mutate the saved document; release creates one undo transaction. Escape/cancellation restores the original transforms. New project IDs reframe the viewport, including tiny, large and offset geometry. Compatibility previews clearly identify that they cannot rotate in real time.
 
 ## Local validation
 

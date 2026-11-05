@@ -137,7 +137,7 @@ export function ViewportPanel() {
 
       <div ref={hostRef} className="absolute inset-0" onDragOver={assetDrop.onDragOver} onDragLeave={assetDrop.onDragLeave} onDrop={assetDrop.onDrop}/>
       <div className="viewport-help pointer-events-none absolute top-2 left-2 text-xs text-gray-400 bg-black/40 px-2 py-1 rounded">
-        {viewportStatus==='ready'?'单击选择 · 左键拖动浏览 · 蓝色手柄编辑 · 右键平移 · 滚轮缩放视图 · 单位：米':'三维未就绪 · 使用对象与属性选择零件，再生成近景检查图'}
+        {viewportStatus==='ready'?'单击选择 · 编辑时拖动选中对象或蓝色手柄 · 其他区域拖动浏览 · 右键平移 · 滚轮缩放视图 · 单位：米':'三维未就绪 · 使用对象与属性选择零件，再生成近景检查图'}
       </div>
     </div>
   );
