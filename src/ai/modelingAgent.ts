@@ -83,6 +83,7 @@ import { makeId } from '../util/ids';
 
 import { AGENT_LIMITS } from './agentPolicy';
 import { normalizeModelingRequestMessages } from './modelingRequest';
+import { sanitizeToolParametersForProvider } from './toolParameters';
 export { AGENT_LIMITS } from './agentPolicy';
 export interface ActivityTiming { summary?:string;phase?:'planning'|'building'|'reviewing'|'repairing'; failureCategory?:ToolFailureCategory;toolName?:string;repeatedInput?:boolean;argumentsChars?:number;resultChars?:number;sceneRevision?:number;firstContentAt?:number;responseAt?:number;usageState?:UsageState;uncachedInputTokens?:number;cacheReadTokens?:number;cacheWriteTokens?:number; id:string; kind:'model'|'tool'; label:string; startedAt:number; firstDataAt?:number; endedAt?:number; failed?:boolean; detail?:string; inputTokens?:number; outputTokens?:number; requestFootprint?:RequestFootprint }
 export interface DesignBrief {flow:string[];layout:string;equipment:{name:string;count:number;features:string[]}[];checks:string[];composition?:CompositionPlan}
@@ -250,7 +251,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
   const reusableChecks=new Set(['inspect_view_visibility','audit_model_detail','audit_model_details_batch','inspect_access_route','inspect_part_topology','detail_quality_standard','inspect_connections','inspect_contact_surfaces','check_requirements','inspect_model_quality','inspect_clearance','inspect_workcells']);
   // Pi 1.5 infers only common TypeBox kinds; keep tuple/union inference at our schema boundary.
   type ToolExecute<T extends TSchema>=(id:string,params:Static<T>,signal?:AbortSignal,onUpdate?:Parameters<AgentTool['execute']>[3])=>ReturnType<AgentTool['execute']>;
-  const tool=<T extends TSchema>(name:string,label:string,description:string,parameters:T,execute:ToolExecute<T>):AgentTool<any>=>({name,label,description,parameters,executionMode:'sequential',execute:(async(...args:Parameters<ToolExecute<T>>)=>{
+  const tool=<T extends TSchema>(name:string,label:string,description:string,parameters:T,execute:ToolExecute<T>):AgentTool<any>=>({name,label,description,parameters:sanitizeToolParametersForProvider(parameters),executionMode:'sequential',execute:(async(...args:Parameters<ToolExecute<T>>)=>{
     check();
     const captureArgs=args[1] as {views?:string[]};const captureKey=JSON.stringify([name,Array.isArray(captureArgs.views)?{...captureArgs,views:[...captureArgs.views].sort()}:captureArgs]);if(captureTools.has(name)&&captureReuse.seen(draft.revision,captureKey))return textResult(JSON.stringify({revision:draft.revision,repeated:true,next:'当前版本相同目标和视角的真实图片已返回，请复用图片进行检查；没有几何修改或新增取景目的时不要重复取图。无法判断保留unknown，已有检查完成即可提交预览。'}));
     const key=JSON.stringify([name,args[1],requirements,requirementsNeedRefresh,executionTexts,activity.design,activity.objectBlueprints,activity.featureBindings,detailReviews,visualAvailable()]);

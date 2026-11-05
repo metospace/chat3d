@@ -12,7 +12,11 @@
 
 ### 开发中：Codex / CliRelay 动画工具兼容性
 
-动画命令的 JSON Schema 不再使用严格工具校验不支持的 `uniqueItems`，保留目标数量上下限。模型响应归一化及命令应用阶段均会去重每条轨道的 `targetIds`；应用阶段在临时 ID 映射后去重，并继续执行动画领域校验。本项未发布，不变更版本号。
+动画命令的 JSON Schema 不再使用严格工具校验不支持的 `uniqueItems`，保留目标数量上下限。模型响应归一化及命令应用阶段均会去重每条轨道的 `targetIds`；应用阶段在临时 ID 映射后去重，并继续执行动画领域校验。
+
+删除命令的 `targetId` / `targetIds` 和动画运动轨道的 `keyframes` / `expression` 使用 `anyOf` 声明必选项，本地命令校验仍拒绝同时提供两者；缺少两者也会拒绝。所有建模工具通过统一的 `sanitizeToolParametersForProvider` 克隆参数 schema，递归把 `oneOf` 近似为 `anyOf`、移除 `uniqueItems`，不修改原始 schema 或其他约束；若原本同时存在两种 union，则通过 `allOf` 保留两个约束组。
+
+参考图 + 资产复用 + 布局工具组的实际请求共 40 个工具，零起始索引 25 为 `edit_scene`；工具数量和索引会随工具组、场景与渲染可用性改变。`tests/command-contract.mjs` 检查全部导出命令 schema 和选择器排他性，`tests/modeling-agent.mjs` 检查清理器及 Pi OpenAI adapter 的实际出站参数。本项未发布，不变更版本号。
 
 
 ## 浏览器
