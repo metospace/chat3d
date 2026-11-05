@@ -1,9 +1,10 @@
 import { withStockMaterials } from './materials';
 import { SceneDocument, SCHEMA_VERSION, validateDocument } from './types';
 
-export const MAX_PROJECT_BYTES = 50 * 1024 * 1024;
-export const MAX_TEAM_SCENE_BYTES = 20 * 1024 * 1024;
+export const MAX_PROJECT_BYTES = 100 * 1024 * 1024;
+export const MAX_TEAM_SCENE_BYTES = 50 * 1024 * 1024;
 export const PROJECT_SIZE_LIMIT = `${MAX_PROJECT_BYTES / (1024 * 1024)} MiB`;
+export const TEAM_SCENE_SIZE_LIMIT = `${MAX_TEAM_SCENE_BYTES / (1024 * 1024)} MiB`;
 const projectSizeError = (bytes: number) => `项目文件超过 ${bytes / (1024 * 1024)} MiB`;
 export const PROJECT_SIZE_ERROR = projectSizeError(MAX_PROJECT_BYTES);
 export const AUTOSAVE_KEY = 'chat3d.project.autosave.v1';

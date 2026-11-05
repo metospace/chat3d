@@ -14,7 +14,8 @@ export interface ModelAssetVersion {
  size:Vec3;nodes:SceneNode[];materials:Material[];thumbnail?:string;externalConnectionsRemoved:number;
 }
 export interface ModelAssetSummary {id:string;version:number;name:string;category:AssetCategory;createdAt:string;size:Vec3;parts:number;thumbnail?:string;quality:'unreviewed';purpose?:string;anchorCount?:number;description?:string;metadataRevision?:number}
-export const MAX_ASSET_BYTES=20*1024*1024;
+export const MAX_ASSET_BYTES=50*1024*1024;
+export const ASSET_SIZE_ERROR=`资产超过${MAX_ASSET_BYTES/1024/1024} MiB，请精简或分拆模型`;
 export function assetDocument(asset:ModelAssetVersion):SceneDocument{return {schemaVersion:SCHEMA_VERSION,projectId:asset.id,revision:0,unit:'m',upAxis:'Y',nodes:structuredClone(asset.nodes),materials:structuredClone(asset.materials),assets:[]};}
 export function selectedAssetNodes(doc:SceneDocument,selection:string[]):SceneNode[]{const ids=new Set(selection),groups=new Set(doc.nodes.filter(n=>ids.has(n.id)&&n.assemblyId).map(n=>n.assemblyId));return doc.nodes.filter(n=>ids.has(n.id)||(n.assemblyId&&groups.has(n.assemblyId)));}
 export function createModelAsset(doc:SceneDocument,selection:string[],details:{name:string;category:AssetCategory;front?:ModelAssetVersion['front'];id?:string;version?:number}):ModelAssetVersion{
@@ -38,7 +39,7 @@ export function validateModelAsset(asset:ModelAssetVersion):void{
  if(asset.contract)validateAssetContract(asset.contract,asset.nodes);
  const errors=validateDocument(assetDocument(asset));if(errors.length)throw errors[0];
  const actual=assemblyBounds(asset.nodes).getSize(new Vector3()).toArray();if(!Array.isArray(asset.size)||asset.size.length!==3||asset.size.some((n,i)=>!Number.isFinite(n)||Math.abs(n-actual[i])>1e-5))throw Error('资产尺寸与几何不一致');
- if(new TextEncoder().encode(JSON.stringify(asset)).length>MAX_ASSET_BYTES)throw Error('资产超过20MB，请精简或分拆模型');
+ if(new TextEncoder().encode(JSON.stringify(asset)).length>MAX_ASSET_BYTES)throw Error(ASSET_SIZE_ERROR);
 }
 export function summarizeAsset(a:ModelAssetVersion):ModelAssetSummary{return {id:a.id,version:a.version,name:a.name,category:a.category,description:a.description,createdAt:a.createdAt,size:[...a.size],parts:a.nodes.length,purpose:a.contract?.purpose,anchorCount:a.contract?.anchors.length??0,thumbnail:a.thumbnail,quality:'unreviewed'};}
 export function instantiateAsset(a:ModelAssetVersion,position:Vec3,yaw=0):Command{
@@ -48,7 +49,7 @@ export function instantiateAsset(a:ModelAssetVersion,position:Vec3,yaw=0):Comman
  const nodes=structuredClone(a.nodes).map(n=>{n.assemblyName=singleGroup?a.name:(a.name+' / '+(n.assemblyName??n.name)).slice(0,200);const p=new Vector3(),q=new Quaternion(),s=new Vector3();new Matrix4().compose(new Vector3(...n.transform.position),new Quaternion(...n.transform.rotationQuaternion),new Vector3(...n.transform.scale)).premultiply(matrix).decompose(p,q,s);n.transform={position:p.toArray() as Vec3,rotationQuaternion:q.toArray() as [number,number,number,number],scale:s.toArray() as Vec3};n.modelAsset={id:a.id,version:a.version,instanceId,sourceNodeId:n.id};return n;});
  return {op:'importComponentDraft',nodes,materials:structuredClone(a.materials)};
 }
-export function parseModelAsset(text:string):ModelAssetVersion{if(new TextEncoder().encode(text).length>MAX_ASSET_BYTES)throw Error('资产超过20MB');let a:ModelAssetVersion;try{a=JSON.parse(text);}catch{throw Error('资产不是有效JSON');}validateModelAsset(a);return a;}
+export function parseModelAsset(text:string):ModelAssetVersion{if(new TextEncoder().encode(text).length>MAX_ASSET_BYTES)throw Error(ASSET_SIZE_ERROR);let a:ModelAssetVersion;try{a=JSON.parse(text);}catch{throw Error('资产不是有效JSON');}validateModelAsset(a);return a;}
 
 // A newly saved independent copy retains the actual editor node IDs. Its source
 // can therefore create the next revision even if those nodes came from an older asset.

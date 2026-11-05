@@ -7,8 +7,11 @@ import {makeId} from '../util/ids';
 import {withStockMaterials} from '../domain/materials';
 import {PHYSICAL_MATERIAL_KEYS} from '../domain/physicalMaterial';
 
+export const MAX_GLB_BYTES=50*1024*1024;
+export const GLB_SIZE_ERROR=`GLB文件不能超过${MAX_GLB_BYTES/1024/1024} MiB`;
+export function assertGlbSize(size:number):void{if(size>MAX_GLB_BYTES)throw Error(GLB_SIZE_ERROR);}
 export function inspectGlbBytes(data:ArrayBuffer){
- if(data.byteLength<20||data.byteLength>20*1024*1024)throw Error('GLB文件需小于20MB');const view=new DataView(data);
+ assertGlbSize(data.byteLength);if(data.byteLength<20)throw Error('GLB文件头不完整');const view=new DataView(data);
  if(view.getUint32(0,true)!==0x46546c67||view.getUint32(4,true)!==2||view.getUint32(8,true)!==data.byteLength)throw Error('仅支持完整的GLB 2.0文件');
  let offset=12,json:any=null,bin:Uint8Array|undefined;
  while(offset<data.byteLength){if(offset+8>data.byteLength)throw Error('GLB块头损坏');const length=view.getUint32(offset,true),kind=view.getUint32(offset+4,true);offset+=8;if(length%4||offset+length>data.byteLength)throw Error('GLB块范围无效');if(kind===0x4e4f534a){if(json)throw Error('GLB包含重复JSON块');json=JSON.parse(new TextDecoder().decode(new Uint8Array(data,offset,length)));}if(kind===0x004e4942){if(bin)throw Error('重复二进制块');bin=new Uint8Array(data,offset,length);}offset+=length;}

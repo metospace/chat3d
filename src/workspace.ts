@@ -164,16 +164,18 @@ export function restoreSession(id:string):void{
 }
 
 
+export const MAX_WORKSPACE_BACKUP_BYTES=200*1024*1024;
+export const WORKSPACE_BACKUP_SIZE_ERROR=`备份超过${MAX_WORKSPACE_BACKUP_BYTES/1024/1024} MiB，请分别导出项目`;
 /** Portable local backup. No model configuration or browser credentials are included. */
 export function exportWorkspaceBackup():string{
  if(busy())throw Error('请先停止生成再备份，以保存一致的草稿');capture();
  const sessions=useWorkspaceStore.getState().sessions.filter(s=>!s.deletedAt).map(s=>({moduleKind:s.moduleKind??'scene',assetCategory:s.assetCategory,sceneCategory:s.sceneCategory,libraryDescription:s.libraryDescription,title:s.title,pinned:!!s.pinned,project:JSON.parse(serializeProject(s.snapshot.doc)),draft:s.snapshot.pendingResult?JSON.parse(serializeProject(s.snapshot.pendingResult.doc)):null,messages:s.snapshot.messages.map(m=>({role:m.role,text:m.text,createdAt:m.createdAt})),composerText:s.snapshot.composerText}));
  const output=JSON.stringify({format:'chat3d-workspace-backup',version:1,createdAt:new Date().toISOString(),sessions});
- if(new TextEncoder().encode(output).length>50*1024*1024)throw Error('备份超过50MB，请分别导出项目');return output;
+ if(new TextEncoder().encode(output).length>MAX_WORKSPACE_BACKUP_BYTES)throw Error(WORKSPACE_BACKUP_SIZE_ERROR);return output;
 }
 export function importWorkspaceBackup(text:string):number{
  if(busy()||blocked||!useWorkspaceStore.getState().ready)throw Error('请先结束当前任务并解决存储错误');
- if(new TextEncoder().encode(text).length>50*1024*1024)throw Error('备份超过50MB');
+ if(new TextEncoder().encode(text).length>MAX_WORKSPACE_BACKUP_BYTES)throw Error(WORKSPACE_BACKUP_SIZE_ERROR);
  const pack=JSON.parse(text);if(pack?.format!=='chat3d-workspace-backup'||pack.version!==1||!Array.isArray(pack.sessions))throw Error('备份格式错误');
  const next:WorkspaceSession[]=[];
  for(const item of pack.sessions){

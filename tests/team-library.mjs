@@ -36,6 +36,12 @@ try{
  assert.equal((await call('items?kind=scene',{headers:{Origin:'https://evil.invalid',Authorization:`Bearer ${a.token}`}})).status,403);
  const cors=await call('publish',{method:'OPTIONS',headers:{Origin:'http://tauri.localhost'}});assert.equal(cors.status,204);assert.equal(cors.headers.get('access-control-allow-origin'),'http://tauri.localhost');
  assert.equal((await call('publish',{method:'POST',headers:{Authorization:`Bearer ${a.token}`,'Content-Type':'application/json'},body:'null'})).status,400);
+ const paddedRequest=bytes=>'{"padding":"'+'x'.repeat(bytes-14)+'"}';
+ const withinHttpCap=await call('login',{method:'POST',headers:{'Content-Type':'application/json'},body:paddedRequest(55*1024*1024)});
+ assert.equal(withinHttpCap.status,400,'55 MiB body reaches login validation');
+ const beyondHttpCap=await call('login',{method:'POST',headers:{'Content-Type':'application/json'},body:paddedRequest(55*1024*1024+1)});
+ assert.equal(beyondHttpCap.status,413);assert.match(await beyondHttpCap.text(),/55 MiB/);
+ console.log('PASS HTTP body accepts 55 MiB and rejects overflow');
  const result=await call('items?kind=scene',{headers:{Authorization:`Bearer ${b.token}`}});assert.equal(result.status,200);assert.equal((await result.json()).length,2);
  console.log('PASS HTTP auth, origin allowlist, preflight and malformed request checks');
  team.logout(a.token);assert.throws(()=>team.authenticate(a.token),e=>e.status===401);team.disable('bob');assert.throws(()=>team.authenticate(b.token),e=>e.status===401);console.log('PASS logout and account disable revoke access');

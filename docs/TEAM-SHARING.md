@@ -26,7 +26,7 @@ npm start
 
 Dockerfile 同时包含团队校验器。容器部署时将受限持久卷挂载至 `/data`，显式设置 `CHAT3D_TEAM_DB=/data/team.sqlite` 和来源白名单；目录须可由容器的 node 用户写入。不要将生产数据库放入构建上下文。
 
-首次运行前由服务器管理员创建持久目录并限制服务用户访问。反向代理将指定 HTTPS 域名转发到 127.0.0.1:1420，允许至少 22 MB 请求体，设置至少 60 秒请求超时。公司域名、证书、服务器位置和运行账号须由部署方提供；仓库不含生产凭据。不要向公网开放无 TLS 的 Node 端口。已有模型代理配置保持独立，不必启用任何收费模型即可使用共享功能。
+首次运行前由服务器管理员创建持久目录并限制服务用户访问。反向代理将指定 HTTPS 域名转发到 127.0.0.1:1420，请求体上限设为 56 MiB（`client_max_body_size 56m`），设置至少 60 秒请求超时。公司域名、证书、服务器位置和运行账号须由部署方提供；仓库不含生产凭据。不要向公网开放无 TLS 的 Node 端口。已有模型代理配置保持独立，不必启用任何收费模型即可使用共享功能。
 
 网页本机测试可以使用 `http://127.0.0.1:1420`，并将浏览器开发来源（例如 `http://localhost:1421`、`http://127.0.0.1:1420`）加入 `CHAT3D_TEAM_ORIGINS`。桌面客户端保留既有 Tauri 权限，仅支持标准 HTTPS 443（本机测试 HTTP 80）；不要填写 1420、1435 等自定义端口。公司部署应使用 HTTPS 443 反向代理到 Node 端口，不要扩大客户端通配权限。Vite dev 不自动承载团队服务；浏览器与桌面客户端填写另行启动的 Node 服务根地址。未设置 `CHAT3D_TEAM_DB` 时共享 API 不启用。
 
@@ -47,7 +47,7 @@ Dockerfile 同时包含团队校验器。容器部署时将受限持久卷挂载
 # 团队 API（已有）
 location ^~ /api/team/ {
   proxy_pass http://127.0.0.1:1420;
-  client_max_body_size 22m;
+  client_max_body_size 56m;
   proxy_read_timeout 60s;
 }
 
@@ -96,7 +96,7 @@ node server/team/admin.mjs disable alice
 ## 运维与边界
 
 - 备份：停止服务后复制整个持久目录（含 SQLite、WAL、SHM）；恢复到受限目录，保持相同 Node 版本后启动。在线备份须使用 SQLite 的备份工具，不要仅复制正在写入的主文件。备份含密码哈希与有效会话，应按内部敏感数据保管。
-- 限制：单进程服务，单团队，没有实时协作、外部客户租户、发布撤回或在线用户管理。登录主路径是 **登录授权**：打开协同 SSO 页 `{SSO_UI}/#/sso?client_id=scenivo&redirect_uri=…&response_type=code&state=…`（**hash 路由** `/#/sso`，勿用 path `/sso`；不传 `scope`，避免协同自动授权跳转，等待用户点击同意授权或拒绝）；默认 SSO UI `http://pm.jiezi365.com:48001`，API `http://36.133.218.210:48080`。回调 `/team/sso/callback` 带回 code 后服务端 `/api/team/login/sso/code` 兑换。新账号为 member，已有账号保留角色；停用账号与平台 401 均拒绝。SSO 会话超过 5 分钟或发布时会用同一用户 token 复核 `get-permission-info`，平台 401 删除会话。本地团队密码登录默认隐藏，仅 `VITE_CHAT3D_TEAM_SHOW_PASSWORD_LOGIN=1` 调试展示；服务端可用 `CHAT3D_TEAM_PASSWORD_LOGIN=0` 关闭。单次发布22 MB HTTP上限，现有格式校验20 MB上限。容量规划与磁盘配额由部署方管理。
+- 限制：单进程服务，单团队，没有实时协作、外部客户租户、发布撤回或在线用户管理。登录主路径是 **登录授权**：打开协同 SSO 页 `{SSO_UI}/#/sso?client_id=scenivo&redirect_uri=…&response_type=code&state=…`（**hash 路由** `/#/sso`，勿用 path `/sso`；不传 `scope`，避免协同自动授权跳转，等待用户点击同意授权或拒绝）；默认 SSO UI `http://pm.jiezi365.com:48001`，API `http://36.133.218.210:48080`。回调 `/team/sso/callback` 带回 code 后服务端 `/api/team/login/sso/code` 兑换。新账号为 member，已有账号保留角色；停用账号与平台 401 均拒绝。SSO 会话超过 5 分钟或发布时会用同一用户 token 复核 `get-permission-info`，平台 401 删除会话。本地团队密码登录默认隐藏，仅 `VITE_CHAT3D_TEAM_SHOW_PASSWORD_LOGIN=1` 调试展示；服务端可用 `CHAT3D_TEAM_PASSWORD_LOGIN=0` 关闭。单次发布的 HTTP 请求体上限为 55 MiB，团队格式校验上限为 50 MiB。容量规划与磁盘配额由部署方管理。
 - 防护：服务端认证、数据库事务、不可变版本、逐原件写权限、跨源白名单；登录错误累计8次暂时限流15分钟。生产代理还应限制连接与登录速率。TLS在公司反向代理终止。
 - 测试仅创建临时账号与临时数据库，不触及真实个人数据、不调用真实收费模型。
 
