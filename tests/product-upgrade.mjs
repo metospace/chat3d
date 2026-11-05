@@ -33,13 +33,13 @@ try{
    assert.equal(w.useWorkspaceStore.getState().sessions,before.sessions);assert.equal(w.useWorkspaceStore.getState().activeId,before.activeId);
   }
  });
- await test('workspace backup retains the 50MiB UTF-8 total budget on import and export',async()=>{
-  const w=await server.ssrLoadModule('/src/workspace.ts'),oversized='界'.repeat(Math.ceil(50*1024*1024/3)),before=w.useWorkspaceStore.getState().sessions;
+ await test('workspace backup enforces the 200MiB UTF-8 total budget on import and export',async()=>{
+  const w=await server.ssrLoadModule('/src/workspace.ts'),oversized='界'.repeat(Math.ceil(w.MAX_WORKSPACE_BACKUP_BYTES/3)),before=w.useWorkspaceStore.getState().sessions;assert.equal(w.MAX_WORKSPACE_BACKUP_BYTES,200*1024*1024);
   const pack={format:'chat3d-workspace-backup',version:1,sessions:[{title:'超限',project:JSON.parse(serializeProject(createInitialDoc())),draft:null,messages:[],composerText:oversized}]};
-  assert.throws(()=>w.importWorkspaceBackup(JSON.stringify(pack)),/50MB/);assert.equal(w.useWorkspaceStore.getState().sessions,before);
+  assert.throws(()=>w.importWorkspaceBackup(JSON.stringify(pack)),/200 MiB/);assert.equal(w.useWorkspaceStore.getState().sessions,before);
   const target=before.find(s=>s.id!==w.useWorkspaceStore.getState().activeId);assert.ok(target);
   w.useWorkspaceStore.setState({sessions:before.map(s=>s===target?{...s,snapshot:{...s.snapshot,composerText:oversized}}:s)});
-  try{assert.throws(()=>w.exportWorkspaceBackup(),/50MB/);}finally{w.useWorkspaceStore.setState({sessions:before});}
+  try{assert.throws(()=>w.exportWorkspaceBackup(),/200 MiB/);}finally{w.useWorkspaceStore.setState({sessions:before});}
   await w.flushWorkspace();
  });
  if(process.env.EXPORT_QA==='1'){globalThis.FileReader=class{readAsArrayBuffer(b){b.arrayBuffer().then(r=>{this.result=r;this.onloadend?.()})}};const {exportGlb}=await server.ssrLoadModule('/src/scene/export.ts');fs.mkdirSync('/workspace/scratch/25da00f7a020/quality-upgrade',{recursive:true});fs.writeFileSync('/workspace/scratch/25da00f7a020/quality-upgrade/components.glb',Buffer.from(await exportGlb(all)));fs.writeFileSync('/workspace/scratch/25da00f7a020/quality-upgrade/components.chat3d.json',serializeProject(all));}

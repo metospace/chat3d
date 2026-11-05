@@ -1,5 +1,5 @@
 import {remapPoseRig} from './poseRig';
-import {MAX_PROJECT_BYTES,PROJECT_SIZE_LIMIT,serializeProject} from './project';
+import {MAX_PROJECT_BYTES,PROJECT_SIZE_LIMIT,TEAM_SCENE_SIZE_LIMIT,serializeProject} from './project';
 import {Vector3} from 'three';
 import {assemblyBounds} from './assemblyEditing';
 import {instantiateAsset,type ModelAssetVersion} from './modelAssets';
@@ -54,7 +54,7 @@ export function arraySelectionCommands(doc:SceneDocument,ids:string[],count:numb
  validateArray(count,axis,gap);const nodes=groups(doc,ids).flat();
  return [{op:'duplicateSelection',targetIds:nodes.map(n=>n.id),count,axis,gap}];
 }
-const MANUAL_ARRAY_OVERFLOW = `本次排列将使项目文件超过 ${PROJECT_SIZE_LIMIT}，请减少本次复制数量或简化模型；没有场景对象总数上限，团队发布请求仍限约 22 MB`;
+const MANUAL_ARRAY_OVERFLOW = `本次排列将使项目文件超过 ${PROJECT_SIZE_LIMIT}，请减少本次复制数量或简化模型；没有场景对象总数上限，团队场景发布上限为 ${TEAM_SCENE_SIZE_LIMIT}`;
 function validateArray(count:number,axis:'x'|'z',gap:number){if(!Number.isSafeInteger(count)||count<2||!['x','z'].includes(axis)||!Number.isFinite(gap)||gap<0)throw Error('排列总数量需为至少 2 的整数，净间距需为非负米数');}
 /** Manual aggregate path: preserve source metadata and internal references without per-import part caps. */
 export function duplicateSelectedNodes(doc:SceneDocument,ids:string[],count:number,axis:'x'|'z',gap:number):SceneNode[]{

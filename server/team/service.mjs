@@ -2,6 +2,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {randomBytes,randomUUID,scryptSync,timingSafeEqual,createHash} from 'node:crypto';
 import {mkdirSync} from 'node:fs';
 import {dirname} from 'node:path';
+const MAX_HTTP_BODY_BYTES=55*1024*1024;
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const fail=(status,message)=>{throw Object.assign(Error(message),{status});};
 export function openTeam(path,options={}){
@@ -128,7 +129,7 @@ export function teamMiddleware(team,validate,{origins=[]}={}){
    if(req.method==='OPTIONS'){res.setHeader('Access-Control-Allow-Methods','GET,POST,OPTIONS');res.setHeader('Access-Control-Allow-Headers','Content-Type,Authorization');res.writeHead(204).end();return;}
    let body;if(req.method==='POST'){
     if(!req.headers['content-type']?.startsWith('application/json'))fail(415,'需要JSON');
-    let size=0;const parts=[];for await(const chunk of req){size+=chunk.length;if(size>22*1024*1024)fail(413,'发布内容超过22MB');parts.push(chunk);}try{body=JSON.parse(Buffer.concat(parts).toString());}catch{fail(400,'JSON无效');}if(!body||typeof body!=='object')fail(400,'请求无效');
+    let size=0;const parts=[];for await(const chunk of req.iterator({destroyOnReturn:false})){size+=chunk.length;if(size>MAX_HTTP_BODY_BYTES){res.setHeader('Connection','close');fail(413,`HTTP 请求体超过 ${MAX_HTTP_BODY_BYTES/(1024*1024)} MiB 上限`);}parts.push(chunk);}try{body=JSON.parse(Buffer.concat(parts).toString());}catch{fail(400,'JSON无效');}if(!body||typeof body!=='object')fail(400,'请求无效');
    }
    if(req.method==='POST'&&url.pathname==='/api/team/login')return send(200,team.login(body.name,body.password));
    if(req.method==='POST'&&url.pathname==='/api/team/login/sso')return send(200,await team.loginSso(body.accessToken,body.tenantId));

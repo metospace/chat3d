@@ -1,11 +1,11 @@
 import {remapPoseRig,validatePoseRig,type PoseRig} from './poseRig';
-import {PROJECT_SIZE_LIMIT,serializeProject} from './project';
+import {PROJECT_SIZE_LIMIT,TEAM_SCENE_SIZE_LIMIT,serializeProject} from './project';
 import {duplicateSelectedNodes,layoutSelectedNodes,wholeObjectIds} from './manualComposition';
 import {editSelectedProperties,type SelectionChange} from './selectionProperties';
 import {persistFeatureBinding} from './structuredComponent';
 import {validateAnimation,remapAnimationForReplacement,type AnimationProgram} from './animation';
 
-const MANUAL_PLACEMENT_OVERFLOW = `本次手动放置将使项目文件超过 ${PROJECT_SIZE_LIMIT}，请简化模型或拆分场景；团队发布请求仍限约 22 MB`;
+const MANUAL_PLACEMENT_OVERFLOW = `本次手动放置将使项目文件超过 ${PROJECT_SIZE_LIMIT}，请简化模型或拆分场景；团队场景发布上限为 ${TEAM_SCENE_SIZE_LIMIT}`;
 // 命令系统（方案第 6 节）
 // - 每个命令有固定参数 schema、目标类型限制、影响集计算、成本估计与逆操作
 // - 一次 AI 批量修改 = 一条历史记录；命令串行提交，原子生效
