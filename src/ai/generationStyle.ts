@@ -1,11 +1,4 @@
-/** Visual intent is independent of detail budgets and renderer preferences. */
-export type GenerationStyle = 'realistic' | 'illustrative';
-export const normalizeGenerationStyle = (value: unknown): GenerationStyle => value === 'illustrative' ? 'illustrative' : 'realistic';
-export const GENERATION_STYLE_LABELS: Record<GenerationStyle, string> = {realistic: '写实', illustrative: '简洁'};
-
-export function generationStylePrompt(value: unknown): string {
-  const style = normalizeGenerationStyle(value);
+export function generationStylePrompt(): string {
   const common = '用户明确指定的风格、参考图、颜色和保留要求优先于本默认风格。仅影响本次新增或明确要求修改的内容，不能自动替换、重建或改色已有资产。风格不改变任务预算、编辑范围或人工确认，也不能代替真实截图验收。';
-  if (style === 'illustrative') return `# 本次生成风格：简洁\n采用克制的展示模型：主轮廓和比例准确，结构清晰，材质分区简明，省略未要求的微小表面纹理。人物可用简化连续轮廓，关节与手部仍须连接合理；不要任意夸大头部、倒角或颜色。${common}`;
   return `# 本次生成风格：写实\n目标为真实比例的工业/产品展示模型。先准确构建主轮廓、负空间、板厚、曲面过渡和装配接缝，再处理表面。连续外壳用profile/lathe/loft或适合的网格；沿水平折线路径延伸的型材/收边可用profileSweep，软管用sweepTube，避免将连续形体堆成积木；箱体和胶囊只用于合适的真实零件或临时占位。倒角按实际尺度与工艺设定，例如普通钣金边缘可从毫米级考虑，不能把所有边缘统一做成厚圆角。\n人物优先选用比例与用途匹配的已有网格，并检查人体轮廓、肩肘腕过渡、衣服体积和握持。目录标为精细不代表已经写实；没有合适资产时按真实人体连续轮廓构建，不能把椭球头加悬空胶囊四肢当作完成。不支持的面部/服装细节如实列为限制。\n材料按真实物质区分：裸金属使用接近金属的metalness，喷漆、塑料、橡胶、布料按非金属处理；涂层可用clearcoat，不用增加metalness冒充漆面。玻璃可用transmission、ior和thickness，不靠统一降低opacity模拟全部透明材料。用mat_paint、mat_brushed、mat_fabric等匹配材质；保留用户指定颜色，不统一染成蓝灰。\n需要表面质感时按需启用surfaces工具，检查UV后批量设置适度的法线/粗糙度纹理，尺度与对象相符。新产品可保持干净，不为写实强加污渍、划痕或无依据装饰。快速档保留主要形体和材料区别，精细档再检查近景接缝、边缘、纹理尺度及背面。三维软件效果、PBR参数和多边形数不能当作照片级还原保证。${common}`;
 }

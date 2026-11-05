@@ -1,7 +1,7 @@
 import {boundSceneRead} from './sceneReadBudget';
 import {agentSceneContext,scopeContext} from './agentContext';
 import {buildSystemPrompt,type ConversationTurn} from './provider';
-import {generationStylePrompt, type GenerationStyle} from './generationStyle';
+import {generationStylePrompt} from './generationStyle';
 import {generationQualityPrompt,type GenerationQuality} from './generationPolicy';
 import {DETAIL_CRITERIA} from '../domain/detailAcceptance';
 import type {SceneDocument} from '../domain/types';
@@ -10,7 +10,7 @@ import {instructionContract,referenceReconstructionContract} from './instruction
 
 interface PromptOptions {
  draft:SceneDocument; base:SceneDocument; selection:string[]; editScope?:EditScope;
- history?:ConversationTurn[]; workerTask?:boolean; generationQuality:GenerationQuality; generationStyle?:GenerationStyle;
+ history?:ConversationTurn[]; workerTask?:boolean; generationQuality:GenerationQuality;
  wantsAnimation:boolean; visualAvailable:boolean; parallelEnabled:boolean; preserveAssetShape:boolean;
  hasReferenceImages?:boolean;
 }
@@ -53,7 +53,7 @@ detail_quality_standard仅按需读一次。编辑回执与截图reviewReadiness
 ${wantsAnimation?'本任务需要动画：先plan_model，再configure_animation→preview_animation→下一轮review_model。动画不能用短程诊断代替用户原目标。':''}
 ${parallelEnabled?'可把确实独立的静态组件分成2–4项并行；启用layout后调用build_components_parallel，主任务仍验收合并结果。':''}
 ${preserveAssetShape?'本轮保留已有网格形状；禁止用新基本体覆盖，仅在真实范围内做姿态与被授权修改。':''}
-${generationStylePrompt(options.generationStyle)}
+${generationStylePrompt()}
 ${generationQualityPrompt(generationQuality,'agent')}
 # 场景上下文
 ${JSON.stringify(scene)}
@@ -87,7 +87,7 @@ capture_view 和 review_model 必须分在不同模型轮次，先收到图片�
   prompt+='\n复杂连续形体也可直接使用build_modeling_program编写参数化Three.js函数体（THREE已提供，return命名Group），支持曲线截面挤出、分层BufferGeometry、管线与PBR材质；循环共享几何，独立命名Mesh转换为可编辑部件。先plan_object_structure，再构建主剪影并取景核对，随后补细节。脚本网格方案用mesh，真实多件组合用assembly。无需用冗长JSON绕开几何表达限制；简单或已有局部编辑仍用edit_scene，保形任务不得整体重建。';
   prompt+='\n差异驱动修正：先全景定位当前1–2个差异目标，明确问题后先实际修改，再获取受影响目标近景复核；不要为全场机械遍历六项表。使用read_scene_contract保持布局、比例与材质一致。上下文中的生成检查图最多6张，其他原图按captureId归档可recall_evidence分页取回，原参考图始终保留；归档不等于验收，过期图不能恢复为新证据。';
   if(preserveAssetShape)prompt+='\n本轮保形约束：已有资产优先原部件刚体旋转和平移；连续网格仅在关节标定有依据时可用bend_existing_mesh保拓扑弯曲。禁止任意重建/替换/缩放/换材质及叠加手袖。先prepare_local_edit一次查齐目标、邻居和已有关节/抓握点；有有效标定优先pose_with_rig合并动作和接触检查，没有标定时仅在有明确关节依据后define_pose_rig保存，或pose_existing_parts。不要反复识别已保存的关节。连续网格有明确关节依据可受控弯曲；无依据则如实说明需先标定，不得承诺保形后用新网格替换。先确定一次修改计划，执行后检查接触和外形；局部修改不扩展验收到未改对象。';
-  prompt+='\n'+generationStylePrompt(options.generationStyle);
+  prompt+='\n'+generationStylePrompt();
   prompt+='\n'+generationQualityPrompt(generationQuality,options.workerTask?'data':'agent');
  return instructionContract({selectionOnly:!!options.editScope?.nodeIds,lockPlacement:options.editScope?.lockPlacement})+'\n\n'+(hasReferenceImages?referenceReconstructionContract()+'\n\n':'')+'# 建模执行规范\n'+prompt;
 }

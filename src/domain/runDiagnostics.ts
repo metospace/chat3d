@@ -1,6 +1,8 @@
 import {safeRequestFootprint} from '../ai/requestFootprint';
 import {safeExecutionMetadata,safeToolFailureCategory} from '../ai/executionTelemetry';
 import type {AgentActivity} from '../ai/modelingAgent';
+import type {EditorState} from '../store';
+import {sanitizeDiagnostic,type DiagnosticEntry} from '../ai/runTraceLog';
 // Only allowlisted operational metadata. Never export messages, raw errors, URLs,
 // tool arguments, scene content, images or credentials (even if an error echoed them).
 const finite=(v:unknown)=>typeof v==='number'&&Number.isFinite(v)&&v>=0?v:undefined;
@@ -36,4 +38,16 @@ export function runDiagnostics(status:string,activity:AgentActivity|null,error:s
    })),
   }:null,
  };
+}
+
+export type FullDiagnosticsSnapshot=Pick<EditorState,'aiStatus'|'lastRun'|'aiError'|'messages'|'doc'|'pendingBatch'|'pendingResult'|'past'|'future'|'aiConfig'>;
+
+// Explicitly omit connection configuration; content remains complete except for credentials.
+// Keep runDiagnostics above as the metadata-only benchmarking/export contract.
+export function fullRunDiagnostics(snapshot:FullDiagnosticsSnapshot,liveDiagnostics?:readonly DiagnosticEntry[]){
+ const {aiStatus,lastRun,aiError,messages,doc,pendingBatch,pendingResult,past,future}=snapshot;
+ return sanitizeDiagnostic({
+  format:'chat3d-full-diagnostics-v1',createdAt:new Date().toISOString(),
+  aiStatus,lastRun,aiError,messages,doc,pendingBatch,pendingResult,past,future,liveDiagnostics,
+ },snapshot.aiConfig?.apiKey);
 }

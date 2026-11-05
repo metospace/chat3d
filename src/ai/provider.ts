@@ -1,6 +1,6 @@
 import {validateCommandOperations,CommandContractError,commandContractGuide} from './commandContract';
 import {sanitizeSectionLoftParams} from '../domain/sectionLoft';
-import {generationStylePrompt, normalizeGenerationStyle, type GenerationStyle} from './generationStyle';
+import {generationStylePrompt} from './generationStyle';
 import {PHYSICAL_MATERIAL_KEYS, PHYSICAL_MATERIAL_LIMITS} from '../domain/physicalMaterial';
 import {generationQualityPrompt, normalizeGenerationQuality, type GenerationQuality} from './generationPolicy';
 import type {TaskBudget} from './taskBudget';
@@ -27,7 +27,6 @@ export interface ModelConfig {
   model: string; // 如 gpt-4o-mini
   reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh'; // undefined leaves the service default unchanged.
   agentMode?: 'pi' | 'single';
-  generationStyle?: GenerationStyle;
   generationQuality?: GenerationQuality; // 缺省为精细；独立于模型、代理模式和预算
   taskBudget?: Partial<TaskBudget>;
   parallelDrafts?: boolean; // 实验：最多两个隔离子草稿，默认关闭
@@ -67,7 +66,7 @@ const DEFAULT_TRANSFORM = {
   scale: [1, 1, 1] as [number, number, number],
 };
 
-export function buildSystemPrompt(ctx: SceneContext, generationQuality: GenerationQuality = 'fine', workflow: 'single' | 'geometry' = 'single', generationStyle: GenerationStyle = 'realistic'): string {
+export function buildSystemPrompt(ctx: SceneContext, generationQuality: GenerationQuality = 'fine', workflow: 'single' | 'geometry' = 'single'): string {
   const nodeLines = ctx.nodes.length
     ? ctx.nodes.map((n) => `  - id:${n.id} name:${n.name} (${n.desc}) pos:[${n.position.join(',')}] rotation:${JSON.stringify(n.rotationQuaternion)} scale:${JSON.stringify(n.scale)} material:${n.materialId} visible:${n.visible} parent:${n.parentId}`).join('\n')
     : '  （空场景，还没有任何对象）';
@@ -225,7 +224,7 @@ ${commandContractGuide()}
 ${nodeLines}
 ${sel}
 
-${workflow === 'single' ? generationQualityPrompt(generationQuality, 'single') + '\n' + generationStylePrompt(generationStyle) : ''}`;
+${workflow === 'single' ? generationQualityPrompt(generationQuality, 'single') + '\n' + generationStylePrompt() : ''}`;
   // The detailed furniture example is not the fast mode's minimum part count.
   const geometryPrompt=normalizeGenerationQuality(generationQuality) === 'fast'
     ? prompt.replace(/# 参考范例[\s\S]*?# 图片/, '# 图片')
@@ -235,7 +234,7 @@ ${workflow === 'single' ? generationQualityPrompt(generationQuality, 'single') +
 
 export interface ConversationTurn { role: 'user' | 'assistant'; text: string }
 
-export function buildMessages(text: string, ctx: SceneContext, images: string[] = [], history: ConversationTurn[] = [], generationQuality: GenerationQuality = 'fine', generationStyle: GenerationStyle = 'realistic'): ChatMessage[] {
+export function buildMessages(text: string, ctx: SceneContext, images: string[] = [], history: ConversationTurn[] = [], generationQuality: GenerationQuality = 'fine'): ChatMessage[] {
   const reminder = '\n\n（请只输出一个 JSON 命令批对象，不要 markdown 代码块或任何解释文字）';
   // 有图时 user 消息走多模态数组（OpenAI 兼容协议）；无图保持纯文本（兼容所有模型）
   const userContent: string | ContentPart[] = images.length
@@ -245,7 +244,7 @@ export function buildMessages(text: string, ctx: SceneContext, images: string[] 
       ]
     : text + reminder;
   return [
-    { role: 'system', content: buildSystemPrompt(ctx, generationQuality, 'single', generationStyle)+(images.length?'\n\n'+referenceReconstructionContract():'') },
+    { role: 'system', content: buildSystemPrompt(ctx, generationQuality)+(images.length?'\n\n'+referenceReconstructionContract():'') },
     ...history.slice(-8).map((turn): ChatMessage => ({ role: turn.role, content: turn.text.slice(0, 1500) })),
     { role: 'user', content: userContent },
   ];
@@ -533,22 +532,23 @@ export async function generateBatch(
   images: string[] = [],
   history: ConversationTurn[] = [],
   onProgress?: (event: GenerationProgress) => void,
+  onDiagnostic?: (kind:string,data:unknown) => void,
 ): Promise<GeneratedBatch> {
-  cfg = {...cfg, generationStyle: normalizeGenerationStyle(cfg.generationStyle), generationQuality: normalizeGenerationQuality(cfg.generationQuality), taskBudget: cfg.taskBudget ? {...cfg.taskBudget} : undefined};
+  cfg = {...cfg, generationQuality: normalizeGenerationQuality(cfg.generationQuality), taskBudget: cfg.taskBudget ? {...cfg.taskBudget} : undefined};
   const base = (cfg.baseURL || '').trim().replace(/\/+$/, '');
   if (!base) throw new Error('未配置 API 地址（baseURL）');
   if (!cfg.apiKey.trim()) throw new Error('未配置 API Key');
   if (!cfg.model.trim()) throw new Error('未配置模型名');
 
   const url = `${base}/chat/completions`;
-  const messages = buildMessages(text, ctx, images, history, cfg.generationQuality, cfg.generationStyle);
+  const messages = buildMessages(text, ctx, images, history, cfg.generationQuality);
 
   // 解析失败自动纠偏重试一次：把模型的错误回复顶回去，再强调格式
   let lastErr: Error | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     const report = (phase: GenerationProgress['phase'], characters = 0, streaming = cfg.stream !== false) => onProgress?.({phase, characters, streaming, attempt: attempt + 1, lastEventAt: Date.now()});
     report(attempt ? 'correcting' : 'waiting');
-    const content = await fetchChat(url, cfg, messages, signal, (characters, streaming) => report('receiving', characters, streaming));
+    const content = await fetchChat(url, cfg, messages, signal, (characters, streaming) => report('receiving', characters, streaming),onDiagnostic);
     report('validating', content.length);
     try {
       const parsed = parseModelResponse(content);
@@ -574,8 +574,10 @@ async function fetchChat(
   messages: ChatMessage[],
   signal?: AbortSignal,
   update: (characters: number, streaming: boolean) => void = () => {},
+  onDiagnostic?: (kind:string,data:unknown) => void,
 ): Promise<string> {
   const f = await getFetch();
+  onDiagnostic?.('model_request',{url,model:cfg.model,messages,reasoningEffort:cfg.reasoningEffort});
   const res = await f(url, {
     method: 'POST',
     headers: {
@@ -595,10 +597,11 @@ async function fetchChat(
 
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
-    throw new Error(describeHttpError(res.status, detail));
+    onDiagnostic?.('http_error',{status:res.status,body:detail});
+    throw new Error(describeHttpError(res.status, detail)+(detail?'\n服务响应：'+detail:''));
   }
 
-  return readChatResponse(res, signal, update);
+  return readChatResponse(res, signal, update,onDiagnostic);
 }
 
 // 测试连接：只验证「能联通 + key 有效 + 模型名被服务方接受」

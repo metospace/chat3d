@@ -1,0 +1,45 @@
+.adx-blender-result {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 0;
+  overflow-wrap: anywhere;
+}
+
+.adx-blender-render {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  object-position: left center;
+  border-radius: 8px;
+}
+
+.adx-blender-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.adx-blender-actions a {
+  text-decoration: underline;
+}
+
+.adx-blender-result p {
+  margin: 0;
+  font-size: .875em;
+}
+
+.adx-blender-auxiliary {
+  min-width: 0;
+}
+
+.adx-blender-auxiliary summary {
+  cursor: pointer;
+  font-size: .875em;
+}
+
+.adx-blender-auxiliary[open] > :not(summary) {
+  margin-top: 8px;
+}

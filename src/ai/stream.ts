@@ -8,10 +8,11 @@ export interface GenerationProgress {
 
 // Only expose transport facts. Never display reasoning or incomplete JSON as the final answer.
 export async function readChatResponse(res: Response, signal: AbortSignal | undefined,
-  update: (characters: number, streaming: boolean) => void): Promise<string> {
+  update: (characters: number, streaming: boolean) => void,onDiagnostic?: (kind:string,data:unknown)=>void): Promise<string> {
   if (!res.headers.get('content-type')?.includes('text/event-stream')) {
     update(0, false);
     const data = await res.json();
+    onDiagnostic?.('model_response',data);
     if (signal?.aborted) throw new DOMException('已停止', 'AbortError');
     if (data?.choices?.[0]?.finish_reason === 'length') throw new Error('模型输出达到长度上限，请拆分为较小的建模步骤');
     const content = data?.choices?.[0]?.message?.content;
@@ -32,6 +33,7 @@ export async function readChatResponse(res: Response, signal: AbortSignal | unde
     if (data === '[DONE]') { done = true; return; }
     let chunk;
     try { chunk = JSON.parse(data); } catch { throw new Error('服务返回了损坏的流式数据，请重试'); }
+    onDiagnostic?.('provider_event',chunk);
     if (chunk.error) throw new Error('模型服务在生成过程中返回错误，请检查服务日志或稍后重试');
     const choice = chunk.choices?.[0];
     if (choice?.finish_reason === 'length') throw new Error('模型输出达到长度上限，请分步创建主体和细节');

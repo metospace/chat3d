@@ -1,3 +1,4 @@
+import type {DiagnosticEntry} from './runTraceLog';
 import {commandSchema,validateCommandOperations,CommandContractError,commandContractGuide} from './commandContract';
 import {EvidenceContext} from './evidenceContext';
 import {buildRepairAgenda} from './repairAgenda';
@@ -88,6 +89,7 @@ export { AGENT_LIMITS } from './agentPolicy';
 export interface ActivityTiming { summary?:string;phase?:'planning'|'building'|'reviewing'|'repairing'; failureCategory?:ToolFailureCategory;toolName?:string;repeatedInput?:boolean;argumentsChars?:number;resultChars?:number;sceneRevision?:number;firstContentAt?:number;responseAt?:number;usageState?:UsageState;uncachedInputTokens?:number;cacheReadTokens?:number;cacheWriteTokens?:number; id:string; kind:'model'|'tool'; label:string; startedAt:number; firstDataAt?:number; endedAt?:number; failed?:boolean; detail?:string; inputTokens?:number; outputTokens?:number; requestFootprint?:RequestFootprint }
 export interface DesignBrief {flow:string[];layout:string;equipment:{name:string;count:number;features:string[]}[];checks:string[];composition?:CompositionPlan}
 export interface AgentActivity {
+  diagnostics?:DiagnosticEntry[];
   phase?:'planning'|'building'|'reviewing'|'repairing';
   lastModelEditAt?:number;
   executionMeta?:ExecutionMetadata;
@@ -122,6 +124,7 @@ interface AgentOptions {
   text: string; config: ModelConfig; document: SceneDocument; selection: string[];
   images?: string[]; history?: ConversationTurn[]; signal?: AbortSignal; editScope?:EditScope;
   onActivity?: (activity: AgentActivity) => void;
+  onDiagnostic?:(kind:string,data:unknown)=>void;
   onPreview?: (doc: SceneDocument) => void;
   onCheckpoint?: (result: AgentResult) => void;
   onControl?: (control:AgentControl|null) => void;
@@ -559,7 +562,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
       const results=await runBoundedJobs(args.items,async(job,index)=>{
         const row=rows[index];row.status='running';row.startedAt=Date.now();emit('子代理正在生成：'+job.name);
         try{
-          const child=await runModelingAgent({text:'只创建独立组件“'+job.name+'”。'+job.brief+'。共同要求：'+args.style+'。围绕原点建模，Y=0为地面，不创建整个场景、不创建额外地板。任务完毕提交数据草稿，最终视觉质量由主代理检查。',config:{...cfg,parallelDrafts:false},document:isolatedDocument(base),selection:[],workerTask:true,budgetState,images:options.images,signal:controller.signal,captureAvailable:()=>false,streamFn:options.workerStreamFn?.(job.name),onActivity:childActivity=>{
+          const child=await runModelingAgent({text:'只创建独立组件“'+job.name+'”。'+job.brief+'。共同要求：'+args.style+'。围绕原点建模，Y=0为地面，不创建整个场景、不创建额外地板。任务完毕提交数据草稿，最终视觉质量由主代理检查。',config:{...cfg,parallelDrafts:false},document:isolatedDocument(base),selection:[],workerTask:true,budgetState,images:options.images,signal:controller.signal,captureAvailable:()=>false,streamFn:options.workerStreamFn?.(job.name),onDiagnostic:(kind,data)=>options.onDiagnostic?.(kind,{component:job.name,value:data}),onActivity:childActivity=>{
             if(controller.signal.aborted||epoch!==parallelEpoch)return;
             activity.inputTokens+=Math.max(0,childActivity.inputTokens-row.inputTokens);activity.outputTokens+=Math.max(0,childActivity.outputTokens-row.outputTokens);
             row.inputTokens=childActivity.inputTokens;row.outputTokens=childActivity.outputTokens;row.rounds=childActivity.turn;row.toolCalls=childActivity.toolCalls;row.usageReported=childActivity.usageReported;
@@ -585,7 +588,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
   }));
   if(options.workerTask){const allowed=new Set(['read_scene_contract','patch_modeling_program','build_modeling_program','read_modeling_program','retry_structured_component','bind_object_features','repair_structured_features','build_structured_component','read_saved_asset','inspect_asset_instances','align_saved_instances','plan_object_structure','bind_object_features','list_saved_assets','add_saved_assets','edit_scene','read_scene','find_scene_parts','list_mesh_components','add_mesh_component','add_mesh_components','read_component_recipe','add_reference_component','set_surface_detail','set_surfaces_batch','prepare_surface_uv','detail_quality_standard','inspect_scene','check_requirements','submit_data_preview']);for(let i=tools.length-1;i>=0;i--)if(!allowed.has(tools[i].name))tools.splice(i,1);}
   const model:Model<'openai-completions'>={id:cfg.model,name:cfg.model,api:'openai-completions',provider:'chat3d-gateway',baseUrl:cfg.baseURL.trim().replace(/\/+$/,''),reasoning:false,input:['text','image'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:32768,maxTokens:AGENT_LIMITS.outputPerTurn,compat:{supportsDeveloperRole:false,supportsReasoningEffort:false,supportsStore:false,supportsUsageInStreaming:true,maxTokensField:'max_tokens'}};
-  const prompt=buildModelingPrompt({draft,base,selection:selectionForDoc(draft),editScope:options.editScope,history:options.history,workerTask:options.workerTask,generationQuality,generationStyle:cfg.generationStyle,wantsAnimation,visualAvailable:visualAvailable(),parallelEnabled,preserveAssetShape,hasReferenceImages:!!options.images?.length});
+  const prompt=buildModelingPrompt({draft,base,selection:selectionForDoc(draft),editScope:options.editScope,history:options.history,workerTask:options.workerTask,generationQuality,wantsAnimation,visualAvailable:visualAvailable(),parallelEnabled,preserveAssetShape,hasReferenceImages:!!options.images?.length});
   const underlyingFetch=options.streamFn?undefined:await getFetch();
   let transportFailure='';
   const f:typeof fetch|undefined=underlyingFetch?async(input,init)=>{try{return await underlyingFetch(input,init);}catch(error){
@@ -644,11 +647,12 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
         const body=(replacement===undefined?payload:replacement) as Record<string,unknown>;
         if(cfg.reasoningEffort)body.reasoning_effort=cfg.reasoningEffort;
         else delete body.reasoning_effort;
+        options.onDiagnostic?.('model_request',body);
         return body;
       }};
       if(options.streamFn)return options.streamFn(m,context,streamOptions);
       return stream(model,context,{...streamOptions,apiKey:cfg.apiKey.trim(),fetch:f,maxTokens:AGENT_LIMITS.outputPerTurn,maxRetries:0,timeoutMs:AGENT_LIMITS.idleTimeoutMs,
-        onProviderStreamEvent:data=>{if(providerHasUsage(data))providerUsageRounds.add(calls);firstData();emit(activity.title);},onResponse:()=>{stamp(`model-${calls}`,{responseAt:Date.now()});emit(`第 ${calls} 轮：服务已响应，正在接收`);} });
+        onProviderStreamEvent:data=>{options.onDiagnostic?.('provider_event',data);if(providerHasUsage(data))providerUsageRounds.add(calls);firstData();emit(activity.title);},onResponse:()=>{stamp(`model-${calls}`,{responseAt:Date.now()});emit(`第 ${calls} 轮：服务已响应，正在接收`);} });
     },
     beforeToolCall:async({toolCall})=>{check();stageReason=stageReason||budgetExceeded();if(stageReason)return {block:true,reason:stageReason,terminate:true};if(!visualAvailable()&&['audit_model_detail','audit_model_details_batch'].includes(toolCall.name))return {block:true,reason:'当前无可用画面证据，系统已自动标记细节未验收；无需逐项填写unknown。继续完成数据编辑与必要数量检查，然后submit_data_preview。'};if(!visualAvailable()&&(['capture_view','capture_multiview','capture_quality_review','capture_detail_diagnostic','capture_component_intrinsic','preview_animation','review_model'].includes(toolCall.name)||(toolCall.name==='submit_preview'&&reviewRequirement(base,draft).kind!=='none')))return {block:true,reason:unavailableStage(),terminate:true};if(runner.hasQueuedMessages())return {block:true,reason:'用户补充了新指令，请先读取并按最新要求重新决定操作',terminate:true};if(questionOnly&&['patch_modeling_program','build_modeling_program','retry_structured_component','bind_object_features','repair_structured_features','build_structured_component','align_saved_instances','add_saved_assets','retry_scene_edit','define_pose_rig','pose_with_rig','bend_existing_mesh','pose_existing_parts','pose_bimanual_interaction','pose_arm_interaction','create_hand_pose','edit_scene','configure_animation','configure_process_route','add_reference_component','add_mesh_component','add_mesh_components','connect_scene_parts','remove_connection','set_surface_detail','set_surfaces_batch','build_components_parallel','prepare_surface_uv','move_components','submit_data_preview','submit_preview'].includes(toolCall.name))return {block:true,reason:'用户当前选择只提问，请直接回答，不要修改或提交场景',terminate:true};if(seenCalls.has(toolCall.id))return {block:true,reason:'重复的工具调用ID已拒绝，避免重复修改'};seenCalls.add(toolCall.id);if(submitted)return {block:true,reason:'本轮已提交预览',terminate:true};if(pauseReason)return {block:true,reason:pauseReason,terminate:true};activity.toolCalls++;return undefined;},
     finishTurn:async({message})=>{
@@ -679,6 +683,9 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
   const abort=()=>{parallelController?.abort();runner.abort();};signal?.addEventListener('abort',abort,{once:true});
   const unsubscribe=runner.subscribe(event=>{
     if(signal?.aborted)return;
+    if(event.type==='message_end')options.onDiagnostic?.('message',event.message);
+    if(event.type==='tool_execution_start')options.onDiagnostic?.('tool_start',{id:event.toolCallId,name:event.toolName,arguments:event.args});
+    if(event.type==='tool_execution_end')options.onDiagnostic?.('tool_end',{id:event.toolCallId,name:event.toolName,error:event.isError,result:event.result});
     if(event.type==='message_end'&&event.message.role==='user'){const guide=steeringMessages.get(event.message.timestamp);if(guide){respondingToSteering=true;questionOnly=guide.mode==='question';localFocus=undefined;if(preserveAssetShapeIntent(guide.text,options.history))preserveAssetShape=true;userTexts.push(guide.text);if(!questionOnly){executionTexts.push(guide.text);requirementsNeedRefresh=requirements.length>0;}steeringMessages.delete(event.message.timestamp);options.onSteeringApplied?.(guide.id);emit('已接收补充要求，正在按最新指令调整',true);}}
     // The runner validates before execute/beforeToolCall. Cache schema failures here too.
     // Only attach recovery to actual schema rejection, never blocked/truncated calls.

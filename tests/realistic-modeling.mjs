@@ -5,9 +5,7 @@ const server=await createServer({server:{middlewareMode:true,hmr:false},appType:
 let passed=0;
 const test=async(name,fn)=>{await fn();console.log('PASS '+name);passed++;};
 try{
- const style=await server.ssrLoadModule('/src/ai/generationStyle.ts');
- const {buildMessages,parseModelResponse}=await server.ssrLoadModule('/src/ai/provider.ts');
- const {buildModelingPrompt}=await server.ssrLoadModule('/src/ai/agentPrompt.ts');
+ const {parseModelResponse}=await server.ssrLoadModule('/src/ai/provider.ts');
  const {saveModelConfig,loadModelConfig}=await server.ssrLoadModule('/src/ai/modelConfigStorage.ts');
  const {createInitialDoc}=await server.ssrLoadModule('/src/store.ts');
  const {validateMaterial,validateDocument}=await server.ssrLoadModule('/src/domain/types.ts');
@@ -23,24 +21,9 @@ try{
  const config={baseURL:'https://example.invalid/v1',apiKey:'private-test-key',model:'test',generationQuality:'fast',generationStyle:'illustrative'};
  const base=createInitialDoc();
 
- await test('style defaults to realism and reaches single, agent and isolated prompts independently of quality',()=>{
-  for(const value of [undefined,null,'bad',{},'realistic'])assert.equal(style.normalizeGenerationStyle(value),'realistic');
-  for(const quality of ['fast','fine'])for(const generationStyle of ['realistic','illustrative']){
-   const label=generationStyle==='realistic'?'写实':'简洁';
-   const messages=buildMessages('用户指定风格优先',{nodes:[],selection:[]},[],[],quality,generationStyle);
-   assert.match(messages[0].content,new RegExp('本次生成风格：'+label));
-   for(const workerTask of [false,true]){
-    const prompt=buildModelingPrompt({draft:base,base,selection:[],generationQuality:quality,generationStyle,workerTask,wantsAnimation:false,visualAvailable:true,parallelEnabled:false,preserveAssetShape:false});
-    assert.match(prompt,new RegExp('本次生成风格：'+label));
-    assert.ok(!prompt.includes('人物用胶囊四肢、椭球头部'));
-    assert.match(prompt,/不能自动替换、重建或改色已有资产/);
-   }
-  }
- });
- await test('style persistence preserves detail preference and never persists an unapproved API key',()=>{
+ await test('legacy style is discarded without losing quality or leaking an unapproved API key',()=>{
   const values=new Map();globalThis.localStorage={getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,String(v)),removeItem:k=>values.delete(k)};
-  saveModelConfig(config);const loaded=loadModelConfig();assert.equal(loaded.generationStyle,'illustrative');assert.equal(loaded.generationQuality,'fast');assert.equal(loaded.apiKey,'');assert.ok(!JSON.stringify([...values]).includes(config.apiKey));
-  saveModelConfig({...config,generationStyle:undefined});assert.equal(loadModelConfig().generationStyle,'realistic');
+  saveModelConfig(config);const loaded=loadModelConfig();assert.equal(Object.hasOwn(loaded,'generationStyle'),false);assert.equal(loaded.generationQuality,'fast');assert.equal(loaded.apiKey,'');assert.ok(!JSON.stringify([...values]).includes(config.apiKey));
   assert.equal(normalizeRenderPreset('invalid'),'studio');saveRenderPreset('classic');assert.equal(loadRenderPreset(),'classic');
   globalThis.localStorage={getItem(){throw Error('blocked')},setItem(){throw Error('blocked')}};assert.equal(loadRenderPreset(),'classic');assert.doesNotThrow(()=>saveRenderPreset('studio'));assert.equal(loadRenderPreset(),'studio');delete globalThis.localStorage;
  });

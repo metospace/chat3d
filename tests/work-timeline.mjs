@@ -72,7 +72,7 @@ try{
   ['等待超过 3 分钟，已停止本次接收',/恢复输入后手动重试/],
   ['PROXY_UPSTREAM_DENIED https://private.example',/检查模型配置/],
   ['HTTP 503 Bad gateway',/模型服务暂时不可用/],
-  ['unknown command edit_scene node-abc123 materialId {"operations":[]}',/你可以继续描述要修改的地方/]
+  ['unknown command edit_scene node-abc123 materialId {"operations":[]}',/失败原因/]
  ])for(const previewRetained of [false,true]){
   const message=generationFailureMessage(raw,{previewRetained});assert.match(message,expected);assert.match(message,previewRetained?/已保留之前的预览/:/场景未修改/);
   for(const hidden of ['HTTP','401','503','JSON','edit_scene','node-abc123','materialId','operations','secret.example','private.example','PROXY_UPSTREAM_DENIED'])assert.equal(message.includes(hidden),false,hidden);

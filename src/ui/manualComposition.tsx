@@ -5,7 +5,7 @@ import {create} from 'zustand';
 import {activeConversationStore} from '../conversationStores';
 import {useEditorStore,type EditorStore} from '../store';
 import {useSelectionTool} from './selectionTool';
-import {groundAssetCommand,wholeObjectIds,manualEditLocked,groundSelectionCommands,alignSelectionCommands,arraySelectionCommands} from '../domain/manualComposition';
+import {groundAssetCommand,manualEditLocked,groundSelectionCommands,alignSelectionCommands,arraySelectionCommands} from '../domain/manualComposition';
 import {selectionPropertyCommands} from '../domain/selectionProperties';
 import type {ModelAssetVersion} from '../domain/modelAssets';
 import type {SceneDocument} from '../domain/types';
@@ -37,13 +37,13 @@ export function useManualComposition({viewportRef,doc,selection,aiStatus,viewpor
   const origin=activeConversationStore(),snapshot=origin.getState().doc;
   if(manualEditLocked(aiStatus)||viewportStatus!=='ready'||box||playing){vp.setComposition(null);if(placement)cancelAssetPlacement();return;}
   if(placement&&!current(placement)){cancelAssetPlacement();vp.setComposition(null);return;}
-  const ids=wholeObjectIds(doc,selection),set=new Set(ids),command=placement?groundAssetCommand(placement.asset,[0,0,0]):null;
+  const ids=selection,set=new Set(ids),command=placement?groundAssetCommand(placement.asset,[0,0,0]):null;
   // Editing animation poses would persist a transform from a different baseline.
   vp.resetAnimation();
   vp.setComposition({mode,nodes:doc.nodes.filter(n=>set.has(n.id)),placement:command&&command.op==='importManualComponent'?command.nodes:null,snapStep:snap?.25:0,
    onCancel:cancelAssetPlacement,
    onPlace:point=>{if(!placement||useCompositionTool.getState().placement!==placement||!current(placement)){cancelAssetPlacement();return;}try{applyAndSelect(origin,[groundAssetCommand(placement.asset,point)],`放置 ${placement.asset.name} v${placement.asset.version}`,true);cancelAssetPlacement();}catch(e){useCompositionTool.setState({notice:e instanceof Error?e.message:'放置失败'});}},
-   onTransform:change=>{if(activeConversationStore()!==origin||origin.getState().doc!==snapshot||manualEditLocked(origin.getState().aiStatus))return;try{applyAndSelect(origin,selectionPropertyCommands(snapshot,ids,change),change.kind==='rotation'?'鼠标旋转整件对象':change.kind==='size'?'鼠标缩放整件对象':'鼠标移动整件对象');}catch(e){useCompositionTool.setState({notice:e instanceof Error?e.message:'变换失败'});}}
+   onTransform:change=>{if(activeConversationStore()!==origin||origin.getState().doc!==snapshot||manualEditLocked(origin.getState().aiStatus))return;try{applyAndSelect(origin,selectionPropertyCommands(snapshot,ids,change),change.kind==='rotation'?'鼠标旋转选中对象':change.kind==='size'?'鼠标缩放选中对象':'鼠标移动选中对象');}catch(e){useCompositionTool.setState({notice:e instanceof Error?e.message:'变换失败'});}}
   });return()=>vp.setComposition(null);
  },[doc,selection,aiStatus,viewportStatus,activeSession,attempt,mode,snap,placement,box,playing,viewportRef]);
 }
