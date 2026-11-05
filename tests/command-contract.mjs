@@ -56,7 +56,7 @@ const fakeTransport=steps=>{
 };
 
 try{
- const {commandContracts,commandNames,commandSchema,validateCommandOperations}=await server.ssrLoadModule('/src/ai/commandContract.ts');
+ const {commandContracts,commandNames,commandSchema,commandEnvelopeSchema,validateCommandOperations}=await server.ssrLoadModule('/src/ai/commandContract.ts');
  const {parseModelResponse}=await server.ssrLoadModule('/src/ai/provider.ts');
  const {runModelingAgent}=await server.ssrLoadModule('/src/ai/modelingAgent.ts');
  const {createInitialDoc,useEditorStore:store}=await server.ssrLoadModule('/src/store.ts');
@@ -223,6 +223,27 @@ try{
   const result=applyBatch(createInitialDoc(),{operations:[{...clone(samples.createPrimitive),name:'selected'},{...clone(samples.createPrimitive),tempId:'other',name:'untouched',transform:{...clone(transform),position:[5,0,0]}}]});
   assert.deepEqual(result.errors,[]);return result.doc;
  };
+
+ await test('strict tool schemas omit uniqueItems and animation targets dedupe before apply',()=>{
+  for(const schema of [commandSchema,commandContracts,commandEnvelopeSchema])assert.ok(!JSON.stringify(schema).includes('"uniqueItems"'));
+  const document=baseDocument(),ids=document.nodes.map(node=>node.id),operation=clone(samples.setAnimation);
+  operation.animation.tracks[0].targetIds=[ids[0],ids[1],ids[0],ids[1]];
+  const before=clone(operation);
+  assert.deepEqual(validateCommandOperations([operation]),[]);
+  const parsed=parse([operation]);
+  assert.deepEqual(parsed.operations[0].animation.tracks[0].targetIds,ids);
+  for(const operations of [parsed.operations,[operation]]){
+   const result=applyBatch(document,{operations});
+   assert.deepEqual(result.errors,[]);
+   assert.deepEqual(result.doc.animation.tracks[0].targetIds,ids);
+  }
+  assert.deepEqual(operation,before,'normalization and apply must not mutate input');
+  const created=clone(samples.createPrimitive),remapped=clone(samples.setAnimation);
+  remapped.animation.tracks[0].targetIds=['body','body'];
+  const result=applyBatch(createInitialDoc(),{operations:[created,remapped]});
+  assert.deepEqual(result.errors,[]);
+  assert.deepEqual(result.doc.animation.tracks[0].targetIds,[result.doc.nodes[0].id]);
+ });
 
  await test('material references use the actual document and never fall back to a stock material',()=>{
   const document=baseDocument(),id=document.nodes[0].id;
