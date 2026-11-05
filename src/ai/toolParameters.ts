@@ -31,3 +31,13 @@ export function sanitizeToolParametersForProvider<T>(parameters:T):T {
   }
   return result as T;
 }
+
+/** Tool `.parameters` must be a JSON Schema object root for providers like tokenrouter. */
+export function ensureToolParametersObject<T>(parameters:T):T & {type:'object'} {
+  const sanitized=sanitizeToolParametersForProvider(parameters) as Record<string,unknown>;
+  if(sanitized===null||typeof sanitized!=='object'||Array.isArray(sanitized)){
+    return {type:'object',properties:{}} as unknown as T & {type:'object'};
+  }
+  if(sanitized.type==='object')return sanitized as T & {type:'object'};
+  return {...sanitized,type:'object'} as T & {type:'object'};
+}

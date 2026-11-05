@@ -66,6 +66,14 @@ try{
   const hex={type:'string',pattern:'^#[0-9a-fA-F]{6}$'};
   assert.deepEqual(sanitizeToolParametersForProvider(hex),hex);
  });
+ await test('provider tool parameters force object roots for bare unions',async()=>{
+  const {ensureToolParametersObject}=await server.ssrLoadModule('/src/ai/toolParameters.ts');
+  const root=ensureToolParametersObject({anyOf:[{type:'object',properties:{mode:{type:'string',const:'list'}},additionalProperties:false},{type:'object',required:['mode','captureId'],properties:{mode:{type:'string',const:'images'},captureId:{type:'string'}},additionalProperties:false}]});
+  assert.equal(root.type,'object');
+  assert.equal(root.anyOf.length,2);
+  assert.deepEqual(ensureToolParametersObject({type:'object',properties:{}}),{type:'object',properties:{}});
+  assert.deepEqual(ensureToolParametersObject(null),{type:'object',properties:{}});
+ });
  await test('live optional tool registry exposes only provider-compatible schemas',async()=>{
   const {OPTIONAL_TOOL_GROUP_NAMES}=await server.ssrLoadModule('/src/ai/toolExposure.ts');
   const f=fake([[{name:'enable_modeling_tools',args:{groups:OPTIONAL_TOOL_GROUP_NAMES}}],[{name:'submit_data_preview',args:{summary:'工具注册表数据检查完成，未视觉验收'}}]]);
@@ -84,7 +92,13 @@ try{
     walk(child,location);
    }
   };
-  for(const [name,tool] of tools)walk(tool.parameters,name);
+  for(const [name,tool] of tools){
+   assert.equal(tool.parameters?.type,'object',name+'.parameters.type');
+   walk(tool.parameters,name);
+  }
+  assert.ok(tools.has('recall_evidence'));
+  assert.equal(tools.get('recall_evidence').parameters.type,'object');
+  assert.ok(Array.isArray(tools.get('recall_evidence').parameters.anyOf));
   assert.ok(tools.has('build_modeling_program'));
   const position=tools.get('build_modeling_program').parameters.properties.position;
   assert.equal(position.items,false);
