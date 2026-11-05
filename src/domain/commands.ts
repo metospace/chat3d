@@ -442,7 +442,7 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
     case 'setConnection': {const n=findNodeInList(nodes,op.targetId)!;if(op.connection)n.connection=structuredClone(op.connection);else delete n.connection;break;}
     case 'setAnimation': {
       animation=structuredClone(op.animation);
-      if(animation&&Array.isArray(animation.tracks))for(const track of animation.tracks){if(track&&Array.isArray(track.targetIds))track.targetIds=track.targetIds.map(id=>tempIdMap.get(id)??id);if(track?.sourceId)track.sourceId=tempIdMap.get(track.sourceId)??track.sourceId;}
+      if(animation&&Array.isArray(animation.tracks))for(const track of animation.tracks){if(track&&Array.isArray(track.targetIds))track.targetIds=[...new Set(track.targetIds.map(id=>tempIdMap.get(id)??id))];if(track?.sourceId)track.sourceId=tempIdMap.get(track.sourceId)??track.sourceId;}
       const errors=validateAnimation(animation,nodes);if(!animation||errors.length)return {doc,error:errors[0]??new Error('动画配置不能为空')};
       break;
     }

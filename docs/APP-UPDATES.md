@@ -10,6 +10,11 @@
 
 日志唯一数据源是 `src/domain/updateHistory.ts`。每次更新必须新增记录并保留旧记录；正式发版填写实际版本及带时区的时间，同时更新上述版本文件。未发布源码改动单独标为“开发中”，不能写成已发布的新版本。发布时将对应开发内容整理进版本记录，不得只改版本号而遗漏更新内容。服务端最新版本的 `notes` 仍用于更新提示，不覆盖历史日志。
 
+### 开发中：Codex / CliRelay 动画工具兼容性
+
+动画命令的 JSON Schema 不再使用严格工具校验不支持的 `uniqueItems`，保留目标数量上下限。模型响应归一化及命令应用阶段均会去重每条轨道的 `targetIds`；应用阶段在临时 ID 映射后去重，并继续执行动画领域校验。本项未发布，不变更版本号。
+
+
 ## 浏览器
 
 生产构建把版本写入 `dist/version.json`。Node 与 Cloudflare Worker 都用它响应 `GET /api/version`，并设置 `Cache-Control: no-store`。反向代理要把 `/api/version` 转到 Node，不能落到静态首页。
