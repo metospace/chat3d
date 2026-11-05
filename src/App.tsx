@@ -27,7 +27,7 @@ import {TeamStudioPage} from './ui/TeamStudioPage';
 import {LibraryProjectSaveDialog} from './ui/LibraryMetadataDialog';
 import {AssetLibrary} from './ui/AssetLibrary';
 import {probeServerRenderer} from './scene/serverCapture';
-import {importGlb} from './scene/importGlb';
+import {assertGlbSize,importGlb} from './scene/importGlb';
 import {WorkspaceTools} from './ui/WorkspaceTools';
 // React owns editor controls; the Three.js viewport remains document-driven.
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -48,7 +48,7 @@ import {TaskCenter,StudioSettings} from './ui/StudioPages';
 import {downloadJson} from './util/downloadJson';
 import {exportFile} from './util/exportFile';
 import {initializeWorkspace,useWorkspaceStore,createSession,anySessionRunning,exportWorkspaceBackup} from './workspace';
-import { MAX_PROJECT_BYTES, parseProject, serializeProject } from './domain/project';
+import { MAX_PROJECT_BYTES, PROJECT_SIZE_ERROR, parseProject, serializeProject } from './domain/project';
 import {activityProgress} from './domain/customerProgress';
 
 function CanvasDraftStatus(){
@@ -125,7 +125,7 @@ export default function App() {
   };
   const openProject = async (file: File) => {
     try {
-      if (file.size > MAX_PROJECT_BYTES) throw new Error('项目文件超过 20 MB');
+      if (file.size > MAX_PROJECT_BYTES) throw new Error(PROJECT_SIZE_ERROR);
       const doc = parseProject(await file.text());
       if (!createSession(doc)) throw new Error('请先完成当前操作，或检查会话存储状态');
       setProjectNotice(`已导入新会话，共 ${doc.nodes.length} 个对象`);
@@ -225,7 +225,7 @@ export default function App() {
           <Button className="workbench-save" type="primary" aria-label={librarySaving?'正在保存…':active?.moduleKind==='asset'?'保存资产':'保存场景'} disabled={locked||librarySaving||!workspace.ready} onClick={()=>{if(active?.moduleKind==='asset'&&!useEditorStore.getState().doc.nodes.length){setProjectNotice('还没有可保存的模型。请先创建或导入模型，再保存到资产库。');setAssistantOpen(true);return;}setShowLibrarySave(true);}}>{librarySaving?'保存中…':active?.moduleKind==='asset'?'保存资产':'保存场景'}</Button>
           </div>
           <input ref={fileRef} type="file" accept=".json,.chat3d.json" className="hidden" onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void openProject(file);}}/>
-          <input ref={modelFileRef} type="file" accept=".glb" className="hidden" onChange={async e=>{const file=e.target.files?.[0];e.target.value='';if(!file)return;try{if(file.size>20*1024*1024)throw Error('GLB超过20MB');setProjectNotice('正在校验并导入网格模型…');const result=await importGlb(await file.arrayBuffer(),file.name);if(!createSession(result.doc,{moduleKind:'asset',title:file.name.replace(/\.glb$/i,'')||'导入模型',assetCategory:'其他'}))throw Error('请结束当前生成后再导入');setModulePage('workbench');useCompositionTool.setState({mode:'orbit'});setProjectNotice(`已导入 ${result.doc.nodes.length} 个网格部件到新会话。${result.warnings.join(' ')}`);}catch(error){setProjectNotice(`网格导入失败：${error instanceof Error?error.message:String(error)}`);}}}/>
+          <input ref={modelFileRef} type="file" accept=".glb" className="hidden" onChange={async e=>{const file=e.target.files?.[0];e.target.value='';if(!file)return;try{assertGlbSize(file.size);setProjectNotice('正在校验并导入网格模型…');const result=await importGlb(await file.arrayBuffer(),file.name);if(!createSession(result.doc,{moduleKind:'asset',title:file.name.replace(/\.glb$/i,'')||'导入模型',assetCategory:'其他'}))throw Error('请结束当前生成后再导入');setModulePage('workbench');useCompositionTool.setState({mode:'orbit'});setProjectNotice(`已导入 ${result.doc.nodes.length} 个网格部件到新会话。${result.warnings.join(' ')}`);}catch(error){setProjectNotice(`网格导入失败：${error instanceof Error?error.message:String(error)}`);}}}/>
         </header>
         <nav className="canvas-tool-rail canvas-surface" aria-label="画布工具"><Button type="text" aria-pressed={shelfOpen} onClick={()=>shelfOpen?setShelfOpen(false):openEditorPanel('asset')} icon={<CubeIcon/>}><span>资产</span></Button><Button type="text" aria-pressed={structureOpen} onClick={()=>structureOpen?setStructureOpen(false):openEditorPanel('structure')} icon={<LayersIcon/>}><span>结构</span></Button><Button type="text" aria-pressed={inspectorOpen} disabled={!selection.length} onClick={()=>inspectorOpen?setInspectorOpen(false):openInspector()} icon={<MixerHorizontalIcon/>}><span>属性</span></Button></nav>
         {shelfOpen&&<CanvasAssetShelf onClose={()=>setShelfOpen(false)} onLibrary={()=>setShowAssets(true)}/>}
@@ -239,9 +239,9 @@ export default function App() {
           <ToolbarAction pressed={selectionBox} label={selectionBox?'退出框选':'框选对象'} help="默认按可见表面框选；Shift / Ctrl / ⌘ 追加，Esc 取消。本次选择可在旁边开启穿透" disabled={!viewportReady||locked} disabledReason={!viewportReady?'三维视图不可用，可在结构列表中多选':'请先结束生成或处理预览'} onPress={()=>useSelectionTool.setState({box:!selectionBox})}><span aria-hidden="true">▧</span></ToolbarAction>
           {selectionBox&&<button className="box-selection-scope" aria-label={wholeModelBox?'框选范围：完整模型':'框选范围：零件'} title={wholeModelBox?'命中零件后扩展到完整模型，包含隐藏和框外成员':'仅选择框内命中的零件，不扩展同模型成员'} onClick={()=>useSelectionTool.setState({wholeModel:!wholeModelBox})}>{wholeModelBox?'框选模型':'框选零件'}</button>}
           {selectionBox&&<button className="box-selection-scope box-selection-through" aria-label="穿透框选" aria-pressed={throughBox} title={throughBox?'穿透已开启：包括被前方模型遮挡的几何；点击恢复可见表面框选':'穿透已关闭：只选最近几何表面（透明面按实体选取）；孔洞中的后方零件仍可能可见'} onClick={()=>useSelectionTool.setState({through:!throughBox})}>{throughBox?'穿透：开':'穿透：关'}</button>}
-          <ToolbarAction label="移动选中对象" pressed={compositionMode==='move'} help="拖动蓝色手柄移动对象；表面及空白处拖动仍浏览场景" disabled={!selection.length||locked} disabledReason={!selection.length?'请先选中一个或多个对象':previewing?'请先应用或放弃当前预览':'任务执行中，暂不能修改位置'} onPress={()=>{useSelectionTool.setState({box:false});useCompositionTool.setState({mode:'move'});setPropertyTab('position');openInspector()}}><MoveIcon/><span>移动</span></ToolbarAction>
-          <ToolbarAction label="旋转选中对象" pressed={compositionMode==='rotate'} help="拖动蓝色手柄旋转对象，或在属性中输入精确角度" disabled={!selection.length||locked} disabledReason={!selection.length?'请先选中一个或多个对象':previewing?'请先应用或放弃当前预览':'任务执行中，暂不能旋转对象'} onPress={()=>{useSelectionTool.setState({box:false});useCompositionTool.setState({mode:'rotate'});setPropertyTab('rotation');openInspector()}}><RotateCounterClockwiseIcon/><span>旋转</span></ToolbarAction>
-          <ToolbarAction label="缩放选中对象" pressed={compositionMode==='scale'} help="拖动蓝色手柄等比缩放，或在属性中输入倍数" disabled={!selection.length||locked} disabledReason={!selection.length?'请先选中一个或多个对象':previewing?'请先应用或放弃当前预览':'任务执行中，暂不能缩放对象'} onPress={()=>{useSelectionTool.setState({box:false});useCompositionTool.setState({mode:'scale'});setPropertyTab('size');openInspector()}}><SizeIcon/><span>缩放</span></ToolbarAction>
+          <ToolbarAction label="移动选中对象" pressed={compositionMode==='move'} help="拖动选中对象或蓝色手柄移动；其他区域拖动浏览" disabled={!selection.length||locked} disabledReason={!selection.length?'请先选中一个或多个对象':previewing?'请先应用或放弃当前预览':'任务执行中，暂不能修改位置'} onPress={()=>{useSelectionTool.setState({box:false});useCompositionTool.setState({mode:'move'});setPropertyTab('position');openInspector()}}><MoveIcon/><span>移动</span></ToolbarAction>
+          <ToolbarAction label="旋转选中对象" pressed={compositionMode==='rotate'} help="拖动选中对象或蓝色手柄旋转，或在属性中输入角度" disabled={!selection.length||locked} disabledReason={!selection.length?'请先选中一个或多个对象':previewing?'请先应用或放弃当前预览':'任务执行中，暂不能旋转对象'} onPress={()=>{useSelectionTool.setState({box:false});useCompositionTool.setState({mode:'rotate'});setPropertyTab('rotation');openInspector()}}><RotateCounterClockwiseIcon/><span>旋转</span></ToolbarAction>
+          <ToolbarAction label="缩放选中对象" pressed={compositionMode==='scale'} help="拖动选中对象或蓝色手柄等比缩放，或在属性中输入倍数" disabled={!selection.length||locked} disabledReason={!selection.length?'请先选中一个或多个对象':previewing?'请先应用或放弃当前预览':'任务执行中，暂不能缩放对象'} onPress={()=>{useSelectionTool.setState({box:false});useCompositionTool.setState({mode:'scale'});setPropertyTab('size');openInspector()}}><SizeIcon/><span>缩放</span></ToolbarAction>
           <ToolbarAction label="适应场景" help="完整显示当前场景" disabled={!nodeCount||!viewportReady} onPress={()=>focusSceneObjects(useEditorStore.getState().doc.nodes.map(n=>n.id))}><span>适应</span></ToolbarAction>
           <ToolbarAction label="聚焦选中对象" help="把镜头移动到选中内容附近，方便查看" disabled={!selection.length||!viewportReady} disabledReason={!selection.length?'请先选中一个或多个对象':'当前三维视图不可用'} onPress={()=>focusSceneObjects(selection)}><EnterFullScreenIcon/></ToolbarAction><span/>
           <DeleteSelectionAction active={workspace.ready&&modulePage==='workbench'} onNotice={setProjectNotice}/>

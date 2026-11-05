@@ -472,7 +472,10 @@ function cleanCommand(opType: string, op: Record<string, unknown>,diagnostics:st
       return { op: 'setVisibility', targetId, visible: op.visible as boolean };
     }
     case 'setAnimation': {
-      if(!op.animation||typeof op.animation!=='object'||JSON.stringify(op.animation).length>300000)return null;return {op:'setAnimation',animation:structuredClone(op.animation) as AnimationProgram};
+      if(!op.animation||typeof op.animation!=='object'||JSON.stringify(op.animation).length>300000)return null;
+      const animation=structuredClone(op.animation) as AnimationProgram;
+      if(Array.isArray(animation.tracks))for(const track of animation.tracks)if(track&&Array.isArray(track.targetIds))track.targetIds=[...new Set(track.targetIds)];
+      return {op:'setAnimation',animation};
     }
     case 'clearAnimation': return {op:'clearAnimation'};
     case 'setAssemblyMetadata': {

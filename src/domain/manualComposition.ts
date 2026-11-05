@@ -1,5 +1,5 @@
 import {remapPoseRig} from './poseRig';
-import {MAX_PROJECT_BYTES,serializeProject} from './project';
+import {MAX_PROJECT_BYTES,PROJECT_SIZE_LIMIT,TEAM_SCENE_SIZE_LIMIT,serializeProject} from './project';
 import {Vector3} from 'three';
 import {assemblyBounds} from './assemblyEditing';
 import {instantiateAsset,type ModelAssetVersion} from './modelAssets';
@@ -54,12 +54,13 @@ export function arraySelectionCommands(doc:SceneDocument,ids:string[],count:numb
  validateArray(count,axis,gap);const nodes=groups(doc,ids).flat();
  return [{op:'duplicateSelection',targetIds:nodes.map(n=>n.id),count,axis,gap}];
 }
+const MANUAL_ARRAY_OVERFLOW = `本次排列将使项目文件超过 ${PROJECT_SIZE_LIMIT}，请减少本次复制数量或简化模型；没有场景对象总数上限，团队场景发布上限为 ${TEAM_SCENE_SIZE_LIMIT}`;
 function validateArray(count:number,axis:'x'|'z',gap:number){if(!Number.isSafeInteger(count)||count<2||!['x','z'].includes(axis)||!Number.isFinite(gap)||gap<0)throw Error('排列总数量需为至少 2 的整数，净间距需为非负米数');}
 /** Manual aggregate path: preserve source metadata and internal references without per-import part caps. */
 export function duplicateSelectedNodes(doc:SceneDocument,ids:string[],count:number,axis:'x'|'z',gap:number):SceneNode[]{
  validateArray(count,axis,gap);const nodes=groups(doc,ids).flat(),included=new Set(nodes.map(n=>n.id)),size=assemblyBounds(nodes).getSize(new Vector3());
  const bytes=new TextEncoder().encode(JSON.stringify(nodes)).length,baseBytes=new TextEncoder().encode(JSON.stringify(doc)).length;
- if(baseBytes+bytes*(count-1)>MAX_PROJECT_BYTES)throw Error('本次排列预计超过项目文件 20MB 序列化预算，请减少本次复制数量或简化模型；没有场景对象总数上限');
+ if(baseBytes+bytes*(count-1)>MAX_PROJECT_BYTES)throw new Error(MANUAL_ARRAY_OVERFLOW);
  const added:SceneNode[]=[];
  for(let i=1;i<count;i++){
   const instances=new Map<string,string>(),assemblies=new Map<string,string>(),idMap=new Map(nodes.map(n=>[n.id,makeId()]));
@@ -72,5 +73,5 @@ export function duplicateSelectedNodes(doc:SceneDocument,ids:string[],count:numb
    copy.transform.position[axis==='x'?0:2]+=(size[axis]+gap)*i;added.push(copy);
   }
  }
- serializeProject({...doc,nodes:[...doc.nodes,...added]});return added;
+ serializeProject({...doc,nodes:[...doc.nodes,...added]},MANUAL_ARRAY_OVERFLOW);return added;
 }

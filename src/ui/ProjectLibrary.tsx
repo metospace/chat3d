@@ -2,8 +2,9 @@ import {ProCard,ProTable} from '@ant-design/pro-components';
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {Button,Checkbox,Dropdown,Drawer,Input,Select,Tag} from 'antd';
 import {PortalDialog} from './kit/PortalDialog';
+import {AccessibleModal as Modal} from './kit/AccessibleModal';
 import {CubeIcon,LayersIcon,PlusIcon,MagnifyingGlassIcon,GridIcon,RowsIcon,Cross1Icon,UploadIcon,ChevronDownIcon} from '@radix-ui/react-icons';
-import {createSession,switchSession,useWorkspaceStore,editLibrarySessionMetadata,moveLibrarySessionsToCategory,syncAssetCatalogMetadata,type WorkspaceSession} from '../workspace';
+import {createSession,switchSession,useWorkspaceStore,editLibrarySessionMetadata,moveLibrarySessionsToCategory,syncAssetCatalogMetadata,isLibraryDraft,sessionIsRunning,trashLibraryDrafts,type WorkspaceSession} from '../workspace';
 import {assetDocument,type ModelAssetSummary} from '../domain/modelAssets';
 import {listModelAssets,moveModelAssetsToCategory,updateModelAssetMetadata,readModelAsset,updateAssetThumbnail} from '../domain/modelAssetStorage';
 import {assertLibraryReady,openLibraryAsset,projectLabel} from '../domain/libraryNavigation';
@@ -35,7 +36,6 @@ export function ProjectThumb({src,name,kind='scene',document:scene}:{src?:string
  },[scene,image]);
  return image?<img src={image} alt={`${name} 几何缩略图`} title={image===src?undefined:'本地形体预览，不代表质量验收'} loading="lazy" decoding="async" onError={()=>{if(image===src)setFailedSrc(src);}}/>:<div ref={placeholder} className="resource-no-thumb">{kind==='asset'?<CubeIcon/>:<LayersIcon/>}<span>{scene&&generating===scene?'正在生成预览…':scene&&!scene.nodes.length?'空白项目':src?'预览图暂不可用':'尚无预览图'}</span></div>;
 }
-function isDraft(session:WorkspaceSession){return !session.librarySavedAt||session.savedRevision!==session.snapshot.doc.revision||!!session.snapshot.pendingBatch||session.snapshot.wasRunning||(session.moduleKind==='asset'&&!session.assetSource);}
 function timestamp(value:string|number){return new Date(value).toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
 function compactTimestamp(value:string|number){return new Date(value).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});}
 function LinkStatus({states,compact=false}:{states:LocalTeamResourceState[];compact?:boolean}){
@@ -54,6 +54,7 @@ export function ProjectLibrary({kind,onOpen,onManage}:{kind:'asset'|'scene';onOp
  const [selected,setSelected]=useState(''),[manageCategories,setManageCategories]=useState(false),[editingAsset,setEditingAsset]=useState<ModelAssetSummary>(),[editingProject,setEditingProject]=useState<WorkspaceSession>();
  const [notice,setNotice]=useState(''),[error,setError]=useState(''),[loading,setLoading]=useState(true),[loadError,setLoadError]=useState(''),[opening,setOpening]=useState(false);
  const [bulk,setBulk]=useState(false),[checked,setChecked]=useState<string[]>([]),[moveTarget,setMoveTarget]=useState('');
+ const [trashTarget,setTrashTarget]=useState<{ids:string[];title?:string}>();
  const [categoriesOpen,setCategoriesOpen]=useState(false);
  const detailRef=useRef<HTMLElement>(null);
  const selectedCardRef=useRef<HTMLElement|null>(null);
@@ -68,7 +69,7 @@ export function ProjectLibrary({kind,onOpen,onManage}:{kind:'asset'|'scene';onOp
  useEffect(()=>{void loadAssets();},[loadAssets]);
  const allProjects=sessions.filter(session=>!session.deletedAt&&(session.moduleKind??'scene')===kind);
  const hasContent=allProjects.length>0||(kind==='asset'&&items.length>0);
- const drafts=allProjects.filter(isDraft),savedProjects=allProjects.filter(session=>!isDraft(session));
+ const drafts=allProjects.filter(isLibraryDraft),savedProjects=allProjects.filter(session=>!isLibraryDraft(session));
  const searchText=query.trim().toLocaleLowerCase();
  const projectCategory=(session:WorkspaceSession)=>kind==='asset'?session.assetCategory:session.sceneCategory;
  const projects=(view==='draft'?drafts:savedProjects).filter(session=>`${session.title} ${session.libraryDescription??''} ${categoryPath(categories,projectCategory(session))}`.toLocaleLowerCase().includes(searchText)&&(!!searchText||categoryMatches(categories,projectCategory(session),filter))).sort((a,b)=>sort==='name'?a.title.localeCompare(b.title,'zh-CN')||b.updatedAt-a.updatedAt:b.updatedAt-a.updatedAt||a.title.localeCompare(b.title,'zh-CN'));
@@ -100,6 +101,11 @@ export function ProjectLibrary({kind,onOpen,onManage}:{kind:'asset'|'scene';onOp
  function readyAction(action:()=>void){try{assertLibraryReady();if(lock.current)throw Error('操作正在进行，请稍候重试');setError('');action();}catch(reason){setError(reason instanceof Error?reason.message:'操作失败');}}
  function openProject(session:WorkspaceSession){readyAction(()=>{if(switchSession(session.id))onOpen();else throw Error('无法打开项目，请关闭其他标签页后刷新本页');});}
  function publishChecked(){if(checked.some(id=>!visibleIds.includes(id))){setError('选中结果已变化，请重新选择');return;}setPublishSources(browsingAssets?checked.map(id=>({id,version:items.find(item=>item.id===id)!.version})):checked.map(id=>({id})));}
+ function canTrash(ids:string[]){return view==='draft'&&ids.length>0&&ids.every(id=>projects.some(project=>project.id===id&&!project.snapshot.wasRunning)&&!sessionIsRunning(id));}
+ function confirmTrash(){if(!trashTarget)return;readyAction(()=>{
+  if(!canTrash(trashTarget.ids)||!trashLibraryDrafts(trashTarget.ids,kind))throw Error('草稿已变化或正在执行，无法移至回收站');
+  resetSelection();setTrashTarget(undefined);setNotice(`已将 ${trashTarget.ids.length} 项草稿移至回收站，可在会话回收站恢复。`);
+ });}
  const listRows=browsingAssets?assets.map(item=>({id:item.id,name:item.name,category:item.category,version:'v'+item.version,parts:item.parts,updatedAt:item.createdAt})):projects.map(session=>({id:session.id,name:session.title,category:projectCategory(session)??'',version:session.assetSource?'v'+session.assetSource.version:'r'+session.snapshot.doc.revision,parts:session.snapshot.doc.nodes.length,updatedAt:new Date(session.updatedAt).toISOString()}));
  return <StudioPage className={`resource-page resource-page-${kind}${hasContent?' resource-page-populated':''}`} aria-label={`${resourceName}库模块`}>
   <StudioPageHeader title={`${resourceName}库`} description={kind==='asset'?'管理可编辑、可复用的本地 3D 资产。':'整理本地场景、资产引用和编辑草稿。'} actions={<Button type="primary" className="primary" disabled={opening} onClick={()=>void createProject()}><PlusIcon/>新建{resourceName}</Button>}/>
@@ -117,7 +123,7 @@ export function ProjectLibrary({kind,onOpen,onManage}:{kind:'asset'|'scene';onOp
   <div className={`library-organizer${hasContent?'':' library-organizer-empty'}`}>
    {hasContent&&<div className="library-category-region"><button type="button" className="library-category-toggle" aria-expanded={categoriesOpen} aria-controls={`library-categories-${kind}`} onClick={()=>setCategoriesOpen(!categoriesOpen)}>分类：{query.trim()?'全部':categoryPath(categories,filter)}<ChevronDownIcon/></button><div className="library-category-content" id={`library-categories-${kind}`} data-mobile-open={categoriesOpen}><LibraryCategoryTree categories={categories} values={categoryValues} value={query.trim()?'全部':filter} onChange={value=>{setFilter(value);setQuery('');setCategoriesOpen(false);resetSelection();}} onManage={()=>setManageCategories(true)}/></div></div>}
    <div className="resource-main">
-    {bulk&&<div className="library-bulk-actions" aria-label="批量资源操作"><strong>已选 {checked.length} 项</strong><Button disabled={opening||!visibleIds.length} onClick={()=>setChecked(visibleIds)}>全选结果</Button><Button type="text" disabled={opening||!checked.length} onClick={()=>setChecked([])}>清空选择</Button><CategoryPicker label="移动到分类" value={moveTarget} onChange={setMoveTarget} categories={categories} optional disabled={opening}/><Button disabled={opening||!checked.length||(browsingAssets&&!moveTarget)} onClick={()=>void moveSelection()}>移动分类</Button>{view==='saved'&&<Button disabled={opening||!checked.length} onClick={()=>readyAction(publishChecked)}><UploadIcon/>发布至团队</Button>}</div>}
+    {bulk&&<div className="library-bulk-actions" aria-label="批量资源操作"><strong>已选 {checked.length} 项</strong><Button disabled={opening||!visibleIds.length} onClick={()=>setChecked(visibleIds)}>全选结果</Button><Button type="text" disabled={opening||!checked.length} onClick={()=>setChecked([])}>清空选择</Button><CategoryPicker label="移动到分类" value={moveTarget} onChange={setMoveTarget} categories={categories} optional disabled={opening}/><Button disabled={opening||!checked.length||(browsingAssets&&!moveTarget)} onClick={()=>void moveSelection()}>移动分类</Button>{view==='saved'?<Button disabled={opening||!checked.length} onClick={()=>readyAction(publishChecked)}><UploadIcon/>发布至团队</Button>:<Button danger disabled={opening||!canTrash(checked)} onClick={()=>readyAction(()=>setTrashTarget({ids:checked}))}>批量移至回收站</Button>}</div>}
     <div className="resource-results-heading"><span>{query.trim()?`跨分类搜索：“${query.trim()}”`:filter==='全部'?`全部${view==='draft'?'草稿':resourceName}`:categoryPath(categories,filter)}{view==='draft'&&' · 未保存或有待处理修改'}</span><span>{visibleIds.length} 项结果</span></div>
     <div className={`resource-browser ${selectedAsset||selectedProject?'has-detail':''} resource-layout-${layout}`}>
      <section className="resource-results" aria-label="资源列表" aria-busy={loading}>
@@ -148,7 +154,7 @@ export function ProjectLibrary({kind,onOpen,onManage}:{kind:'asset'|'scene';onOp
       <section className="resource-detail-section"><h3>摘要</h3><dl><dt>完整分类</dt><dd>{categoryPath(categories,projectCategory(selectedProject))}</dd><dt>状态</dt><dd>{projectLabel(selectedProject)}</dd><dt>零件</dt><dd>{selectedProject.snapshot.doc.nodes.length}</dd><dt>更新时间</dt><dd>{timestamp(selectedProject.updatedAt)}</dd></dl>{selectedProject.libraryDescription&&<p className="resource-detail-description">{selectedProject.libraryDescription}</p>}</section>
       <section className="resource-detail-section"><h3>版本与来源</h3><p className="resource-muted">{selectedProject.assetSource?`资产 v${selectedProject.assetSource.version} · `:''}文档修订 r{selectedProject.snapshot.doc.revision}{selectedProject.librarySavedAt?` · 最近入库 ${timestamp(selectedProject.librarySavedAt)}`:' · 尚未保存到库'}</p><LinkStatus states={linksFor(selectedProject.assetSource?.id??selectedProject.id)}/>{kind==='scene'&&<div className="resource-references"><h4>引用资产</h4>{Array.from(new Map(selectedProject.snapshot.doc.nodes.filter(node=>node.modelAsset).map(node=>[node.modelAsset!.instanceId,node.modelAsset!])).values()).map(asset=><p className="resource-reference" key={asset.instanceId}>{items.find(item=>item.id===asset.id)?.name??'资产实例'} · v{asset.version}</p>)}{!selectedProject.snapshot.doc.nodes.some(node=>node.modelAsset)&&<p className="resource-muted">尚未引用资产</p>}</div>}</section>
       {detailLinks.filter(state=>state.link.active&&state.updateAvailable).map(state=><div className="resource-linked-update" key={state.link.id}><small>{state.link.serviceOrigin}</small><Button disabled={opening} onClick={()=>readyAction(()=>setAcquireTarget({item:teamItemFromLink(state.link,state.latestVersion),serviceOrigin:state.link.serviceOrigin}))}>获取新版 v{state.latestVersion} 并保留旧副本</Button></div>)}
-      </div><footer className="resource-detail-footer"><div className="resource-detail-actions"><Button type="primary" className="primary" disabled={opening} onClick={()=>openProject(selectedProject)}>{kind==='asset'?'继续编辑草稿':'打开场景'}</Button><Button disabled={opening} onClick={()=>readyAction(()=>setEditingProject(selectedProject))}>编辑信息</Button>{view==='saved'&&<Button disabled={opening} onClick={()=>readyAction(()=>setPublishSources([{id:selectedProject.id}]))}><UploadIcon/>发布至团队</Button>}</div><p className="resource-muted">场景预览在工作台重新保存时更新。草稿和待确认修改不会被当作已保存内容发布。</p></footer>
+      </div><footer className="resource-detail-footer"><div className="resource-detail-actions"><Button type="primary" className="primary" disabled={opening} onClick={()=>openProject(selectedProject)}>{kind==='asset'?'继续编辑草稿':'打开场景'}</Button><Button disabled={opening} onClick={()=>readyAction(()=>setEditingProject(selectedProject))}>编辑信息</Button>{view==='saved'?<Button disabled={opening} onClick={()=>readyAction(()=>setPublishSources([{id:selectedProject.id}]))}><UploadIcon/>发布至团队</Button>:<Button danger disabled={opening||!canTrash([selectedProject.id])} onClick={()=>readyAction(()=>setTrashTarget({ids:[selectedProject.id],title:selectedProject.title}))}>移至回收站</Button>}</div><p className="resource-muted">场景预览在工作台重新保存时更新。草稿和待确认修改不会被当作已保存内容发布。</p></footer>
      </aside>}</Drawer>
     </div>
    </div>
@@ -160,5 +166,6 @@ export function ProjectLibrary({kind,onOpen,onManage}:{kind:'asset'|'scene';onOp
   {teamLogin&&<PortalDialog label="检查团队关联更新" onClose={()=>setTeamLogin(false)}><h2 className="app-modal-title">检查团队关联更新</h2><p className="app-modal-description">登录关联对应的团队服务后手动检查；不会上传或覆盖本地内容。</p><TeamSessionLogin onConnected={()=>{setTeamLogin(false);void checkTeamUpdates();}}/><div className="app-modal-actions"><Button onClick={()=>setTeamLogin(false)}>取消</Button></div></PortalDialog>}
   {acquireTarget&&<TeamTransferDialog kind={kind} mode="acquire" items={[acquireTarget.item]} serviceOrigin={acquireTarget.serviceOrigin} onClose={()=>setAcquireTarget(undefined)} onCompleted={()=>void completedTransfer()}/>}
   {publishSources&&<TeamTransferDialog kind={kind} mode="publish" sources={publishSources} onClose={()=>setPublishSources(undefined)} onCompleted={()=>void completedTransfer()}/>}
+  <Modal open={!!trashTarget} onCancel={()=>setTrashTarget(undefined)} footer={null} closable={false} width={420} className="session-dialog"><div role="alertdialog" aria-label="移至回收站？"><h2 className="session-dialog-title">移至回收站？</h2><p className="session-dialog-lede">{trashTarget?.title?`“${trashTarget.title}”`:`所选 ${trashTarget?.ids.length} 项草稿`}的聊天、参考图与场景将一起移入回收站，之后可以恢复。</p>{error&&<p role="alert">{error}</p>}<div className="dialog-actions"><Button onClick={()=>setTrashTarget(undefined)}>取消</Button><Button danger disabled={opening||!trashTarget||!canTrash(trashTarget.ids)} onClick={confirmTrash}>移至回收站</Button></div></div></Modal>
  </StudioPage>;
 }

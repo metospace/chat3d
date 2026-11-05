@@ -10,6 +10,15 @@
 
 日志唯一数据源是 `src/domain/updateHistory.ts`。每次更新必须新增记录并保留旧记录；正式发版填写实际版本及带时区的时间，同时更新上述版本文件。未发布源码改动单独标为“开发中”，不能写成已发布的新版本。发布时将对应开发内容整理进版本记录，不得只改版本号而遗漏更新内容。服务端最新版本的 `notes` 仍用于更新提示，不覆盖历史日志。
 
+### 开发中：Codex / CliRelay 动画工具兼容性
+
+动画命令的 JSON Schema 不再使用严格工具校验不支持的 `uniqueItems`，保留目标数量上下限。模型响应归一化及命令应用阶段均会去重每条轨道的 `targetIds`；应用阶段在临时 ID 映射后去重，并继续执行动画领域校验。
+
+删除命令的 `targetId` / `targetIds` 和动画运动轨道的 `keyframes` / `expression` 使用 `anyOf` 声明必选项，本地命令校验仍拒绝同时提供两者；缺少两者也会拒绝。所有建模工具通过统一的 `sanitizeToolParametersForProvider` 克隆参数 schema，递归把 `oneOf` 近似为 `anyOf`、移除 `uniqueItems`，不修改原始 schema 或其他约束；若原本同时存在两种 union，则通过 `allOf` 保留两个约束组。
+
+参考图 + 资产复用 + 布局工具组的实际请求共 40 个工具，零起始索引 25 为 `edit_scene`；工具数量和索引会随工具组、场景与渲染可用性改变。`tests/command-contract.mjs` 检查全部导出命令 schema 和选择器排他性，`tests/modeling-agent.mjs` 检查清理器及 Pi OpenAI adapter 的实际出站参数。本项未发布，不变更版本号。
+
+
 ## 浏览器
 
 生产构建把版本写入 `dist/version.json`。Node 与 Cloudflare Worker 都用它响应 `GET /api/version`，并设置 `Cache-Control: no-store`。反向代理要把 `/api/version` 转到 Node，不能落到静态首页。

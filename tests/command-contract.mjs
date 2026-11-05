@@ -56,7 +56,7 @@ const fakeTransport=steps=>{
 };
 
 try{
- const {commandContracts,commandNames,commandSchema,validateCommandOperations}=await server.ssrLoadModule('/src/ai/commandContract.ts');
+ const {commandContracts,commandNames,commandSchema,commandEnvelopeSchema,validateCommandOperations}=await server.ssrLoadModule('/src/ai/commandContract.ts');
  const {parseModelResponse}=await server.ssrLoadModule('/src/ai/provider.ts');
  const {runModelingAgent}=await server.ssrLoadModule('/src/ai/modelingAgent.ts');
  const {createInitialDoc,useEditorStore:store}=await server.ssrLoadModule('/src/store.ts');
@@ -217,12 +217,58 @@ try{
   });
  });
 
+ await test('delete and motion tracks require exactly one selector',()=>{
+  const single={op:'delete',targetId:'n1'},multiple={op:'delete',targetIds:['n1']};
+  for(const operation of [single,multiple]){
+   assert.deepEqual(validateCommandOperations([operation]),[]);
+   assert.deepEqual(parse([operation]).operations,[operation]);
+  }
+  assertRejected({op:'delete'},['operations',0,'targetId']);
+  assertRejected({...single,...multiple},['operations',0]);
+  for(const channel of ['position','scale','rotation']){
+   const {keyframes:originalKeys,...track}=animation.tracks[0];
+   const keyframes=channel==='rotation'?[{time:0,value:0},{time:2,value:1}]:channel==='scale'?[{time:0,value:[1,1,1]},{time:2,value:[2,1,1]}]:originalKeys;
+   const expression=channel==='rotation'?'t':channel==='scale'?[1,1,1]:['t',0,0];
+   const motion=fields=>({op:'setAnimation',animation:{...animation,tracks:[{...track,channel,...(channel==='rotation'?{axis:[0,1,0],pivot:[0,0,0]}:{}),...fields}]}});
+   for(const operation of [motion({keyframes}),motion({expression})]){
+    assert.deepEqual(validateCommandOperations([operation]),[]);
+    assert.deepEqual(parse([operation]).operations,[operation]);
+   }
+   assertRejected(motion({}),['operations',0,'animation','tracks',0]);
+   assertRejected(motion({keyframes,expression}),['operations',0,'animation','tracks',0]);
+  }
+ });
+
  const config={baseURL:'https://mock.invalid/v1',apiKey:'mock-only',model:'mock-tools',useMock:false};
  const agentOptions=(transport,document)=>({text:'只修改选中主体，不改其他对象',config,document,selection:[],images:[],streamFn:transport.fn,captureAvailable:()=>false});
  const baseDocument=()=>{
   const result=applyBatch(createInitialDoc(),{operations:[{...clone(samples.createPrimitive),name:'selected'},{...clone(samples.createPrimitive),tempId:'other',name:'untouched',transform:{...clone(transform),position:[5,0,0]}}]});
   assert.deepEqual(result.errors,[]);return result.doc;
  };
+
+ await test('strict tool schemas omit oneOf and uniqueItems',()=>{
+  for(const schema of [commandSchema,commandContracts,commandEnvelopeSchema])assert.doesNotMatch(JSON.stringify(schema),/"(?:oneOf|uniqueItems)"\s*:/);
+ });
+
+ await test('animation targets dedupe before apply',()=>{
+  const document=baseDocument(),ids=document.nodes.map(node=>node.id),operation=clone(samples.setAnimation);
+  operation.animation.tracks[0].targetIds=[ids[0],ids[1],ids[0],ids[1]];
+  const before=clone(operation);
+  assert.deepEqual(validateCommandOperations([operation]),[]);
+  const parsed=parse([operation]);
+  assert.deepEqual(parsed.operations[0].animation.tracks[0].targetIds,ids);
+  for(const operations of [parsed.operations,[operation]]){
+   const result=applyBatch(document,{operations});
+   assert.deepEqual(result.errors,[]);
+   assert.deepEqual(result.doc.animation.tracks[0].targetIds,ids);
+  }
+  assert.deepEqual(operation,before,'normalization and apply must not mutate input');
+  const created=clone(samples.createPrimitive),remapped=clone(samples.setAnimation);
+  remapped.animation.tracks[0].targetIds=['body','body'];
+  const result=applyBatch(createInitialDoc(),{operations:[created,remapped]});
+  assert.deepEqual(result.errors,[]);
+  assert.deepEqual(result.doc.animation.tracks[0].targetIds,[result.doc.nodes[0].id]);
+ });
 
  await test('material references use the actual document and never fall back to a stock material',()=>{
   const document=baseDocument(),id=document.nodes[0].id;

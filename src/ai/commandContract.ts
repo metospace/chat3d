@@ -7,7 +7,7 @@ import {STRUCTURED_PART_LIMIT} from '../domain/structureLimits';
 import {structuredGeometrySchema} from './structuredGeometrySchema';
 
 export interface CommandIssue {path:(string|number)[];code:string;message:string;expected?:string}
-type Schema=TSchema & {type?:string;properties?:Record<string,Schema>;required?:string[];items?:Schema|Schema[]|boolean;prefixItems?:Schema[];anyOf?:Schema[];allOf?:Schema[];oneOf?:Schema[];const?:unknown;description?:string;additionalProperties?:boolean;minimum?:number;maximum?:number;exclusiveMinimum?:number;exclusiveMaximum?:number;minLength?:number;maxLength?:number;pattern?:string;minItems?:number;maxItems?:number;multipleOf?:number};
+type Schema=TSchema & {type?:string;properties?:Record<string,Schema>;required?:string[];items?:Schema|Schema[]|boolean;prefixItems?:Schema[];anyOf?:Schema[];allOf?:Schema[];const?:unknown;description?:string;additionalProperties?:boolean;minimum?:number;maximum?:number;exclusiveMinimum?:number;exclusiveMaximum?:number;minLength?:number;maxLength?:number;pattern?:string;minItems?:number;maxItems?:number;multipleOf?:number};
 const text=(maxLength?:number)=>Type.String({minLength:1,pattern:'\\S',...(maxLength===undefined?{}:{maxLength})});
 const number=()=>Type.Number();
 const vec3=()=>Type.Tuple([number(),number(),number()]);
@@ -17,7 +17,7 @@ const strings=()=>Type.Array(text(),{minItems:1});
 const optional=Type.Optional;
 const object=(properties:Record<string,TSchema>,description?:string,options:Record<string,unknown>={})=>Type.Object(properties,{additionalProperties:false,...options,...(description?{description:[description,options.description].filter(Boolean).join(' ')}:{})});
 const atLeastOne=(keys:string[])=>({anyOf:keys.map(key=>({required:[key]})),description:'Provide at least one of: '+keys.join(', ')});
-const exactlyOne=(keys:string[])=>({oneOf:keys.map(key=>({required:[key]})),description:'Provide exactly one of: '+keys.join(', ')});
+const exactlyOne=(keys:string[])=>({...atLeastOne(keys),description:'Provide exactly one of: '+keys.join(', ')});
 const transformFields={position:optional(vec3()),rotationQuaternion:optional(quaternion()),scale:optional(scale())};
 const createTransform=object({...transformFields,rotationDegrees:optional(vec3())},'Optional components default to origin, identity rotation and unit scale; quaternion takes precedence over rotationDegrees.');
 const transformPatch=object(transformFields,'Absolute transform patch; omitted components are unchanged.',{...atLeastOne(Object.keys(transformFields))});
@@ -44,7 +44,7 @@ const motionNumber=()=>Type.Number({minimum:-1e6,maximum:1e6});
 const motionVector=()=>Type.Tuple([motionNumber(),motionNumber(),motionNumber()]);
 const expressionOps=['add','sub','mul','div','mod','sin','cos','abs','min','max','clamp','gt','lt','if'] as const;
 const expression=Type.Union([motionNumber(),Type.Literal('t'),Type.Literal('pi'),object({op:Type.Union(expressionOps.map(op=>Type.Literal(op))),args:Type.Array(Type.Unknown(),{minItems:1,maxItems:3})},'Bounded mathematical AST. Nested args are validated by the animation domain validator (depth ≤8, ≤64 nodes and operator-specific arity).')]);
-const trackBase={id:text(120),name:Type.String({maxLength:120}),targetIds:Type.Array(text(),{minItems:1,maxItems:512,uniqueItems:true})};
+const trackBase={id:text(120),name:Type.String({maxLength:120}),targetIds:Type.Array(text(),{minItems:1,maxItems:512})};
 const keyframes=(value:TSchema)=>Type.Array(object({time:Type.Number({minimum:0,maximum:3600}),value}),{minItems:1,maxItems:128});
 const motionTrack=(channel:'position'|'scale'|'rotation')=>object({...trackBase,channel:Type.Literal(channel),keyframes:optional(keyframes(channel==='rotation'?motionNumber():channel==='scale'?scale():motionVector())),expression:optional(channel==='rotation'?expression:Type.Tuple([expression,expression,expression])),...(channel==='rotation'?{axis:motionVector(),pivot:motionVector()}:{})},'Motion track; exactly one of keyframes or expression. Expressions allow depth ≤8 and ≤64 nodes; operator arity and timeline/reference relationships are checked on apply.',exactlyOne(['keyframes','expression']));
 const animation=object({version:Type.Literal(1),name:text(120),duration:Type.Number({exclusiveMinimum:0,maximum:3600}),loop:Type.Boolean(),tracks:Type.Array(Type.Union([motionTrack('position'),motionTrack('scale'),motionTrack('rotation'),object({...trackBase,channel:Type.Literal('visibility'),keyframes:keyframes(Type.Boolean())}),object({...trackBase,channel:Type.Literal('follow'),sourceId:text(),start:Type.Number({minimum:0,maximum:3600}),end:Type.Number({minimum:0,maximum:3600})})]),{minItems:1,maxItems:128})},'Complete animation replacement. Dynamic references, time ordering, channel conflicts, expression arity and follow dependencies remain validated atomically by applyBatch.');
@@ -116,19 +116,17 @@ function schemaIssues(schema:Schema,value:unknown,path:(string|number)[],issues:
  else if(schema.items&&typeof schema.items==='object')shallow.items={};
  // Logical required groups are intentionally evaluated by the schema library, then summarized once.
  const errors=Errors(shallow,value);
- const groupFailed=errors.some(error=>error.keyword==='anyOf'||error.keyword==='oneOf');
+ const groupFailed=errors.some(error=>error.keyword==='anyOf');
  for(const error of errors){
-  if(groupFailed&&/\/(anyOf|oneOf)\//.test(error.schemaPath))continue;
+  if(groupFailed&&error.schemaPath.includes('/anyOf/'))continue;
   if(error.keyword==='required'){
    const keys=error.params.requiredProperties;
    for(const key of keys)issues.push({path:[...path,key],code:'required',message:'Required field is missing.',expected:expected(schema.properties?.[key]??{})});
   }else if(error.keyword==='additionalProperties'){
    for(const key of error.params.additionalProperties)issues.push({path:[...path,key],code:'additionalProperties',message:'Unknown field; use only documented fields for this operation.',expected:Object.keys(schema.properties??{}).join(', ')});
   }else{
-   const group=error.keyword==='anyOf'||error.keyword==='oneOf';
-   const alternatives=group?(schema.oneOf??schema.anyOf)?.flatMap(branch=>branch.required??[]):undefined;
-   const input=Check(objectInput,value)?value as Record<string,unknown>:undefined;
-   const missingSelector=error.keyword==='oneOf'&&alternatives?.length===2&&alternatives.includes('targetId')&&input&&input.targetId===undefined&&input.targetIds===undefined;
+   const group=error.keyword==='anyOf';
+   const missingSelector=group&&schema===commandContracts.delete;
    const relativePath=error.instancePath.split('/').slice(1).map(key=>key.replace(/~1/g,'/').replace(/~0/g,'~')).map(key=>/^\d+$/.test(key)?Number(key):key);
    issues.push({path:[...path,...relativePath,...(missingSelector?['targetId']:[])],code:error.keyword,message:group?'Required field alternative is not satisfied.':error.message,expected:expected(schema)});
   }
@@ -141,6 +139,22 @@ function schemaIssues(schema:Schema,value:unknown,path:(string|number)[],issues:
   if(schema.prefixItems)for(let index=0;index<Math.min(value.length,schema.prefixItems.length);index++)schemaIssues(schema.prefixItems[index],value[index],[...path,index],issues);
   if(Array.isArray(schema.items))for(let index=0;index<Math.min(value.length,schema.items.length);index++)schemaIssues(schema.items[index],value[index],[...path,index],issues);
   else if(schema.items&&typeof schema.items==='object')for(let index=schema.prefixItems?.length??0;index<value.length;index++)schemaIssues(schema.items,value[index],[...path,index],issues);
+ }
+}
+// Provider schemas require at least one selector; reject the other invalid case locally.
+function rejectBoth(input:Record<string,unknown>,path:(string|number)[],issues:CommandIssue[],first:string,second:string):void {
+ if(input[first]!==undefined&&input[second]!==undefined)issues.push({path,code:'exclusiveFields',message:`Provide exactly one of ${first} or ${second}.`});
+}
+function selectorIssues(operation:Record<string,unknown>,path:(string|number)[],issues:CommandIssue[]):void {
+ if(operation.op==='delete')rejectBoth(operation,path,issues,'targetId','targetIds');
+ if(operation.op!=='setAnimation'||!Check(objectInput,operation.animation))return;
+ const {tracks}=operation.animation as Record<string,unknown>;
+ if(!Array.isArray(tracks))return;
+ for(let index=0;index<tracks.length;index++){
+  const raw:unknown=tracks[index];
+  if(!Check(objectInput,raw))continue;
+  const track=raw as Record<string,unknown>;
+  if(track.channel==='position'||track.channel==='scale'||track.channel==='rotation')rejectBoth(track,[...path,'animation','tracks',index],issues,'keyframes','expression');
  }
 }
 function relationalIssues(value:unknown,path:(string|number)[],issues:CommandIssue[]):void {
@@ -179,6 +193,7 @@ export function validateCommandOperations(operations:unknown):CommandIssue[]{
    continue;
   }
   schemaIssues(commandContracts[value.op as AICommandOp] as Schema,value,path,issues);
+  selectorIssues(value,path,issues);
   relationalIssues(value,path,issues);
  }
  return issues;

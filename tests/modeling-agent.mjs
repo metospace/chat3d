@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {createServer} from 'vite';
 import {createAssistantMessageEventStream} from '@earendil-works/pi-ai';
+import {Type} from 'typebox';
 const server=await createServer({server:{middlewareMode:true},appType:'custom'});
 let passed=0;let forceTransportError=false;
 const test=async(name,fn)=>{await fn();passed++;console.log('PASS',name)};
@@ -26,6 +27,90 @@ try{
   let approvals=0;
   await assert.rejects(runModelingAgent({...opts(f),text:'按图生成完整车间产线场景',blenderModeling:true,confirmBlenderScript:async request=>{approvals++;assert.equal(request.script,script);return false;}}),/未确认执行/);
   assert.equal(approvals,1);
+ });
+ await test('provider tool parameters clone nested schemas and preserve conjunctive unions',async()=>{
+  const {sanitizeToolParametersForProvider}=await server.ssrLoadModule('/src/ai/toolParameters.ts');
+  const schema={type:'object',required:['items'],additionalProperties:false,properties:{items:{type:'array',uniqueItems:true,minItems:1,items:{oneOf:[{const:'a'},{type:'array',uniqueItems:true,items:{oneOf:[{type:'number'}]}}],anyOf:[{type:'string'},{type:'array'}],allOf:[{description:'keep this constraint'}]}}}};
+  const original=structuredClone(schema);
+  const result=sanitizeToolParametersForProvider(schema);
+  assert.deepEqual(result,{type:'object',required:['items'],additionalProperties:false,properties:{items:{type:'array',minItems:1,items:{anyOf:[{type:'string'},{type:'array'}],allOf:[{description:'keep this constraint'},{anyOf:[{const:'a'},{type:'array',items:{anyOf:[{type:'number'}]}}]}]}}}});
+  assert.deepEqual(schema,original);
+  assert.notEqual(result.required,schema.required);
+  assert.notEqual(result.properties.items.items.anyOf[0],schema.properties.items.items.anyOf[0]);
+ });
+ await test('provider tool parameters strip TypeBox metadata and rewrite optional tuples',async()=>{
+  const {sanitizeToolParametersForProvider}=await server.ssrLoadModule('/src/ai/toolParameters.ts');
+  const schema=Type.Object({position:Type.Optional(Type.Tuple([Type.Number(),Type.Number(),Type.Number()])),points:Type.Array(Type.Tuple([Type.Number(),Type.Number()]),{uniqueItems:true}),choice:Type.Number()},{additionalProperties:false});
+  schema.properties.choice.oneOf=[Type.Number(),Type.String()];
+  schema[Symbol('internal')]='hidden';
+  const original=JSON.stringify(schema);
+  const result=sanitizeToolParametersForProvider(schema);
+  assert.equal(result.type,'object');
+  assert.equal(result.additionalProperties,false);
+  assert.doesNotMatch(JSON.stringify(result),/"(?:~[^"\s]*|oneOf|uniqueItems)"\s*:/);
+  assert.deepEqual(Reflect.ownKeys(result),Object.keys(result));
+  assert.deepEqual(result.properties.position,{type:'array',prefixItems:[{type:'number'},{type:'number'},{type:'number'}],items:false,minItems:3,maxItems:3});
+  assert.deepEqual(result.properties.points.items,{type:'array',prefixItems:[{type:'number'},{type:'number'}],items:false,minItems:2,maxItems:2});
+  for(const maxItems of [1,5]){
+   const tuple=sanitizeToolParametersForProvider({type:'array',items:[Type.Number(),Type.Number()],additionalItems:false,maxItems});
+   assert.equal(tuple.maxItems,Math.min(maxItems,2));
+   assert.equal(tuple.items,false);
+   assert.ok(!Object.hasOwn(tuple,'additionalItems'));
+  }
+  assert.equal(JSON.stringify(schema),original);
+ });
+ await test('provider tool parameters replace only ambiguous non-whitespace patterns without mutation',async()=>{
+  const {sanitizeToolParametersForProvider}=await server.ssrLoadModule('/src/ai/toolParameters.ts');
+  const schema={type:'string',minLength:1,pattern:'\\S',maxLength:80},original=structuredClone(schema);
+  assert.deepEqual(sanitizeToolParametersForProvider(schema),{type:'string',minLength:1,maxLength:80});
+  assert.deepEqual(schema,original);
+  for(const minLength of [undefined,0,-1,NaN,'1',3]){
+   const result=sanitizeToolParametersForProvider({type:'string',pattern:'\\S',minLength});
+   assert.ok(!Object.hasOwn(result,'pattern'));
+   assert.equal(result.minLength,minLength===3?3:1);
+  }
+  const hex={type:'string',pattern:'^#[0-9a-fA-F]{6}$'};
+  assert.deepEqual(sanitizeToolParametersForProvider(hex),hex);
+ });
+ await test('provider tool parameters force object roots for bare unions',async()=>{
+  const {ensureToolParametersObject}=await server.ssrLoadModule('/src/ai/toolParameters.ts');
+  const root=ensureToolParametersObject({anyOf:[{type:'object',properties:{mode:{type:'string',const:'list'}},additionalProperties:false},{type:'object',required:['mode','captureId'],properties:{mode:{type:'string',const:'images'},captureId:{type:'string'}},additionalProperties:false}]});
+  assert.equal(root.type,'object');
+  assert.equal(root.anyOf.length,2);
+  assert.deepEqual(ensureToolParametersObject({type:'object',properties:{}}),{type:'object',properties:{}});
+  assert.deepEqual(ensureToolParametersObject(null),{type:'object',properties:{}});
+ });
+ await test('live optional tool registry exposes only provider-compatible schemas',async()=>{
+  const {OPTIONAL_TOOL_GROUP_NAMES}=await server.ssrLoadModule('/src/ai/toolExposure.ts');
+  const f=fake([[{name:'enable_modeling_tools',args:{groups:OPTIONAL_TOOL_GROUP_NAMES}}],[{name:'submit_data_preview',args:{summary:'工具注册表数据检查完成，未视觉验收'}}]]);
+  const o=opts(f,createInitialDoc());o.captureAvailable=()=>false;o.onPreview=()=>{};
+  await assert.rejects(()=>runModelingAgent(o),/本轮未修改场景，也未完成视觉验收/);
+  assert.equal(f.calls,2);
+  const tools=new Map(f.contexts.flatMap(c=>c.messages.flatMap(m=>m.toolsAdded??[])).map(t=>[t.name,t]));
+  assert.ok(tools.size>=50,`expected >=50 tools, got ${tools.size}`);
+  const walk=(value,path)=>{
+   if(!value||typeof value!=='object')return;
+   for(const [key,child] of Object.entries(value)){
+    const location=`${path}.${key}`;
+    assert.ok(!/^~/.test(key)&&!['oneOf','uniqueItems','additionalItems'].includes(key),location);
+    assert.ok(key!=='items'||!Array.isArray(child),location);
+    assert.ok(key!=='pattern'||child!=='\\S',location);
+    walk(child,location);
+   }
+  };
+  for(const [name,tool] of tools){
+   assert.equal(tool.parameters?.type,'object',name+'.parameters.type');
+   walk(tool.parameters,name);
+  }
+  assert.ok(tools.has('recall_evidence'));
+  assert.equal(tools.get('recall_evidence').parameters.type,'object');
+  assert.ok(Array.isArray(tools.get('recall_evidence').parameters.anyOf));
+  assert.ok(tools.has('build_modeling_program'));
+  const position=tools.get('build_modeling_program').parameters.properties.position;
+  assert.equal(position.items,false);
+  assert.ok(Array.isArray(position.prefixItems));assert.equal(position.prefixItems.length,3);
+  assert.ok(tools.has('edit_scene'));
+  assert.ok(!JSON.stringify(tools.get('edit_scene').parameters).includes(JSON.stringify('pattern')+':'+JSON.stringify('\\S')));
  });
  await test('task budgets normalize invalid input and preserve bounded defaults',async()=>{
   const {normalizeTaskBudget,taskBudgetReason}=await server.ssrLoadModule('/src/ai/taskBudget.ts');
@@ -260,6 +345,20 @@ try{
  await test('production Pi OpenAI adapter sends native tool schema and returns screenshot for the next request',async()=>{
    let wire=[];globalThis.fetch=async(url,init)=>{if(forceTransportError)throw new Error('本站模型代理响应异常（HTTP 403）。访问会话已失效');const body=JSON.parse(init.body);wire.push(body);const actions=wire.length===1?[plan,edit,capture]:[review,submit];const tc=actions.map((a,i)=>({index:i,id:`wire_${wire.length}_${i}`,type:'function',function:{name:a.name,arguments:JSON.stringify(a.args)}}));const raw='data: '+JSON.stringify({id:'test',object:'chat.completion.chunk',choices:[{index:0,delta:{role:'assistant',tool_calls:tc},finish_reason:null}]})+'\n\ndata: '+JSON.stringify({id:'test',object:'chat.completion.chunk',choices:[{index:0,delta:{},finish_reason:'tool_calls'}],usage:{prompt_tokens:30,completion_tokens:20,total_tokens:50}})+'\n\ndata: [DONE]\n\n';return new Response(raw,{headers:{'content-type':'text/event-stream'}})};
    const o=opts(fake([]));delete o.streamFn;const r=await runModelingAgent(o);assert.equal(wire.length,2);assert.ok(wire[0].tools.some(t=>t.function.name==='edit_scene'));assert.ok(wire.every(body=>body.tools.every(tool=>tool.type==='function')));assert.equal(wire[0].stream,true);assert.equal(wire[0].max_tokens,8192);assert.ok(JSON.stringify(wire[1].messages).includes('data:image/jpeg;base64,YWJj'));assert.equal(r.result.doc.nodes.length,1);assert.equal(r.activity.outputTokens,40);
+   const unsupportedKeywords=value=>value!==null&&typeof value==='object'&&Object.entries(value).some(([key,child])=>/^~/.test(key)||key==='oneOf'||key==='uniqueItems'||(key==='items'&&Array.isArray(child))||unsupportedKeywords(child));
+   const firstTools=wire[0].tools.map(tool=>tool.function);
+   const editScene=firstTools.find(tool=>tool.name==='edit_scene');
+   const program=firstTools.find(tool=>tool.name==='build_modeling_program');
+   assert.ok(program?.parameters,'build_modeling_program must declare parameters');
+   const position=program.parameters.properties.position;
+   assert.ok(position,'build_modeling_program must declare position');
+   assert.equal(position.items,false);
+   assert.deepEqual(position.prefixItems,[{type:'number'},{type:'number'},{type:'number'}]);
+   console.log('Pi reference-image tool declarations',JSON.stringify({names:firstTools.map(tool=>tool.name),count:firstTools.length,index25:firstTools[25]?.name??null,editSceneClean:!!editScene?.parameters&&!unsupportedKeywords(editScene.parameters)}));
+   for(const body of wire)for(const {function:{name,parameters}} of body.tools){
+    assert.ok(parameters,`${name} must declare its parameters`);
+    assert.ok(!unsupportedKeywords(parameters),`${name} parameters contain TypeBox metadata, oneOf, uniqueItems, or tuple items arrays`);
+   }
    assert.ok(wire.every(body=>!Object.hasOwn(body,'reasoning_effort')),'production default never sends off or an SDK-selected effort');
  });
  await test('draw-workshop wording is normalized only for outbound modeling messages',async()=>{

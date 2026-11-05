@@ -18,6 +18,7 @@ export const useWorkspaceStore=create<WorkspaceState>(()=>({ready:false,saving:f
 const stores=new Map<string,EditorStore>();
 export const getSessionEditor=(id:string)=>stores.get(id);
 export const sessionIsRunning=(id:string)=>{const state=stores.get(id)?.getState();return !!state&&['capturing','context','generating','validating','applying'].includes(state.aiStatus);};
+export function isLibraryDraft(session:WorkspaceSession){return !session.librarySavedAt||session.savedRevision!==session.snapshot.doc.revision||!!session.snapshot.pendingBatch||session.snapshot.wasRunning||(session.moduleKind==='asset'&&!session.assetSource);}
 export const anySessionRunning=()=>[...stores.keys()].some(sessionIsRunning);
 const busy=anySessionRunning;
 const snapshot=(s:EditorState=useEditorStore.getState()):Snapshot=>{return {doc:s.doc,messages:s.messages,selection:s.selection,dirty:s.dirty,past:s.past,future:s.future,composerText:s.composerText,composerImages:s.composerImages,lastRun:s.lastRun,pendingBatch:s.pendingBatch,pendingResult:s.pendingResult,wasRunning:['capturing','context','generating','validating','applying'].includes(s.aiStatus)}};
@@ -35,9 +36,12 @@ export function recoverSession(session:WorkspaceSession):WorkspaceSession {
   const messages=interrupted?[...recoveredMessages,{id:makeId(),role:'assistant' as const,text:s.pendingBatch?'上次生成中断，已恢复最近保存的阶段草稿（未完成复核），原场景未修改。不会自动继续调用模型。':'上次生成因页面关闭或刷新中断，尚无可恢复的阶段草稿；已恢复原场景和聊天。不会自动继续调用模型。',createdAt:Date.now()}]:recoveredMessages;
   return {...session,snapshot:{...s,messages,wasRunning:false}};
 }
+function withSnapshot(session:WorkspaceSession,state:EditorState){
+  const snap=snapshot(state),firstUser=session.autoTitle?snap.messages.find(m=>m.role==='user'):undefined;
+  return {...session,snapshot:snap,updatedAt:Date.now(),title:firstUser?(firstUser.text.slice(0,24)||'图片建模'):session.title};
+}
 function writeSnapshot(id:string,state:EditorState){
-  const snap=snapshot(state);
-  useWorkspaceStore.setState(w=>({sessions:w.sessions.map(s=>s.id===id?{...s,snapshot:snap,updatedAt:Date.now(),title:s.autoTitle&&snap.messages.some(m=>m.role==='user')?(snap.messages.find(m=>m.role==='user')!.text.slice(0,24)||'图片建模'):s.title}:s)}));
+  useWorkspaceStore.setState(w=>({sessions:w.sessions.map(s=>s.id===id?withSnapshot(s,state):s)}));
 }
 function track(session:WorkspaceSession){
   if(stores.has(session.id))return stores.get(session.id)!;
@@ -138,28 +142,40 @@ export function toggleSessionPinned(id:string):boolean{
  if(blocked||sessionIsRunning(id))return false;const target=useWorkspaceStore.getState().sessions.find(s=>s.id===id&&!s.deletedAt);if(!target)return false;
  useWorkspaceStore.setState(w=>({sessions:w.sessions.map(s=>s.id===id?{...s,pinned:!s.pinned}:s)}));schedule();return true;
 }
-export function trashSession(id:string):boolean{
-  if(sessionIsRunning(id)||blocked)return false;capture();const w=useWorkspaceStore.getState();
-  let sessions=w.sessions.map(s=>s.id===id?{...s,deletedAt:Date.now()}:s);
+export function trashSession(id:string):boolean{return trashSessions([id]);}
+export function trashLibraryDrafts(ids:readonly string[],kind:'asset'|'scene'):boolean{return trashSessions(ids,kind);}
+function trashSessions(ids:readonly string[],kind?:'asset'|'scene'):boolean{
+  const w=useWorkspaceStore.getState(),targets=new Set(ids);
+  if(blocked||!w.ready||!targets.size)return false;
+  const editor=stores.get(w.activeId);
+  const deletedAt=Date.now();let matched=0;
+  let sessions=w.sessions.map(s=>{
+    const session=editor&&s.id===w.activeId?withSnapshot(s,editor.getState()):s;
+    if(!targets.has(s.id)||session.deletedAt||sessionIsRunning(s.id)||session.snapshot.wasRunning||(kind&&((session.moduleKind??'scene')!==kind||!isLibraryDraft(session))))return session;
+    matched++;return {...session,deletedAt};
+  });
+  if(matched!==targets.size)return false;
   let active=sessions.find(s=>s.id===w.activeId&&!s.deletedAt)??sessions.find(s=>!s.deletedAt);
   if(!active){active=record(fresh());sessions=[active,...sessions];}
-  useWorkspaceStore.setState({sessions,activeId:active.id});restore(active);schedule();return true;
+  useWorkspaceStore.setState({sessions,activeId:active.id});if(active.id!==w.activeId)restore(active);schedule();return true;
 }
 export function restoreSession(id:string):void{
   if(blocked)return;useWorkspaceStore.setState(w=>({sessions:w.sessions.map(s=>s.id===id?{...s,deletedAt:null}:s)}));schedule();
 }
 
 
+export const MAX_WORKSPACE_BACKUP_BYTES=200*1024*1024;
+export const WORKSPACE_BACKUP_SIZE_ERROR=`备份超过${MAX_WORKSPACE_BACKUP_BYTES/1024/1024} MiB，请分别导出项目`;
 /** Portable local backup. No model configuration or browser credentials are included. */
 export function exportWorkspaceBackup():string{
  if(busy())throw Error('请先停止生成再备份，以保存一致的草稿');capture();
  const sessions=useWorkspaceStore.getState().sessions.filter(s=>!s.deletedAt).map(s=>({moduleKind:s.moduleKind??'scene',assetCategory:s.assetCategory,sceneCategory:s.sceneCategory,libraryDescription:s.libraryDescription,title:s.title,pinned:!!s.pinned,project:JSON.parse(serializeProject(s.snapshot.doc)),draft:s.snapshot.pendingResult?JSON.parse(serializeProject(s.snapshot.pendingResult.doc)):null,messages:s.snapshot.messages.map(m=>({role:m.role,text:m.text,createdAt:m.createdAt})),composerText:s.snapshot.composerText}));
  const output=JSON.stringify({format:'chat3d-workspace-backup',version:1,createdAt:new Date().toISOString(),sessions});
- if(new TextEncoder().encode(output).length>50*1024*1024)throw Error('备份超过50MB，请分别导出项目');return output;
+ if(new TextEncoder().encode(output).length>MAX_WORKSPACE_BACKUP_BYTES)throw Error(WORKSPACE_BACKUP_SIZE_ERROR);return output;
 }
 export function importWorkspaceBackup(text:string):number{
  if(busy()||blocked||!useWorkspaceStore.getState().ready)throw Error('请先结束当前任务并解决存储错误');
- if(new TextEncoder().encode(text).length>50*1024*1024)throw Error('备份超过50MB');
+ if(new TextEncoder().encode(text).length>MAX_WORKSPACE_BACKUP_BYTES)throw Error(WORKSPACE_BACKUP_SIZE_ERROR);
  const pack=JSON.parse(text);if(pack?.format!=='chat3d-workspace-backup'||pack.version!==1||!Array.isArray(pack.sessions))throw Error('备份格式错误');
  const next:WorkspaceSession[]=[];
  for(const item of pack.sessions){

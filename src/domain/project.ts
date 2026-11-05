@@ -1,22 +1,29 @@
 import { withStockMaterials } from './materials';
 import { SceneDocument, SCHEMA_VERSION, validateDocument } from './types';
 
-export const MAX_PROJECT_BYTES = 20 * 1024 * 1024;
+export const MAX_PROJECT_BYTES = 100 * 1024 * 1024;
+export const MAX_TEAM_SCENE_BYTES = 50 * 1024 * 1024;
+export const PROJECT_SIZE_LIMIT = `${MAX_PROJECT_BYTES / (1024 * 1024)} MiB`;
+export const TEAM_SCENE_SIZE_LIMIT = `${MAX_TEAM_SCENE_BYTES / (1024 * 1024)} MiB`;
+const projectSizeError = (bytes: number) => `项目文件超过 ${bytes / (1024 * 1024)} MiB`;
+export const PROJECT_SIZE_ERROR = projectSizeError(MAX_PROJECT_BYTES);
 export const AUTOSAVE_KEY = 'chat3d.project.autosave.v1';
 
 // 项目文件不包含模型 API 地址、密钥或聊天附件。
-export function serializeProject(doc: SceneDocument): string {
+export function serializeProject(doc: SceneDocument, overflowMessage?: string, maxBytes = MAX_PROJECT_BYTES): string {
   const scene: SceneDocument = {
     schemaVersion: doc.schemaVersion, projectId: doc.projectId, revision: doc.revision,
     unit: doc.unit, upAxis: doc.upAxis, nodes: doc.nodes, materials: doc.materials,
     assets: doc.assets, ...(doc.animation?{animation:doc.animation}:{}), ...(doc.viewState ? { viewState: doc.viewState } : {}),
   };
   // Compact JSON keeps whitespace from consuming the portable byte budget.
-  const output=JSON.stringify({ format: 'chat3d-project', version: 1, scene });if(new TextEncoder().encode(output).length>MAX_PROJECT_BYTES)throw Error('项目文件超过20MB，请精简贴图或拆分场景后导出');return output;
+  const output = JSON.stringify({ format: 'chat3d-project', version: 1, scene });
+  if (new TextEncoder().encode(output).length > maxBytes) throw new Error(overflowMessage ?? `${projectSizeError(maxBytes)}，请精简贴图或拆分场景后导出`);
+  return output;
 }
 
-export function parseProject(text: string): SceneDocument {
-  if (new TextEncoder().encode(text).length > MAX_PROJECT_BYTES) throw new Error('项目文件超过 20 MB');
+export function parseProject(text: string, maxBytes = MAX_PROJECT_BYTES): SceneDocument {
+  if (new TextEncoder().encode(text).length > maxBytes) throw new Error(projectSizeError(maxBytes));
   let value: unknown;
   try { value = JSON.parse(text); } catch { throw new Error('项目文件不是有效 JSON'); }
   const pack = value as { format?: unknown; version?: unknown; scene?: SceneDocument } | null;
