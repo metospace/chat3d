@@ -21,6 +21,16 @@ try{
  const picture='data:image/jpeg;base64,YWJj';
  const fake=(steps)=>{let n=0;const contexts=[];const fn=async(model,context)=>{contexts.push(structuredClone(context));const step=steps[n++]??'done';const actions=typeof step==='function'?step(context):step;const content=Array.isArray(actions)?actions.map((a,i)=>({type:'toolCall',id:`call_${n}_${i}`,name:a.name,arguments:a.args})):[{type:'text',text:actions}];const message={role:'assistant',content,api:'openai-completions',provider:'mock',model:'mock',stopReason:Array.isArray(actions)?'toolUse':'stop',timestamp:Date.now(),usage:{input:20,output:10,cacheRead:0,cacheWrite:0,totalTokens:30,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}};const stream=createAssistantMessageEventStream();queueMicrotask(()=>{stream.push({type:'start',partial:message});stream.push({type:'done',reason:message.stopReason,message})});return stream};return {fn,contexts,get calls(){return n}}};
  const opts=(transport,document=createInitialDoc())=>({text:'按参考图建模',config:cfg,document,selection:[],images:[picture],streamFn:transport.fn,capture:async()=>picture});
+ await test('provider tool parameters clone nested schemas and preserve conjunctive unions',async()=>{
+  const {sanitizeToolParametersForProvider}=await server.ssrLoadModule('/src/ai/toolParameters.ts');
+  const schema={type:'object',required:['items'],additionalProperties:false,properties:{items:{type:'array',uniqueItems:true,minItems:1,items:{oneOf:[{const:'a'},{type:'array',uniqueItems:true,items:{oneOf:[{type:'number'}]}}],anyOf:[{type:'string'},{type:'array'}],allOf:[{description:'keep this constraint'}]}}}};
+  const original=structuredClone(schema);
+  const result=sanitizeToolParametersForProvider(schema);
+  assert.deepEqual(result,{type:'object',required:['items'],additionalProperties:false,properties:{items:{type:'array',minItems:1,items:{anyOf:[{type:'string'},{type:'array'}],allOf:[{description:'keep this constraint'},{anyOf:[{const:'a'},{type:'array',items:{anyOf:[{type:'number'}]}}]}]}}}});
+  assert.deepEqual(schema,original);
+  assert.notEqual(result.required,schema.required);
+  assert.notEqual(result.properties.items.items.anyOf[0],schema.properties.items.items.anyOf[0]);
+ });
  await test('task budgets normalize invalid input and preserve bounded defaults',async()=>{
   const {normalizeTaskBudget,taskBudgetReason}=await server.ssrLoadModule('/src/ai/taskBudget.ts');
   assert.deepEqual(normalizeTaskBudget(),{maxMinutes:10,maxRounds:24,maxReportedTokens:2000000});
@@ -254,6 +264,14 @@ try{
  await test('production Pi OpenAI adapter sends native tool schema and returns screenshot for the next request',async()=>{
    let wire=[];globalThis.fetch=async(url,init)=>{if(forceTransportError)throw new Error('本站模型代理响应异常（HTTP 403）。访问会话已失效');const body=JSON.parse(init.body);wire.push(body);const actions=wire.length===1?[plan,edit,capture]:[review,submit];const tc=actions.map((a,i)=>({index:i,id:`wire_${wire.length}_${i}`,type:'function',function:{name:a.name,arguments:JSON.stringify(a.args)}}));const raw='data: '+JSON.stringify({id:'test',object:'chat.completion.chunk',choices:[{index:0,delta:{role:'assistant',tool_calls:tc},finish_reason:null}]})+'\n\ndata: '+JSON.stringify({id:'test',object:'chat.completion.chunk',choices:[{index:0,delta:{},finish_reason:'tool_calls'}],usage:{prompt_tokens:30,completion_tokens:20,total_tokens:50}})+'\n\ndata: [DONE]\n\n';return new Response(raw,{headers:{'content-type':'text/event-stream'}})};
    const o=opts(fake([]));delete o.streamFn;const r=await runModelingAgent(o);assert.equal(wire.length,2);assert.ok(wire[0].tools.some(t=>t.function.name==='edit_scene'));assert.ok(wire.every(body=>body.tools.every(tool=>tool.type==='function')));assert.equal(wire[0].stream,true);assert.equal(wire[0].max_tokens,8192);assert.ok(JSON.stringify(wire[1].messages).includes('data:image/jpeg;base64,YWJj'));assert.equal(r.result.doc.nodes.length,1);assert.equal(r.activity.outputTokens,40);
+   const unsupportedKeywords=value=>value!==null&&typeof value==='object'&&Object.entries(value).some(([key,child])=>key==='oneOf'||key==='uniqueItems'||unsupportedKeywords(child));
+   const firstTools=wire[0].tools.map(tool=>tool.function);
+   const editScene=firstTools.find(tool=>tool.name==='edit_scene');
+   console.log('Pi reference-image tool declarations',JSON.stringify({names:firstTools.map(tool=>tool.name),count:firstTools.length,index25:firstTools[25]?.name??null,editSceneClean:!!editScene?.parameters&&!unsupportedKeywords(editScene.parameters)}));
+   for(const body of wire)for(const {function:{name,parameters}} of body.tools){
+    assert.ok(parameters,`${name} must declare its parameters`);
+    assert.ok(!unsupportedKeywords(parameters),`${name} parameters contain oneOf or uniqueItems`);
+   }
    assert.ok(wire.every(body=>!Object.hasOwn(body,'reasoning_effort')),'production default never sends off or an SDK-selected effort');
  });
  await test('draw-workshop wording is normalized only for outbound modeling messages',async()=>{

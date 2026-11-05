@@ -217,6 +217,28 @@ try{
   });
  });
 
+ await test('delete and motion tracks require exactly one selector',()=>{
+  const single={op:'delete',targetId:'n1'},multiple={op:'delete',targetIds:['n1']};
+  for(const operation of [single,multiple]){
+   assert.deepEqual(validateCommandOperations([operation]),[]);
+   assert.deepEqual(parse([operation]).operations,[operation]);
+  }
+  assertRejected({op:'delete'},['operations',0,'targetId']);
+  assertRejected({...single,...multiple},['operations',0]);
+  for(const channel of ['position','scale','rotation']){
+   const {keyframes:originalKeys,...track}=animation.tracks[0];
+   const keyframes=channel==='rotation'?[{time:0,value:0},{time:2,value:1}]:channel==='scale'?[{time:0,value:[1,1,1]},{time:2,value:[2,1,1]}]:originalKeys;
+   const expression=channel==='rotation'?'t':channel==='scale'?[1,1,1]:['t',0,0];
+   const motion=fields=>({op:'setAnimation',animation:{...animation,tracks:[{...track,channel,...(channel==='rotation'?{axis:[0,1,0],pivot:[0,0,0]}:{}),...fields}]}});
+   for(const operation of [motion({keyframes}),motion({expression})]){
+    assert.deepEqual(validateCommandOperations([operation]),[]);
+    assert.deepEqual(parse([operation]).operations,[operation]);
+   }
+   assertRejected(motion({}),['operations',0,'animation','tracks',0]);
+   assertRejected(motion({keyframes,expression}),['operations',0,'animation','tracks',0]);
+  }
+ });
+
  const config={baseURL:'https://mock.invalid/v1',apiKey:'mock-only',model:'mock-tools',useMock:false};
  const agentOptions=(transport,document)=>({text:'只修改选中主体，不改其他对象',config,document,selection:[],images:[],streamFn:transport.fn,captureAvailable:()=>false});
  const baseDocument=()=>{
@@ -224,8 +246,11 @@ try{
   assert.deepEqual(result.errors,[]);return result.doc;
  };
 
- await test('strict tool schemas omit uniqueItems and animation targets dedupe before apply',()=>{
-  for(const schema of [commandSchema,commandContracts,commandEnvelopeSchema])assert.ok(!JSON.stringify(schema).includes('"uniqueItems"'));
+ await test('strict tool schemas omit oneOf and uniqueItems',()=>{
+  for(const schema of [commandSchema,commandContracts,commandEnvelopeSchema])assert.doesNotMatch(JSON.stringify(schema),/"(?:oneOf|uniqueItems)"\s*:/);
+ });
+
+ await test('animation targets dedupe before apply',()=>{
   const document=baseDocument(),ids=document.nodes.map(node=>node.id),operation=clone(samples.setAnimation);
   operation.animation.tracks[0].targetIds=[ids[0],ids[1],ids[0],ids[1]];
   const before=clone(operation);
