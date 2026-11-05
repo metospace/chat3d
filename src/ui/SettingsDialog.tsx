@@ -53,7 +53,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       if (id !== sequence.current) return;
       setModels(r.models);
       if (r.error) { setError(c.signal.aborted ? '获取模型超时，请检查接口或稍后重试' : r.error); }
-      else { setManual(false); setModel((previous) => r.models.includes(previous) ? previous : (r.models.length === 1 ? r.models[0] : '')); }
+      else { setManual(!!model.trim()&&!r.models.includes(model)); setModel((previous) => previous || (r.models.length === 1 ? r.models[0] : '')); }
     } catch (e) { if (id === sequence.current) setError(e instanceof Error ? e.message : '获取模型失败'); }
     finally { window.clearTimeout(timeout); if (id === sequence.current) setFetching(false); }
   };

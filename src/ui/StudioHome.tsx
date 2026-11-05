@@ -46,7 +46,9 @@ export function StudioHome({onOpen,onGenerate,onConfigure,onTasks,onImport,hidde
  useEffect(()=>{if(hidden)return;let alive=true;listModelAssets().then(a=>{if(alive){setItems(a);setLibraryError('');}}).catch(()=>{if(alive)setLibraryError('资产预览读取失败，项目仍可打开。请稍后重试。');});return()=>{alive=false;};},[hidden]);
  const projects=sessions.filter(s=>!s.deletedAt&&(s.moduleKind||s.snapshot.doc.nodes.length||s.snapshot.messages.length)).sort((a,b)=>b.updatedAt-a.updatedAt);
  const matching=projects.filter(s=>(filter==='all'||(s.moduleKind??'scene')===filter)&&(s.title+' '+artworkTitle(s)).toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
- const recent=matching.slice(0,12);
+ const [visibleCount,setVisibleCount]=useState(12);
+ useEffect(()=>{setVisibleCount(12);},[search,filter]);
+ const recent=matching.slice(0,visibleCount);
  function startBlankProject(){
   if(creating.current)return;
   creating.current=true;
@@ -105,6 +107,7 @@ export function StudioHome({onOpen,onGenerate,onConfigure,onTasks,onImport,hidde
       </button>
       <Dropdown trigger={['click']} menu={{items:[{key:'rename',label:'重命名',onClick:()=>{setRenaming(project);setName(title);}}]}}><Button type="text" className="project-artwork-menu" aria-label={`作品操作 ${title}`} disabled={locked} icon={<DotsHorizontalIcon/>}/></Dropdown>
      </article>;})}</div>:<StudioEmptyState title={projects.length?'没有找到匹配的项目':'还没有作品？先说说你的想法'} description={projects.length?'试试其他名称，或切换项目类型。':'在上方描述一个模型或场景，你的作品会自动留在这里。'}/>}
+     {matching.length>recent.length&&<Button onClick={()=>setVisibleCount(count=>count+12)}>显示更多项目（还有 {matching.length-recent.length} 项）</Button>}
     </ProCard>
    </section>
   </div>
