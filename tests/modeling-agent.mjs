@@ -53,6 +53,45 @@ try{
   }
   assert.equal(JSON.stringify(schema),original);
  });
+ await test('provider tool parameters replace only ambiguous non-whitespace patterns without mutation',async()=>{
+  const {sanitizeToolParametersForProvider}=await server.ssrLoadModule('/src/ai/toolParameters.ts');
+  const schema={type:'string',minLength:1,pattern:'\\S',maxLength:80},original=structuredClone(schema);
+  assert.deepEqual(sanitizeToolParametersForProvider(schema),{type:'string',minLength:1,maxLength:80});
+  assert.deepEqual(schema,original);
+  for(const minLength of [undefined,0,-1,NaN,'1',3]){
+   const result=sanitizeToolParametersForProvider({type:'string',pattern:'\\S',minLength});
+   assert.ok(!Object.hasOwn(result,'pattern'));
+   assert.equal(result.minLength,minLength===3?3:1);
+  }
+  const hex={type:'string',pattern:'^#[0-9a-fA-F]{6}$'};
+  assert.deepEqual(sanitizeToolParametersForProvider(hex),hex);
+ });
+ await test('live optional tool registry exposes only provider-compatible schemas',async()=>{
+  const {OPTIONAL_TOOL_GROUP_NAMES}=await server.ssrLoadModule('/src/ai/toolExposure.ts');
+  const f=fake([[{name:'enable_modeling_tools',args:{groups:OPTIONAL_TOOL_GROUP_NAMES}}],[{name:'submit_data_preview',args:{summary:'工具注册表数据检查完成，未视觉验收'}}]]);
+  const o=opts(f,createInitialDoc());o.captureAvailable=()=>false;o.onPreview=()=>{};
+  await assert.rejects(()=>runModelingAgent(o),/本轮未修改场景，也未完成视觉验收/);
+  assert.equal(f.calls,2);
+  const tools=new Map(f.contexts.flatMap(c=>c.messages.flatMap(m=>m.toolsAdded??[])).map(t=>[t.name,t]));
+  assert.ok(tools.size>=50,`expected >=50 tools, got ${tools.size}`);
+  const walk=(value,path)=>{
+   if(!value||typeof value!=='object')return;
+   for(const [key,child] of Object.entries(value)){
+    const location=`${path}.${key}`;
+    assert.ok(!/^~/.test(key)&&!['oneOf','uniqueItems','additionalItems'].includes(key),location);
+    assert.ok(key!=='items'||!Array.isArray(child),location);
+    assert.ok(key!=='pattern'||child!=='\\S',location);
+    walk(child,location);
+   }
+  };
+  for(const [name,tool] of tools)walk(tool.parameters,name);
+  assert.ok(tools.has('build_modeling_program'));
+  const position=tools.get('build_modeling_program').parameters.properties.position;
+  assert.equal(position.items,false);
+  assert.ok(Array.isArray(position.prefixItems));assert.equal(position.prefixItems.length,3);
+  assert.ok(tools.has('edit_scene'));
+  assert.ok(!JSON.stringify(tools.get('edit_scene').parameters).includes(JSON.stringify('pattern')+':'+JSON.stringify('\\S')));
+ });
  await test('task budgets normalize invalid input and preserve bounded defaults',async()=>{
   const {normalizeTaskBudget,taskBudgetReason}=await server.ssrLoadModule('/src/ai/taskBudget.ts');
   assert.deepEqual(normalizeTaskBudget(),{maxMinutes:10,maxRounds:24,maxReportedTokens:2000000});

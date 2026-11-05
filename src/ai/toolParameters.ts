@@ -7,6 +7,11 @@ export function sanitizeToolParametersForProvider<T>(parameters:T):T {
     if(typeof key!=='string'||key.startsWith('~')||key==='oneOf'||key==='uniqueItems')continue;
     Object.defineProperty(result,key,{value:sanitizeToolParametersForProvider(Reflect.get(parameters,key)),enumerable:true,writable:true,configurable:true});
   }
+  if(result.pattern==='\\S'){
+    // Codex cannot determine emptiness for this search regex combined with minLength.
+    delete result.pattern;
+    if(typeof result.minLength!=='number'||!(result.minLength>=1))result.minLength=1;
+  }
   if(Array.isArray(result.items)){
     // Replace draft-07 tuple validation with draft 2020-12 keywords.
     const prefixItems=result.items;
