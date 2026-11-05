@@ -60,7 +60,13 @@ export class ManualInteraction {
  private down=(e:PointerEvent)=>{
   const c=this.config;if(!c||e.button!==0||e.isPrimary===false||this.gesture||(!c.placement&&(e.shiftKey||e.ctrlKey||e.metaKey)))return;
   if(c.placement){this.updateGhost(e);this.gesture={id:e.pointerId,x:e.clientX,y:e.clientY,start:null,change:null,placement:true};}
-  else{if(c.mode==='orbit'||!c.nodes.length)return;const ray=this.ray(e.clientX,e.clientY);if(!ray)return;this.scene.updateMatrixWorld(true);const hit=this.handles&&ray.intersectObjects(this.handles.children,false)[0];if(!hit)return;
+  else{if(c.mode==='orbit'||!c.nodes.length)return;const ray=this.ray(e.clientX,e.clientY);if(!ray)return;this.scene.updateMatrixWorld(true);
+   const handleHit=this.handles&&ray.intersectObjects(this.handles.children,false).length>0;
+   if(!handleHit){
+    const selectedIds=new Set(c.nodes.map(node=>node.id)),targets:THREE.Mesh[]=[];
+    for(const {mesh} of this.meshes().values())if(mesh.visible&&selectedIds.has(mesh.userData.nodeId))targets.push(mesh);
+    if(!ray.intersectObjects(targets,false).length)return;
+   }
    const start=this.ground(e.clientX,e.clientY);if(c.mode==='move'&&!start)return;this.gesture={id:e.pointerId,x:e.clientX,y:e.clientY,start,change:null,placement:false};
   }this.stop(e);this.canvas.setPointerCapture?.(e.pointerId);
  };
