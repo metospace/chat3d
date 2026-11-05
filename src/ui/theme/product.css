@@ -12047,6 +12047,8 @@ body:has(.frosted-studio) .workbench-project-info .editor-save-state,body:has(.f
   background: var(--sc-surface-elevated,#fdfefe);
   color: var(--sc-ink,#203334)
 }
+.object-tree-row.is-hidden .object-tree-name.ant-btn{color:var(--sc-ink-muted);opacity:.65}
+.object-tree-hidden-label{flex:none;font-size:10px;color:var(--sc-ink-muted);white-space:nowrap}
 .object-tree-group {
   margin: 2px 0;
   border-bottom: 1px solid var(--sc-border-subtle,#dce4e4)

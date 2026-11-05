@@ -10,7 +10,11 @@ import {blenderWorker} from './model.mjs';
 const run = promisify(execFile);
 const runner = fileURLToPath(new URL('./python-runner.py', import.meta.url));
 export const maxScriptBytes = 256 * 1024;
-const maxGlbBytes = 20 * 1024 * 1024;
+export const pythonArtifacts = [
+  {field:'blend',filename:'result.blend',mimeType:'application/octet-stream',maxBytes:32*1024*1024},
+  {field:'glb',filename:'result.glb',mimeType:'model/gltf-binary',maxBytes:20*1024*1024},
+  {field:'render',filename:'render.png',mimeType:'image/png',maxBytes:8*1024*1024},
+];
 export const pythonToolName = 'run_blender_python';
 export const pythonSchema = {type:'object', additionalProperties:false, required:['script'], properties:{script:{type:'string',minLength:1,maxLength:maxScriptBytes}}};
 // Only pass environment needed to locate and start Blender and its runtime.
@@ -22,6 +26,32 @@ export function validatePython(input) {
   return {script:input.script};
 }
 
+export function validatePythonArtifact(field,bytes) {
+  const artifact = pythonArtifacts.find(item=>item.field===field);
+  if (!artifact || !Buffer.isBuffer(bytes) || bytes.length > artifact.maxBytes) throw failure(422,'Invalid generated '+field+' size');
+  const valid = field === 'blend' ? bytes.length >= 12 && bytes.toString('ascii',0,7) === 'BLENDER'
+    : field === 'glb' ? bytes.length >= 20 && bytes.toString('ascii',0,4) === 'glTF' && bytes.readUInt32LE(4) === 2 && bytes.readUInt32LE(8) === bytes.length
+    : bytes.length >= 33 && bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])) && bytes.toString('ascii',12,16) === 'IHDR' && bytes.readUInt32BE(16) > 0 && bytes.readUInt32BE(20) > 0 && bytes.readUInt32BE(16) <= 768 && bytes.readUInt32BE(20) <= 768;
+  if (!valid) throw failure(422,'Invalid generated '+field);
+  return bytes;
+}
+
+async function readArtifact(dir,{field,filename,maxBytes}) {
+  const file = await open(join(dir,filename),constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)).catch(()=>{throw failure(422,'Blender Python did not produce '+filename);});
+  try {
+    const info = await file.stat();
+    if (!info.isFile() || info.size < 12 || info.size > maxBytes) throw failure(422,'Invalid generated '+field+' size');
+    const bytes = Buffer.alloc(info.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const {bytesRead} = await file.read(bytes,offset,bytes.length-offset,offset);
+      if (!bytesRead) break;
+      offset += bytesRead;
+    }
+    if (offset !== bytes.length) throw failure(422,'Incomplete generated '+field);
+    return validatePythonArtifact(field,bytes);
+  } finally {await file.close();}
+}
 // This executes trusted code with the Blender process's OS privileges. The temp
 // directory, execution timeout and output limits are not an OS sandbox.
 export async function runBlenderPython(input,{executable=process.env.BLENDER_EXECUTABLE ?? 'blender',signal}={}) {
@@ -41,22 +71,12 @@ export async function runBlenderPython(input,{executable=process.env.BLENDER_EXE
       if (error.code === 'ABORT_ERR') throw failure(499,'Blender Python cancelled');
       if (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') throw failure(422,'Blender Python log limit exceeded');
       if (error.killed) throw failure(504,'Blender Python timed out');
-      throw failure(422,'Blender Python execution or GLB export failed');
+      const logs=[error.stderr,error.stdout].filter(value=>typeof value==='string'&&value.trim()).join('\n');
+      throw failure(422,'Blender Python execution, artifact export or render failed'+(logs?'\n'+logs:': '+error.message));
     }
-    const file = await open(join(dir,'result.glb'),constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)).catch(()=>{throw failure(422,'Blender Python did not produce a GLB');});
-    try {
-      const info = await file.stat();
-      if (!info.isFile() || info.size < 20 || info.size > maxGlbBytes) throw failure(422,'Invalid generated GLB size');
-      const bytes = Buffer.alloc(info.size);
-      let offset = 0;
-      while (offset < bytes.length) {
-        const {bytesRead} = await file.read(bytes,offset,bytes.length-offset,offset);
-        if (!bytesRead) break;
-        offset += bytesRead;
-      }
-      if (offset !== bytes.length || bytes.toString('ascii',0,4) !== 'glTF' || bytes.readUInt32LE(4) !== 2 || bytes.readUInt32LE(8) !== bytes.length) throw failure(422,'Invalid generated GLB');
-      return bytes;
-    } finally {await file.close();}
+    const artifacts = {};
+    for (const artifact of pythonArtifacts) artifacts[artifact.field] = await readArtifact(dir,artifact);
+    return artifacts;
   } finally {
     try {if(dir) await rm(dir,{recursive:true,force:true});}
     finally {blenderWorker.active = false;}

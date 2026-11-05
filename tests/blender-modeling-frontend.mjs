@@ -11,7 +11,7 @@ try {
   const scene=new Scene(),mesh=new Mesh(new BoxGeometry(.12,.008,.08),new MeshStandardMaterial());
   scene.add(mesh);mesh.position.y=.004;
   const bytes=await new GLTFExporter().parseAsync(scene,{binary:true});
-  const {blenderModelingStatus,blenderPlateCommands,blenderScriptCommands,blenderPythonStatus}=await server.ssrLoadModule('/src/scene/blenderModeling.ts');
+  const {blenderModelingStatus,blenderPlateCommands,runBlenderScript,blenderPythonStatus}=await server.ssrLoadModule('/src/scene/blenderModeling.ts');
   const {applyBatch}=await server.ssrLoadModule('/src/domain/commands.ts');
   const draft={schemaVersion:1,projectId:'blender-regression',revision:0,unit:'m',upAxis:'Y',nodes:[],materials:[],assets:[]};
   let outcome='ok';
@@ -39,28 +39,31 @@ try {
     outcome=failure;await assert.rejects(blenderPlateCommands(created.doc,{...args,targetId:original.id}));
     assert.equal(JSON.stringify(created.doc),snapshot);
   }
-  const wheel=new Mesh(new BoxGeometry(.03,.03,.03),new MeshStandardMaterial({color:0x303030}));wheel.name='Wheel';wheel.position.set(.08,.02,.02);mesh.name='Chassis';scene.add(wheel);
-  const multi=await new GLTFExporter().parseAsync(scene,{binary:true});
-  const scriptArgs={name:'AGV',script:'import bpy\n# AGV',position:[1,2,3]};
+  const scriptArgs={name:'AGV',script:'import bpy\n# AGV'};
+  const payloads={blend:new Uint8Array([1,2,3]),glb:new Uint8Array(bytes),render:new Uint8Array([4,5,6])};
   let requests=0,posts=0,approved=false;
   globalThis.fetch=async(url,request)=>{
     requests++;
     if(url==='/api/blender/python/status'){assert.equal(request.headers['X-Chat3D-Python'],'1');return Response.json({available:true,token:'token'});}
     posts++;
     assert.ok(approved);assert.equal(url,'/api/blender/python');assert.equal(request.headers['X-Chat3D-Python'],'token');assert.deepEqual(JSON.parse(request.body),{script:scriptArgs.script});
-    return new Response(outcome==='invalid-glb'?new ArrayBuffer(20):multi);
+    const form=new FormData();
+    for(const [key,mime] of [['blend','application/octet-stream'],['glb','model/gltf-binary'],['render','image/png']]){
+      if(outcome!=='missing-render'||key!=='render')form.append(key,new Blob([payloads[key]],{type:mime}),key);
+    }
+    return new Response(form);
   };
   assert.deepEqual(await blenderPythonStatus(),{available:true,reason:undefined});requests=0;
-  await assert.rejects(blenderScriptCommands(scriptArgs),/未确认/);
-  await assert.rejects(blenderScriptCommands(scriptArgs,async()=>false),/未确认/);
+  await assert.rejects(runBlenderScript(scriptArgs),/未确认/);
+  await assert.rejects(runBlenderScript(scriptArgs,async()=>false),/未确认/);
   const stop=new AbortController();
-  await assert.rejects(blenderScriptCommands(scriptArgs,async()=>{stop.abort();return true;},stop.signal),{name:'AbortError'});
+  await assert.rejects(runBlenderScript(scriptArgs,async()=>{stop.abort();return true;},stop.signal),{name:'AbortError'});
   assert.equal(requests,0);assert.equal(posts,0);
   const confirm=async request=>{assert.deepEqual(request,scriptArgs);approved=true;return true;};
   outcome='ok';
-  const withAgv=applyBatch(created.doc,{operations:await blenderScriptCommands(scriptArgs,confirm)});
-  assert.deepEqual(withAgv.errors,[]);assert.equal(posts,1);assert.deepEqual(withAgv.doc.nodes[0],original);
-  const added=withAgv.doc.nodes.slice(1);assert.deepEqual(added.map(n=>n.name),['Chassis','Wheel']);assert.equal(new Set(added.map(n=>n.assemblyId)).size,1);assert.equal(new Set(added.map(n=>n.materialId)).size,2);assert.ok(Math.abs(added[1].transform.position[0]-1.08)<1e-6);
-  outcome='invalid-glb';await assert.rejects(blenderScriptCommands(scriptArgs,confirm));assert.equal(JSON.stringify(created.doc),snapshot);
-  console.log('PASS Blender status, existing plate compatibility, Python confirmation/cancellation and atomic multi-mesh append');
+  const result=await runBlenderScript(scriptArgs,confirm);
+  assert.equal(posts,1);
+  for(const [key,expected] of Object.entries(payloads))assert.deepEqual(new Uint8Array(await result[key].arrayBuffer()),expected);
+  outcome='missing-render';await assert.rejects(runBlenderScript(scriptArgs,confirm),/未返回完整/);
+  console.log('PASS plate compatibility, Python authorization/cancellation and unchanged Blender artifacts');
 } finally {globalThis.fetch=originalFetch;globalThis.FileReader=originalReader;await server.close();}

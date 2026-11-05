@@ -1,6 +1,6 @@
 import {randomBytes, timingSafeEqual} from 'node:crypto';
 import {pythonThroughMcp} from './mcp-client.mjs';
-import {maxScriptBytes, validatePython} from './python.mjs';
+import {maxScriptBytes, pythonArtifacts, validatePython} from './python.mjs';
 import {executableExists} from './build-http.mjs';
 
 const root = '/api/blender/python';
@@ -45,8 +45,17 @@ export function pythonMiddleware({bindHost, executable='blender', publicOrigin} 
       let input;
       try {input = validatePython(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks))));}
       catch (error) {return send(error.status ?? 422,{error:error.status ? error.message : 'Invalid UTF-8 JSON'});}
-      const bytes = await pythonThroughMcp(input,{executable,signal:ac.signal});
-      return res.writeHead(200,{'Content-Type':'model/gltf-binary','Content-Length':bytes.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}).end(bytes);
+      const artifacts = await pythonThroughMcp(input,{executable,signal:ac.signal});
+      if (ac.signal.aborted) return;
+      const boundary = 'scenivo-'+randomBytes(24).toString('hex');
+      const parts = [];
+      for (const {field,filename,mimeType} of pythonArtifacts) {
+        parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${field}"; filename="${filename}"\r\nContent-Type: ${mimeType}\r\n\r\n`),artifacts[field],Buffer.from('\r\n'));
+      }
+      const end = Buffer.from(`--${boundary}--\r\n`);
+      res.writeHead(200,{'Content-Type':'multipart/form-data; boundary='+boundary,'Content-Length':parts.reduce((size,part)=>size+part.length,end.length),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
+      for (const part of parts) res.write(part);
+      return res.end(end);
     } catch(error) {
       if (!res.destroyed) return send(error.status ?? 500,{error:error.status ? error.message : 'Blender Python failed'});
     }

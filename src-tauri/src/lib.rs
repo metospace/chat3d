@@ -22,7 +22,8 @@ fn save_support_json(app: tauri::AppHandle, contents: String, kind: String) -> R
     };
     if contents.len() > 50 * 1024 * 1024 { return Err("导出文件超过50MB".into()); }
     let value: serde_json::Value = serde_json::from_str(&contents).map_err(|_| "导出内容不是有效JSON")?;
-    if value.get("format").and_then(|v| v.as_str()) != Some(format) { return Err("导出格式不匹配".into()); }
+    let actual_format = value.get("format").and_then(|v| v.as_str());
+    if actual_format != Some(format) && !(kind == "diagnostics" && actual_format == Some("chat3d-full-diagnostics-v1")) { return Err("导出格式不匹配".into()); }
     let directory = app.path().download_dir().map_err(|e| e.to_string())?.join("Scenivo");
     std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_millis();

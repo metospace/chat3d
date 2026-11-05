@@ -86,10 +86,10 @@ try{
  await ui.goto('http://127.0.0.1:'+port+'/');
  
  const picker=ui.getByRole('button',{name:'生成档位，当前精细'}).first();await picker.click();
- assert.equal(await ui.getByRole('menuitemradio',{name:'写实风格'}).getAttribute('aria-checked'),'true');
- await ui.getByRole('menuitemradio',{name:'简洁风格'}).click();
- assert.equal(await ui.evaluate(()=>JSON.parse(localStorage.getItem('chat3d.modelConfig')).generationStyle),'illustrative');
- await picker.click();await ui.getByRole('menuitemradio',{name:'写实风格'}).click();
+ assert.equal(await ui.getByRole('menuitemradio',{name:'直接生成'}).getAttribute('aria-checked'),'true');
+ assert.equal(await ui.getByRole('menuitemradio',{name:'简洁风格'}).count(),0);
+ await ui.getByRole('menuitemradio',{name:'Blender 生成'}).click();
+ await picker.click();await ui.getByRole('menuitemradio',{name:'直接生成'}).click();
  await picker.click();await ui.waitForTimeout(250);await ui.screenshot({path:resolve(output,'realistic-menu-desktop.png')});
  await ui.keyboard.press('Escape');await ui.setViewportSize({width:390,height:844});await picker.click();
  const menu=ui.getByRole('menu',{name:'生成档位'});const bounds=await menu.boundingBox();assert.ok(bounds.x>=0&&bounds.x+bounds.width<=391);await ui.waitForTimeout(250);await ui.screenshot({path:resolve(output,'realistic-menu-mobile.png')});

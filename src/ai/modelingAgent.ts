@@ -1,10 +1,10 @@
+import type {DiagnosticEntry} from './runTraceLog';
 import {commandSchema,validateCommandOperations,CommandContractError,commandContractGuide} from './commandContract';
 import {EvidenceContext} from './evidenceContext';
 import {buildRepairAgenda} from './repairAgenda';
 import {sceneContract} from './sceneContract';
 import {readSource,editSource} from './modelingProgramSource';
 import {runModelingProgram} from '../scene/modelingProgram';
-import {blenderScriptCommands,BlenderScriptDeclined,MAX_BLENDER_SCRIPT_BYTES,type ConfirmBlenderScript} from '../scene/blenderModeling';
 import {modelingProgramCommands,modelingProgramSource} from './modelingProgramDraft';
 import {agentSceneContext,targetedSceneContext,selectedAssemblies,compactAgentContext} from './agentContext';
 import {structuredPartSchema,compositionSchema} from './agentSchemas';
@@ -89,6 +89,7 @@ export { AGENT_LIMITS } from './agentPolicy';
 export interface ActivityTiming { summary?:string;phase?:'planning'|'building'|'reviewing'|'repairing'; failureCategory?:ToolFailureCategory;toolName?:string;repeatedInput?:boolean;argumentsChars?:number;resultChars?:number;sceneRevision?:number;firstContentAt?:number;responseAt?:number;usageState?:UsageState;uncachedInputTokens?:number;cacheReadTokens?:number;cacheWriteTokens?:number; id:string; kind:'model'|'tool'; label:string; startedAt:number; firstDataAt?:number; endedAt?:number; failed?:boolean; detail?:string; inputTokens?:number; outputTokens?:number; requestFootprint?:RequestFootprint }
 export interface DesignBrief {flow:string[];layout:string;equipment:{name:string;count:number;features:string[]}[];checks:string[];composition?:CompositionPlan}
 export interface AgentActivity {
+  diagnostics?:DiagnosticEntry[];
   phase?:'planning'|'building'|'reviewing'|'repairing';
   lastModelEditAt?:number;
   executionMeta?:ExecutionMetadata;
@@ -117,14 +118,13 @@ export interface AgentResult { batch: CommandBatch; result: ExecutionResult; act
 interface AgentOptions {
   budgetState?:{startedAt:number;rounds:number;reportedTokens:number;controller:AbortController};
   workerTask?:boolean;
-  blenderModeling?:boolean;
-  confirmBlenderScript?:ConfirmBlenderScript;
   workerStreamFn?:(name:string)=>StreamFn;
   qualityBaseline?:SceneDocument;
   referenceRepairs?:ReferenceRepairItem[];
   text: string; config: ModelConfig; document: SceneDocument; selection: string[];
   images?: string[]; history?: ConversationTurn[]; signal?: AbortSignal; editScope?:EditScope;
   onActivity?: (activity: AgentActivity) => void;
+  onDiagnostic?:(kind:string,data:unknown)=>void;
   onPreview?: (doc: SceneDocument) => void;
   onCheckpoint?: (result: AgentResult) => void;
   onControl?: (control:AgentControl|null) => void;
@@ -175,7 +175,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
   const continuation=resolvedIntent!==options.text;
   let preserveAssetShape=preserveAssetShapeIntent(options.text,options.history);
   let wantsAnimation=/动起来|动画|动作|没有动|没动|运动|循环播放|animate/i.test(resolvedIntent)&&!/(不要|无需|不需要).{0,5}(?:动画|动作)/.test(resolvedIntent);
-  const needsDesign=!options.blenderModeling&&!options.workerTask&&base.nodes.length===0&&requestsFullScene(options.text);
+  const needsDesign=!options.workerTask&&base.nodes.length===0&&requestsFullScene(options.text);
   let requirements:Requirement[]=[];const userTexts=[resolvedIntent];const executionTexts=[resolvedIntent];let questionOnly=false,requirementsNeedRefresh=false;
   const operations: Command[]=[];
   const applied: ExecutionResult['applied']=[];
@@ -305,18 +305,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
       const parsed=parseModelResponse(JSON.stringify(args));
       return commitEdits({summary:args.summary,operations:parsed.operations});
     };
-  let blenderFailure=false,blenderDeclined=false;
   const tools: AgentTool<any>[]=[
-    ...(options.blenderModeling?[tool('run_blender_python','执行 Blender Python 脚本','执行任意 Blender Python 脚本（用户启用模式后直接执行），自动将 Blender 场景导出为 GLB 并把普通静态网格追加到当前草稿。每次从空场景开始；米制、Blender Z 向上；position 是可选的工作台 Y 向上坐标偏移（米）。保留不同网格和材质，不替换已有对象。',Type.Object({name:Type.String({minLength:1,maxLength:80}),script:Type.String({minLength:1,maxLength:MAX_BLENDER_SCRIPT_BYTES}),position:Type.Optional(Type.Tuple([Type.Number(),Type.Number(),Type.Number()]))},{additionalProperties:false}),async(_id,args)=>{
-      check();blenderFailure=true;
-      if(preserveAssetShape||options.editScope?.nodeIds)throw Error('Blender Python 仅能追加新组件，不能在保形任务或仅选中对象范围执行。');
-      if(submitted)throw Error('当前预览已经提交，不能继续追加模型。');
-      const executionSignal=signal?AbortSignal.any([signal,budgetController.signal]):budgetController.signal;
-      if(blenderDeclined)throw new BlenderScriptDeclined();
-      const operations=await blenderScriptCommands(args,options.confirmBlenderScript,executionSignal).catch(error=>{if(error instanceof BlenderScriptDeclined)blenderDeclined=true;throw error;});check();
-      const result=await commitEdits({summary:'已导入 Blender Python 生成的多网格模型',operations});
-      blenderFailure=false;return result;
-    })]:[]),
     tool('read_command_contract','读取命令参数契约','读取当前支持的全部命令、必填字段和组合约束。缺字段或参数错误先按统一报告纠正原批次，不猜缺失值、不换路线新建无关模型。',Type.Object({}),async()=>textResult(commandContractGuide())),
     tool('read_scene_contract','读取共享场景约束','读取当前布局、单位、主要材质、比例方案和参数化组件目录，用于局部修正保持全场一致。只读现状，不代表质量通过，不扩大编辑权限。',Type.Object({}),async()=>textResult(JSON.stringify(sceneContract(draft,activity.design,activity.objectBlueprints)))),
     tool('recall_evidence','取回已归档检查图','分页取回本次任务已生成的原始检查图，不重新渲染、不增加验收权限。list查看captureId及游标；images一次最多3张，原始版本与当前版本不符则拒绝。',Type.Union([Type.Object({mode:Type.Literal('list'),offset:Type.Optional(Type.Integer({minimum:0})),limit:Type.Optional(Type.Integer({minimum:1,maximum:12}))},{additionalProperties:false}),Type.Object({mode:Type.Literal('images'),captureId:Type.String(),startImage:Type.Optional(Type.Integer({minimum:0})),count:Type.Optional(Type.Integer({minimum:1,maximum:3}))},{additionalProperties:false})]),async(_id,args)=>args.mode==='list'?textResult(JSON.stringify(evidenceContext.list(args.offset,args.limit))):evidenceContext.recall(args,draft.revision)),
@@ -562,7 +551,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
       return {...textResult('预览已提交，等待用户确认应用。'),terminate:true};
     }),
   ];
-  const parallelEnabled=!options.blenderModeling&&cfg.parallelDrafts===true&&!options.workerTask&&!options.editScope?.nodeIds&&!options.editScope?.lockPlacement;
+  const parallelEnabled=cfg.parallelDrafts===true&&!options.workerTask&&!options.editScope?.nodeIds&&!options.editScope?.lockPlacement;
   if(parallelEnabled)tools.push(tool('build_components_parallel','并行生成独立组件','实验能力：仅用于2–4个确实需要独立建模的静态新组件，最多2个子代理同时运行。每个只接收自己的brief和公共style，不读取主场景/历史。position是合并时世界平移，子模型围绕原点地面Y=0。主代理负责明确尺寸/风格/接口约束并在合并后统一检查质量、布局和接触。现成目录批量放置、简单调整或相互依赖的动作直接用已有工具，不要启动子代理。可能增加总Token，不保证提速。',Type.Object({style:Type.String({maxLength:500}),items:Type.Array(Type.Object({name:Type.String({minLength:1,maxLength:80}),brief:Type.String({minLength:15,maxLength:1800}),position:Type.Tuple([Type.Number(),Type.Number(),Type.Number()])}),{minItems:2,maxItems:4})}),async(_id,args)=>{
     check();if(needsDesign&&!activity.plan.length)throw Error('完整场景先plan_model，再拆分独立组件');
     const epoch=parallelEpoch,controller=new AbortController();parallelController=controller;
@@ -573,7 +562,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
       const results=await runBoundedJobs(args.items,async(job,index)=>{
         const row=rows[index];row.status='running';row.startedAt=Date.now();emit('子代理正在生成：'+job.name);
         try{
-          const child=await runModelingAgent({text:'只创建独立组件“'+job.name+'”。'+job.brief+'。共同要求：'+args.style+'。围绕原点建模，Y=0为地面，不创建整个场景、不创建额外地板。任务完毕提交数据草稿，最终视觉质量由主代理检查。',config:{...cfg,parallelDrafts:false},document:isolatedDocument(base),selection:[],workerTask:true,budgetState,images:options.images,signal:controller.signal,captureAvailable:()=>false,streamFn:options.workerStreamFn?.(job.name),onActivity:childActivity=>{
+          const child=await runModelingAgent({text:'只创建独立组件“'+job.name+'”。'+job.brief+'。共同要求：'+args.style+'。围绕原点建模，Y=0为地面，不创建整个场景、不创建额外地板。任务完毕提交数据草稿，最终视觉质量由主代理检查。',config:{...cfg,parallelDrafts:false},document:isolatedDocument(base),selection:[],workerTask:true,budgetState,images:options.images,signal:controller.signal,captureAvailable:()=>false,streamFn:options.workerStreamFn?.(job.name),onDiagnostic:(kind,data)=>options.onDiagnostic?.(kind,{component:job.name,value:data}),onActivity:childActivity=>{
             if(controller.signal.aborted||epoch!==parallelEpoch)return;
             activity.inputTokens+=Math.max(0,childActivity.inputTokens-row.inputTokens);activity.outputTokens+=Math.max(0,childActivity.outputTokens-row.outputTokens);
             row.inputTokens=childActivity.inputTokens;row.outputTokens=childActivity.outputTokens;row.rounds=childActivity.turn;row.toolCalls=childActivity.toolCalls;row.usageReported=childActivity.usageReported;
@@ -598,12 +587,8 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
     }
   }));
   if(options.workerTask){const allowed=new Set(['read_scene_contract','patch_modeling_program','build_modeling_program','read_modeling_program','retry_structured_component','bind_object_features','repair_structured_features','build_structured_component','read_saved_asset','inspect_asset_instances','align_saved_instances','plan_object_structure','bind_object_features','list_saved_assets','add_saved_assets','edit_scene','read_scene','find_scene_parts','list_mesh_components','add_mesh_component','add_mesh_components','read_component_recipe','add_reference_component','set_surface_detail','set_surfaces_batch','prepare_surface_uv','detail_quality_standard','inspect_scene','check_requirements','submit_data_preview']);for(let i=tools.length-1;i>=0;i--)if(!allowed.has(tools[i].name))tools.splice(i,1);}
-  if(options.blenderModeling){
-    const allowed=new Set(['run_blender_python','plan_model','inspect_scene','read_scene','find_scene_parts','find_scene_parts_batch','read_scene_contract','inspect_model_quality','inspect_part_topology','check_requirements','capture_quality_review','capture_view','capture_multiview','recall_evidence','review_model','submit_preview','submit_data_preview','detail_quality_standard','audit_model_detail','audit_model_details_batch']);
-    for(let i=tools.length-1;i>=0;i--)if(!allowed.has(tools[i].name))tools.splice(i,1);
-  }
   const model:Model<'openai-completions'>={id:cfg.model,name:cfg.model,api:'openai-completions',provider:'chat3d-gateway',baseUrl:cfg.baseURL.trim().replace(/\/+$/,''),reasoning:false,input:['text','image'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:32768,maxTokens:AGENT_LIMITS.outputPerTurn,compat:{supportsDeveloperRole:false,supportsReasoningEffort:false,supportsStore:false,supportsUsageInStreaming:true,maxTokensField:'max_tokens'}};
-  const prompt=buildModelingPrompt({draft,base,selection:selectionForDoc(draft),editScope:options.editScope,history:options.history,workerTask:options.workerTask,generationQuality,generationStyle:cfg.generationStyle,wantsAnimation,visualAvailable:visualAvailable(),parallelEnabled,preserveAssetShape,hasReferenceImages:!!options.images?.length})+(options.blenderModeling?'\n本轮已开启 Blender Python：使用 run_blender_python 生成用户实际请求的模型（例如 AGV 的底盘、车轮、传感器与外壳，可用 bpy 脚本生成多个命名网格）。Blender 使用米、Z 向上；后端自动导出场景，不需要脚本自行导出。脚本应只做建模，不读写外部文件、不访问网络、不启动进程；不要输入密钥、私人数据或系统路径。启用本模式即直接执行，不等待逐次确认。参考图建模先按可见位置、轮廓、长宽高和设备顺序拆解，再生成几何；先匹配相机视角和轮廓，不用重复小零件代替外观差异。对于 SMT 产线，分别建模窄上/下板机、深色观察窗与内部导轨、贴片机开放送料架、低长斜顶分段回流焊炉；把前景通道、低矮载架 AGV、玻璃门防潮柜与绿色检验台按图分区。只在参考图确有这些对象时使用。现有工作台草稿不会被传给 Blender；GLB 导入只追加，不覆盖或直接修改旧对象。不要调用其他建模或结构规划工具。成功导入后按正常流程复核及提交预览；失败或用户不要求建模时不要编造结果。':'');
+  const prompt=buildModelingPrompt({draft,base,selection:selectionForDoc(draft),editScope:options.editScope,history:options.history,workerTask:options.workerTask,generationQuality,wantsAnimation,visualAvailable:visualAvailable(),parallelEnabled,preserveAssetShape,hasReferenceImages:!!options.images?.length});
   const underlyingFetch=options.streamFn?undefined:await getFetch();
   let transportFailure='';
   const f:typeof fetch|undefined=underlyingFetch?async(input,init)=>{try{return await underlyingFetch(input,init);}catch(error){
@@ -662,13 +647,14 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
         const body=(replacement===undefined?payload:replacement) as Record<string,unknown>;
         if(cfg.reasoningEffort)body.reasoning_effort=cfg.reasoningEffort;
         else delete body.reasoning_effort;
+        options.onDiagnostic?.('model_request',body);
         return body;
       }};
       if(options.streamFn)return options.streamFn(m,context,streamOptions);
       return stream(model,context,{...streamOptions,apiKey:cfg.apiKey.trim(),fetch:f,maxTokens:AGENT_LIMITS.outputPerTurn,maxRetries:0,timeoutMs:AGENT_LIMITS.idleTimeoutMs,
-        onProviderStreamEvent:data=>{if(providerHasUsage(data))providerUsageRounds.add(calls);firstData();emit(activity.title);},onResponse:()=>{stamp(`model-${calls}`,{responseAt:Date.now()});emit(`第 ${calls} 轮：服务已响应，正在接收`);} });
+        onProviderStreamEvent:data=>{options.onDiagnostic?.('provider_event',data);if(providerHasUsage(data))providerUsageRounds.add(calls);firstData();emit(activity.title);},onResponse:()=>{stamp(`model-${calls}`,{responseAt:Date.now()});emit(`第 ${calls} 轮：服务已响应，正在接收`);} });
     },
-    beforeToolCall:async({toolCall})=>{check();stageReason=stageReason||budgetExceeded();if(stageReason)return {block:true,reason:stageReason,terminate:true};if(!visualAvailable()&&['audit_model_detail','audit_model_details_batch'].includes(toolCall.name))return {block:true,reason:'当前无可用画面证据，系统已自动标记细节未验收；无需逐项填写unknown。继续完成数据编辑与必要数量检查，然后submit_data_preview。'};if(!visualAvailable()&&(['capture_view','capture_multiview','capture_quality_review','capture_detail_diagnostic','capture_component_intrinsic','preview_animation','review_model'].includes(toolCall.name)||(toolCall.name==='submit_preview'&&reviewRequirement(base,draft).kind!=='none')))return {block:true,reason:unavailableStage(),terminate:true};if(runner.hasQueuedMessages())return {block:true,reason:'用户补充了新指令，请先读取并按最新要求重新决定操作',terminate:true};if(questionOnly&&['run_blender_python','patch_modeling_program','build_modeling_program','retry_structured_component','bind_object_features','repair_structured_features','build_structured_component','align_saved_instances','add_saved_assets','retry_scene_edit','define_pose_rig','pose_with_rig','bend_existing_mesh','pose_existing_parts','pose_bimanual_interaction','pose_arm_interaction','create_hand_pose','edit_scene','configure_animation','configure_process_route','add_reference_component','add_mesh_component','add_mesh_components','connect_scene_parts','remove_connection','set_surface_detail','set_surfaces_batch','build_components_parallel','prepare_surface_uv','move_components','submit_data_preview','submit_preview'].includes(toolCall.name))return {block:true,reason:'用户当前选择只提问，请直接回答，不要修改或提交场景',terminate:true};if(seenCalls.has(toolCall.id))return {block:true,reason:'重复的工具调用ID已拒绝，避免重复修改'};seenCalls.add(toolCall.id);if(submitted)return {block:true,reason:'本轮已提交预览',terminate:true};if(pauseReason)return {block:true,reason:pauseReason,terminate:true};activity.toolCalls++;return undefined;},
+    beforeToolCall:async({toolCall})=>{check();stageReason=stageReason||budgetExceeded();if(stageReason)return {block:true,reason:stageReason,terminate:true};if(!visualAvailable()&&['audit_model_detail','audit_model_details_batch'].includes(toolCall.name))return {block:true,reason:'当前无可用画面证据，系统已自动标记细节未验收；无需逐项填写unknown。继续完成数据编辑与必要数量检查，然后submit_data_preview。'};if(!visualAvailable()&&(['capture_view','capture_multiview','capture_quality_review','capture_detail_diagnostic','capture_component_intrinsic','preview_animation','review_model'].includes(toolCall.name)||(toolCall.name==='submit_preview'&&reviewRequirement(base,draft).kind!=='none')))return {block:true,reason:unavailableStage(),terminate:true};if(runner.hasQueuedMessages())return {block:true,reason:'用户补充了新指令，请先读取并按最新要求重新决定操作',terminate:true};if(questionOnly&&['patch_modeling_program','build_modeling_program','retry_structured_component','bind_object_features','repair_structured_features','build_structured_component','align_saved_instances','add_saved_assets','retry_scene_edit','define_pose_rig','pose_with_rig','bend_existing_mesh','pose_existing_parts','pose_bimanual_interaction','pose_arm_interaction','create_hand_pose','edit_scene','configure_animation','configure_process_route','add_reference_component','add_mesh_component','add_mesh_components','connect_scene_parts','remove_connection','set_surface_detail','set_surfaces_batch','build_components_parallel','prepare_surface_uv','move_components','submit_data_preview','submit_preview'].includes(toolCall.name))return {block:true,reason:'用户当前选择只提问，请直接回答，不要修改或提交场景',terminate:true};if(seenCalls.has(toolCall.id))return {block:true,reason:'重复的工具调用ID已拒绝，避免重复修改'};seenCalls.add(toolCall.id);if(submitted)return {block:true,reason:'本轮已提交预览',terminate:true};if(pauseReason)return {block:true,reason:pauseReason,terminate:true};activity.toolCalls++;return undefined;},
     finishTurn:async({message})=>{
       stageReason=stageReason||budgetExceeded();
       if(stageReason){emit(stageReason,true);return {action:'end'};}
@@ -697,6 +683,9 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
   const abort=()=>{parallelController?.abort();runner.abort();};signal?.addEventListener('abort',abort,{once:true});
   const unsubscribe=runner.subscribe(event=>{
     if(signal?.aborted)return;
+    if(event.type==='message_end')options.onDiagnostic?.('message',event.message);
+    if(event.type==='tool_execution_start')options.onDiagnostic?.('tool_start',{id:event.toolCallId,name:event.toolName,arguments:event.args});
+    if(event.type==='tool_execution_end')options.onDiagnostic?.('tool_end',{id:event.toolCallId,name:event.toolName,error:event.isError,result:event.result});
     if(event.type==='message_end'&&event.message.role==='user'){const guide=steeringMessages.get(event.message.timestamp);if(guide){respondingToSteering=true;questionOnly=guide.mode==='question';localFocus=undefined;if(preserveAssetShapeIntent(guide.text,options.history))preserveAssetShape=true;userTexts.push(guide.text);if(!questionOnly){executionTexts.push(guide.text);requirementsNeedRefresh=requirements.length>0;}steeringMessages.delete(event.message.timestamp);options.onSteeringApplied?.(guide.id);emit('已接收补充要求，正在按最新指令调整',true);}}
     // The runner validates before execute/beforeToolCall. Cache schema failures here too.
     // Only attach recovery to actual schema rejection, never blocked/truncated calls.
@@ -726,14 +715,13 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
       const name=event.toolName;
       if(name==='plan_model'||name==='plan_object_structure')activity.phase='planning';
       else if(name.startsWith('capture_')||name.startsWith('inspect_')||name.startsWith('audit_')||['review_model','preview_animation','detail_quality_standard','check_requirements','submit_preview','submit_data_preview'].includes(name))activity.phase='reviewing';
-      else if(['run_blender_python','patch_modeling_program','build_modeling_program','edit_scene','retry_scene_edit','retry_structured_component','build_structured_component','repair_structured_features','build_components_parallel','move_components','align_saved_instances','add_saved_assets','add_mesh_component','add_mesh_components','add_reference_component','configure_animation','configure_process_route','pose_with_rig','bend_existing_mesh','pose_existing_parts','pose_arm_interaction','pose_bimanual_interaction','create_hand_pose','set_surface_detail','set_surfaces_batch','prepare_surface_uv','connect_scene_parts','remove_connection'].includes(name))activity.phase=name==='patch_modeling_program'||name.startsWith('retry_')||name==='repair_structured_features'||completionBlockers.length>0||detailReviews.some(r=>r.checks.some(c=>c.status==='fail'))?'repairing':'building';
+      else if(['patch_modeling_program','build_modeling_program','edit_scene','retry_scene_edit','retry_structured_component','build_structured_component','repair_structured_features','build_components_parallel','move_components','align_saved_instances','add_saved_assets','add_mesh_component','add_mesh_components','add_reference_component','configure_animation','configure_process_route','pose_with_rig','bend_existing_mesh','pose_existing_parts','pose_arm_interaction','pose_bimanual_interaction','create_hand_pose','set_surface_detail','set_surfaces_batch','prepare_surface_uv','connect_scene_parts','remove_connection'].includes(name))activity.phase=name==='patch_modeling_program'||name.startsWith('retry_')||name==='repair_structured_features'||completionBlockers.length>0||detailReviews.some(r=>r.checks.some(c=>c.status==='fail'))?'repairing':'building';
       if(name==='build_modeling_program'&&event.args&&typeof event.args==='object'&&'replaceComponentId' in event.args&&event.args.replaceComponentId)activity.phase='repairing';
     }
     if(event.type==='tool_execution_start'){const inputKey=JSON.stringify([draft.revision,event.toolName,event.args,parallelEpoch]);const repeatedInput=toolInputs.has(inputKey);toolInputs.add(inputKey);const readArgs=event.args as {assemblyId?:string;nodeIds?:string[]};const readLabel=readArgs.assemblyId?'组件:'+(draft.nodes.find(n=>n.assemblyId===readArgs.assemblyId)?.assemblyName??readArgs.assemblyId):readArgs.nodeIds?'节点:'+readArgs.nodeIds.map(id=>draft.nodes.find(n=>n.id===id)?.name??id).join(',').slice(0,120):'总览';turnActions.push(event.toolName+(event.toolName==='read_scene'?`(${readLabel})`:''));const label=tools.find(t=>t.name===event.toolName)?.label??event.toolName;activity.timings=[...activity.timings,{id:event.toolCallId,kind:'tool',label,phase:activity.phase,summary:publicToolSummary(event.toolName,event.args),toolName:tools.some(t=>t.name===event.toolName)?event.toolName:undefined,repeatedInput,argumentsChars:JSON.stringify(event.args??{}).length,sceneRevision:draft.revision,detail:event.toolName==='read_scene'?readLabel:typeof (event.args as {summary?:unknown}).summary==='string'?String((event.args as {summary:string}).summary).slice(0,300):undefined,startedAt:Date.now()}];emit(`正在${label}`);}
     if(event.type==='tool_execution_end'){const result=event.result as {content?:{type:string;text?:string}[]};const detail=event.isError?(result?.content??[]).filter(c=>c.type==='text').map(c=>c.text??'').join(' ').split('Received arguments:')[0].slice(0,500):undefined;stamp(event.toolCallId,{endedAt:Date.now(),failed:event.isError,resultChars:JSON.stringify(result?.content??[]).length,...(event.isError?{failureCategory:classifyToolFailure(detail,event.toolName)}:{}),...(detail?{detail}:{})});emit(activity.title);}
     if(event.type==='tool_execution_end'){
       if(event.isError){
-        if(event.toolName==='run_blender_python')blenderFailure=true;
         const result=event.result as {content?:{type:string;text?:string}[]};
         const detail=(result?.content??[]).filter(c=>c.type==='text').map(c=>c.text??'').join(' ').split('Received arguments:')[0].slice(0,700);
         if(detail!==pauseReason){lastToolError=`${event.toolName}：${detail}`;turnErrors.push(lastToolError);if(!rootToolErrors.includes(lastToolError)){rootToolErrors.push(lastToolError);if(rootToolErrors.length>3)rootToolErrors.shift();}}
@@ -778,7 +766,6 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
     const last=[...runner.state.messages].reverse().find(m=>m.role==='assistant');
     if(last?.role==='assistant' && (last.stopReason==='error'||last.stopReason==='aborted'))throw new Error(transportFailure||last.errorMessage||'模型服务未完成请求，请检查工具调用兼容性');
     if(operations.length&&!submitted){emit('本轮结束，已保留未完成阶段草稿',true);return checkpoint(stageReason|| (pauseReason?(pauseReason+'\n原始工具错误：'+rootToolErrors.join('；')):last?.role==='assistant'&&last.stopReason==='stop'&&last.content.some(c=>c.type==='text')?last.content.filter(c=>c.type==='text').map(c=>c.text).join('\n'):'本轮未完成“最新截图→复核→提交”，没有自动修改正式场景。'));}
-    if(!operations.length&&blenderFailure)throw Error(lastToolError||'Blender 建模未完成，原场景未修改。');
     if(!operations.length&&stageReason)throw new Error(stageReason);
     if(!operations.length && pauseReason)throw new Error(pauseReason+'\n最近执行：'+activity.events.filter(e=>/^第\d+轮执行/.test(e)).slice(-4).join('；')+(rootToolErrors.length?'\n原始工具错误：'+rootToolErrors.join('；'):''));
     if(!operations.length){summary=last?.role==='assistant'?last.content.filter(c=>c.type==='text').map(c=>c.text).join('\n'):'';if(!summary.trim())throw new Error(lastToolError?'工具调用未完成：'+lastToolError:'模型未返回有效回复，请检查模型工具调用支持');

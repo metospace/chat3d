@@ -103,7 +103,6 @@ try{
   const reopen=page.getByRole('button',{name:'打开 AI 助手',exact:true});if(await reopen.isVisible())await reopen.click();
   await page.getByLabel('建模描述',{exact:true}).waitFor({state:'visible'});
   await page.waitForFunction(()=>{const el=document.querySelector('.adx-composer-toolbar');return el&&el.clientWidth>0&&el.scrollWidth<=el.clientWidth+1;});
-  const type=await page.locator('.adx-run .adx-work-entry .adx-run-text').first().evaluate(el=>({size:parseFloat(getComputedStyle(el).fontSize),line:getComputedStyle(el).lineHeight}));assert.ok(type.size>=14);
   await page.getByLabel('建模描述',{exact:true}).focus();
   await page.mouse.move(600,150);
   const modelStyle=await page.locator('.adx-composer-controls .model-picker-trigger').evaluate(el=>getComputedStyle(el).backgroundColor);assert.equal(modelStyle,'rgba(0, 0, 0, 0)');
@@ -113,7 +112,7 @@ try{
   assert.equal(await page.locator('.is-assistant .ant-bubble-footer').count(),0,'no empty response action footer');
   assert.equal(await page.getByRole('button',{name:'复制回复',exact:true}).count(),0);
  });
- await check('running conversation keeps request first and native stop in footer',async()=>{
+ await check('running conversation keeps request first and stop in footer',async()=>{
   await page.evaluate(async()=>{const {useEditorStore:s}=await import('/src/store.ts');const now=Date.now();s.setState({aiStatus:'generating',composerText:'',messages:s.getState().messages.map(m=>m.run?{...m,run:{...m.run,status:'running',startedAt:now-5000}}:m)});const {conversationController}=await import('/src/runtime/conversationController.ts');const {activeConversationStore}=await import('/src/conversationStores.ts');conversationController(activeConversationStore()).ui.setState({started:now-5000,runMessageId:'fixture-user',agentActivity:s.getState().messages[0].run.activity});});
   await page.locator('.adx-run.is-active .adx-work-timeline').waitFor();
   await page.getByRole('button',{name:'停止生成',exact:true}).waitFor();

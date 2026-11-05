@@ -31,12 +31,13 @@ function artworkTitle(project:WorkspaceSession){
  }
  return project.autoTitle?ideaTitle(project.title,project.moduleKind??'scene'):project.title;
 }
-export function StudioHome({onOpen,onGenerate,onConfigure,onTasks,onImport,hidden=false}:{onOpen:()=>void;onGenerate?:(projectId:string)=>void;onConfigure?:()=>void;onTasks?:()=>void;onImport?:()=>void;hidden?:boolean}){
+export function StudioHome({onOpen,onGenerate,onConfigure,onTasks,onImport,hidden=false}:{onOpen:()=>void;onGenerate?:(projectId:string,blenderModeling:boolean)=>void;onConfigure?:()=>void;onTasks?:()=>void;onImport?:()=>void;hidden?:boolean}){
  const sessions=useWorkspaceStore(s=>s.sessions);
  const config=useEditorStore(s=>s.aiConfig);
  const configured=!!config&&!config.useMock&&!!config.baseURL.trim()&&!!config.apiKey.trim()&&!!config.model.trim();
  const ready=useWorkspaceStore(s=>s.ready),workspaceError=useWorkspaceStore(s=>s.error);
  const [kind,setKind]=useState<'asset'|'scene'>('asset'),[draft,setDraft]=useState(''),[images,setImages]=useState<string[]>([]),[imageBusy,setImageBusy]=useState(false);
+ const [blenderModeling,setBlenderModeling]=useState(false);
  const [items,setItems]=useState<ModelAssetSummary[]>([]),[error,setError]=useState(''),[libraryError,setLibraryError]=useState('');
  const [renaming,setRenaming]=useState<WorkspaceSession|null>(null),[name,setName]=useState('');
  const [search,setSearch]=useState(''),[filter,setFilter]=useState<'all'|'asset'|'scene'>('all');
@@ -66,12 +67,13 @@ export function StudioHome({onOpen,onGenerate,onConfigure,onTasks,onImport,hidde
    const config=useEditorStore.getState().aiConfig;
    if(!config||config.useMock||!config.baseURL.trim()||!config.apiKey.trim()||!config.model.trim()){onConfigure?.();throw Error('请先连接并选择模型，输入内容已保留');}
    if(config.agentMode!=='single'&&config.stream===false)throw Error('请在连接设置中开启流式输出，或选择单次生成模式');
+   if(blenderModeling&&config.agentMode==='single')throw Error('Blender Python 建模需要 Agent 模式，请在模型配置中切换；输入已保留');
    const title=draft.trim()?ideaTitle(draft,kind):(kind==='asset'?'参考附件资产':'参考附件场景');
    if(!createSession(undefined,{moduleKind:kind,title, ...(kind==='asset'?{assetCategory:'其他' as const}:{})}))throw Error('当前无法新建，请关闭其他标签页后刷新本页');
    // An explicit home submit authorizes one generation in a new project. Images stay in that project.
    useEditorStore.getState().setComposerText(draft);useEditorStore.getState().setComposerImages([...images]);
    const projectId=useEditorStore.getState().doc.projectId;
-   setDraft('');setImages([]);setError('');onOpen();onGenerate?.(projectId);
+   setDraft('');setImages([]);setError('');onOpen();onGenerate?.(projectId,blenderModeling);
   }catch(e){setError(e instanceof Error?e.message:'新建失败');creating.current=false;}
  }
  async function addImages(files:File[]){if(imageBusyRef.current)return;imageBusyRef.current=true;setImageBusy(true);setError('');const prepared:string[]=[];try{for(const file of files){if(file.size>MAX_ATTACHMENT_BYTES){setError('单个附件不能超过100MB');continue;}try{prepared.push(await prepareReference(file,compressImage));}catch{setError('附件处理失败，请重新选择');}}setImages(old=>[...old,...prepared]);}catch{setError('附件处理失败，请重新选择');}finally{imageBusyRef.current=false;setImageBusy(false)}}
@@ -87,10 +89,10 @@ export function StudioHome({onOpen,onGenerate,onConfigure,onTasks,onImport,hidde
     <form className="pro-home-form" aria-label="创建项目" onSubmit={event=>{event.preventDefault();startProject();}}>
      <Sender ref={draftRef} className="home-x-sender pro-home-sender" value={draft} onChange={setDraft} onPasteFile={files=>void addImages(Array.from(files))} onSubmit={startProject} onKeyDown={event=>{if(event.nativeEvent.isComposing||event.keyCode===229)return false;}} submitType="enter" disabled={locked} readOnly={imageBusy} suffix={false} autoSize={{minRows:3,maxRows:8}} placeholder={kind==='asset'?'描述你想创建的模型，例如：一台带升降机构的仓储 AGV…':'描述你想创建的空间，例如：一个有两排货架和中央通道的仓库…'}
       header={<Sender.Header title={`参考附件 · ${images.length}`} open={images.length>0} forceRender closable={false}><ReferenceAttachments ref={attachmentsRef} values={images} disabled={locked||imageBusy} onAdd={files=>void addImages(files)} onRemove={index=>setImages(old=>old.filter((_,i)=>i!==index))}/></Sender.Header>}
-      footer={(_, {components:{SendButton}})=><div className="pro-home-composer-actions home-composer-toolbar"><Button aria-label={imageBusy?'正在处理参考附件':'添加参考附件'} title="添加参考附件（单文件100MB以内）" type="text" disabled={locked||imageBusy} onClick={()=>attachmentsRef.current?.select({multiple:true})} icon={<PaperClipOutlined/>}/><QualityPicker forNewProject onConfigure={onConfigure}/><ModelPicker forNewProject onConfigure={onConfigure}/><span className="pro-spacer"/><SendButton shape="default" icon={<ArrowRightIcon/>} aria-label="开始生成" disabled={locked||imageBusy||(!draft.trim()&&!images.length)}>开始生成</SendButton></div>}/>
+      footer={(_, {components:{SendButton}})=><div className="pro-home-composer-actions home-composer-toolbar"><Button aria-label={imageBusy?'正在处理参考附件':'添加参考附件'} title="添加参考附件（单文件100MB以内）" type="text" disabled={locked||imageBusy} onClick={()=>attachmentsRef.current?.select({multiple:true})} icon={<PaperClipOutlined/>}/><QualityPicker forNewProject onConfigure={onConfigure} blenderModeling={blenderModeling} onBlenderModelingChange={setBlenderModeling}/><ModelPicker forNewProject onConfigure={onConfigure}/><span className="pro-spacer"/><SendButton shape="default" icon={<ArrowRightIcon/>} aria-label="开始生成" disabled={locked||imageBusy||(!draft.trim()&&!images.length)}>开始生成</SendButton></div>}/>
     </form>
    </div>
-   <div className="home-idea-footnote">{!configured?<span><Button type="link" disabled={locked} onClick={onConfigure}>连接模型</Button>后即可生成，输入和附件会保留。</span>:<span>每次生成独立项目，预览确认后再应用。</span>}<Dropdown trigger={['click']} menu={{items:createMenu}}><Button type="text" disabled={locked} aria-label="新建项目">空白项目 / 导入 GLB <ArrowRightIcon/></Button></Dropdown></div>
+   <div className="home-idea-footnote">{!configured?<span><Button type="link" disabled={locked} onClick={onConfigure}>连接模型</Button>后即可生成，输入和附件会保留。</span>:<span>{blenderModeling?'Blender 模型会在工作台预览，应用后可编辑。':'每次生成独立项目，预览确认后再应用。'}</span>}<Dropdown trigger={['click']} menu={{items:createMenu}}><Button type="text" disabled={locked} aria-label="新建项目">空白项目 / 导入 GLB <ArrowRightIcon/></Button></Dropdown></div>
    {(error||workspaceError)&&<p className="resource-error" role="alert">{error||'工作区保存异常，请关闭其他标签页后刷新本页'}</p>}
   </section>
   <div className="home-resume-area"><HomeTasks items={items} disabled={locked} hidden={hidden} onOpen={onOpen} onAll={onTasks}/>

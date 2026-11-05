@@ -3,12 +3,23 @@ import {createInterface} from 'node:readline';
 import {fileURLToPath} from 'node:url';
 import {blenderWorker} from './model.mjs';
 
-import {pythonToolName} from './python.mjs';
+import {pythonArtifacts, pythonToolName, validatePythonArtifact} from './python.mjs';
 
 const script = fileURLToPath(new URL('./mcp.mjs',import.meta.url));
 const protocolVersion = '2025-06-18';
 export const buildThroughMcp = (spec,options) => callThroughMcp('build_model',spec,options);
 export const pythonThroughMcp = (spec,options) => callThroughMcp(pythonToolName,spec,options);
+
+function decodePythonResources(content) {
+  if (!Array.isArray(content) || content.length !== pythonArtifacts.length) throw Error('Invalid MCP Python resources');
+  const artifacts = {};
+  for (const {field,filename,mimeType,maxBytes} of pythonArtifacts) {
+    const part = content.find(item=>item?.type === 'resource' && item.resource?.uri === 'scenivo-blender:///'+filename)?.resource;
+    if (part?.mimeType !== mimeType || typeof part.blob !== 'string' || part.blob.length > 4*Math.ceil(maxBytes/3)) throw Error('Invalid MCP '+filename+' resource');
+    artifacts[field] = validatePythonArtifact(field,Buffer.from(part.blob,'base64'));
+  }
+  return artifacts;
+}
 async function callThroughMcp(tool,spec,{executable,signal}) {
   const python = tool === pythonToolName;
   if (blenderWorker.active) throw Object.assign(Error('Blender worker busy'),{status:429});
@@ -18,14 +29,14 @@ async function callThroughMcp(tool,spec,{executable,signal}) {
       const child = spawn(process.execPath,[script],{env:{...process.env,BLENDER_EXECUTABLE:executable},stdio:['pipe','pipe','ignore'],windowsHide:true});
       const lines = createInterface({input:child.stdout});
       let settled = false;
-      const finish = (error,bytes) => {
+      const finish = (error,value) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         signal?.removeEventListener('abort',abort);
         lines.close();
         child.stdin.end();
-        if (error) reject(error); else resolve(bytes);
+        if (error) reject(error); else resolve(value);
       };
       const abort = () => send({method:'notifications/cancelled',params:{requestId:2}});
       const send = (request) => child.stdin.write(JSON.stringify({jsonrpc:'2.0',...request})+'\n');
@@ -44,8 +55,9 @@ async function callThroughMcp(tool,spec,{executable,signal}) {
           } else if (response.id === 2) {
             if (response.result?.isError) {
               const message = response.result.content?.[0]?.text;
-              return finish(Object.assign(Error(message || 'Blender build failed'),{status:message === 'Blender executable not found' ? 503 : / timed out$/.test(message) ? 504 : python ? 422 : 500}));
+              return finish(Object.assign(Error(message || 'Blender build failed'),{status:message === 'Blender executable not found' ? 503 : / timed out$/.test(message) ? 504 : message === 'Blender Python cancelled' ? 499 : python ? 422 : 500}));
             }
+            if (python) return finish(null,decodePythonResources(response.result?.content));
             const resource = response.result?.content?.[0]?.resource;
             if (resource?.mimeType !== 'model/gltf-binary' || typeof resource.blob !== 'string' || resource.blob.length > 28*1024*1024) throw Error('Invalid MCP GLB resource');
             const bytes = Buffer.from(resource.blob,'base64');

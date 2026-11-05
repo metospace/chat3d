@@ -1,13 +1,19 @@
 export interface GenerationFailureOptions {previewRetained?:boolean}
 const unchanged='本次调整未成功，场景未修改。';
 const retained='本次调整未成功，已保留之前的预览。';
-const continueEditing='你可以继续描述要修改的地方。';
 
 /** Raw failures belong in task diagnostics, never in normal chat or preview text. */
 export function generationFailureMessage(error:unknown,options:GenerationFailureOptions={}):string {
  const raw=error instanceof Error?error.message:String(error??'');
  if(/^(?:本次调整未成功，(?:场景未修改|已保留之前的预览)。|已停止(?:本次调整|生成)，|场景已变化，本次结果未应用。)/.test(raw)&&!technicalPayload.test(raw))return raw;
  const outcome=options.previewRetained?retained:unchanged;
+ if(/未确认执行 Blender|BlenderScriptDeclined/.test(raw))return outcome+'本次 Blender 执行授权未通过，脚本没有发送。请重新选择 Blender 生成后发送。';
+ if(/模型没有调用 Blender|本轮没有返回 Blender/.test(raw))return outcome+'模型未执行 Blender 建模工具，没有生成模型文件。请查看失败原因或任务记录中的模型回复。';
+ if(/Blender Python 未启用|Blender Python is not enabled|执行令牌/.test(raw))return outcome+'本机 Blender Python 服务未开启或执行授权已失效，请重新连接本机 Blender。';
+ if(/Blender worker busy/.test(raw))return outcome+'本机 Blender 正在执行另一个任务，请等待该任务结束后再发送。';
+ if(/Blender executable not found/.test(raw))return outcome+'找不到本机 Blender 程序，请检查启动服务时配置的路径。';
+ if(/Blender Python timed out/.test(raw))return outcome+'本机 Blender 执行超过 60 秒，已终止。请查看执行日志，减少单次建模或渲染工作量。';
+ if(/Blender Python.*(?:failed|失败|execution)|Python (?:execution|artifact)/i.test(raw))return outcome+'Blender 脚本执行、导出或渲染失败。下方“失败原因”提供具体错误。';
  if(/体验页访问验证未通过|体验页要求重新登录/.test(raw))return outcome+'体验页访问验证未通过，请重新登录体验页后再发送。';
  if(/\b401\b|unauthori[sz]ed|invalid.{0,12}(?:api.?key|token)|authentication|密钥.{0,8}(?:无效|错误|过期)/i.test(raw))return outcome+'模型服务未能验证身份，请在模型配置中检查访问凭证后再发送。';
  if(/\b403\b|forbidden|permission denied|无权访问/i.test(raw))return outcome+'当前账号没有使用该模型的权限，请在模型配置中选择可用的模型后再发送。';
@@ -19,7 +25,7 @@ export function generationFailureMessage(error:unknown,options:GenerationFailure
  if(/场景已变化/.test(raw))return '场景已变化，本次结果未应用。请根据当前场景重新描述要修改的地方。';
  if(/不允许新增|修改范围|范围外/.test(raw))return outcome+'本次修改超出了允许的范围，请调整修改范围或重新描述要修改的对象。';
  if(/已停止|用户停止|你已停止/.test(raw))return (options.previewRetained?'已停止本次调整，已保留之前的预览。':'已停止生成，场景未修改。')+'继续调整需由你重新发送描述，不会自动生成。';
- return outcome+continueEditing;
+ return outcome+'本次请求在执行过程中出现错误，请展开“失败原因”查看具体信息；完整记录可在任务记录中导出。';
 }
 
 const technicalPayload=/(?:\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b|\b(?:HTTP\s*\d{3}|Error|TypeError|SyntaxError|JSON|nodeIds?|materialId|requestId|baseRevision|projectId|parentId|rotationQuaternion|createPrimitive|updateNode|editScope|operations|tool_calls)\b|\b(?:unknown|invalid|missing|required|failed|exception)\b|(?:[A-Za-z]:[\\/]|https?:\/\/|\/(?:src|api|v1|tmp)\/)|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f-]{23,}|\b(?:node|component|assembly|capture|toolcall)-[a-z0-9-]+\b|[{}\[\]]|["'][^"']+["']\s*:|\b(?:sk-[A-Za-z0-9_-]+|Bearer\s+\S+)|(?:工具|命令|参数|字段).{0,18}(?:失败|错误|无效|缺失)|中断原因[：:])/i;
