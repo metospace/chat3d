@@ -39,9 +39,9 @@ try{
  fireEvent.click(heading);assert.equal(heading.getAttribute('aria-expanded'),'true');assert.ok(ui.getByRole('list'));assert.ok(rows().every(row=>row.dataset.status==='ended'));
  console.log('PASS native disclosure preserves user choice through live and ended updates, independently of stop');
  ui.rerender(React.createElement(ConversationRun,{run:{status:'completed',startedAt:start,activity:{...activity,explanations:[]}}}));
- assert.equal(section.querySelector('.adx-work-entry'),null);assert.ok(section.textContent.includes('未保存'));assert.ok(!section.textContent.includes('raw event'));
+ assert.equal(section.querySelector('.adx-work-entry'),null);assert.ok(section.textContent.includes('本轮已结束'));assert.ok(!section.textContent.includes('raw event'));
  ui.rerender(React.createElement(ConversationRun,{run:{...run,activity:{...activity,explanations:[]}}}));
- assert.equal(section.querySelector('.adx-work-entry'),null);assert.ok(section.textContent.includes('等待'));assert.ok(!section.textContent.includes('建立模型结构'));
+ assert.equal(section.querySelector('.adx-work-entry'),null);assert.ok(section.textContent.includes('正在复核模型'));assert.ok(!section.textContent.includes('建立模型结构'));
  ui.rerender(React.createElement(ConversationRun,{run:{...run,activity:{...activity,explanations:[{id:'legacy',text:'旧版公开工作说明。'}]}}}));
  assert.ok(ui.getByText('时间未记录'));assert.equal(section.querySelector('.adx-work-entry').dataset.status,'recorded');
  console.log('PASS tool-only histories remain compact and legacy public prose never receives an invented timestamp');
