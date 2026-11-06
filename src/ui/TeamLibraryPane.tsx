@@ -3,56 +3,11 @@ import {Button,Input,Tag} from 'antd';
 import {CheckIcon,CubeIcon,DownloadIcon,GridIcon,LayersIcon,ListBulletIcon,MagnifyingGlassIcon,ReloadIcon,UploadIcon} from '@radix-ui/react-icons';
 import {getTeamSession,subscribeTeamSession,type TeamClient,type TeamItem} from '../domain/teamLibrary';
 import {listLocalTeamResourceStates,rememberTeamResourceHeads,subscribeTeamResourceLinks,type LocalTeamResourceState} from '../domain/teamResourceLinks';
-import {assetDocument,parseModelAsset} from '../domain/modelAssets';
-import {parseProject} from '../domain/project';
-import {captureLibraryThumbnail} from '../scene/libraryThumbnail';
+import {createTeamPreviewLoader} from '../scene/teamPreview';
+import {TeamResourceImage} from './TeamResourceImage';
 import {useWorkspaceStore} from '../workspace';
 import {TeamSessionLogin,TeamTransferDialog} from './TeamTransferDialog';
 import './team-library.css';
-
-type TeamThumbnail={image:string;notice?:string};
-let teamPreviewQueue=Promise.resolve();
-
-/** Keep private previews in this pane's session, never in the local resource library. */
-function createTeamPreviewLoader(client:TeamClient){
- const cache=new Map<string,TeamThumbnail>();
- return (row:TeamItem,signal:AbortSignal,render=false)=>{
-  const key=`${row.kind}:${row.id}:${row.version}`;
-  const check=()=>{if(signal.aborted)throw new DOMException('Preview cancelled','AbortError');};
-  const pending=teamPreviewQueue.then(async()=>{
-   check();
-   if(!render&&cache.has(key))return cache.get(key)!;
-   const value=await client.read(row);check();
-   const asset=value.kind==='asset'?parseModelAsset(JSON.stringify(value.payload)):undefined;
-   const thumbnail=asset?.thumbnail&&!render?{image:asset.thumbnail}:await captureLibraryThumbnail(asset?assetDocument(asset):parseProject(JSON.stringify(value.payload)));
-   check();cache.set(key,thumbnail);return thumbnail;
-  });
-  teamPreviewQueue=pending.then(()=>{},()=>{});
-  return pending;
- };
-}
-type TeamPreviewLoader=(row:TeamItem,signal:AbortSignal,render?:boolean)=>Promise<TeamThumbnail>;
-
-function TeamResourceImage({row,load,onOpen}:{row:TeamItem;load:TeamPreviewLoader;onOpen?:()=>void}){
- const host=useRef<HTMLDivElement>(null),[thumbnail,setThumbnail]=useState<TeamThumbnail>(),[error,setError]=useState(''),[attempt,setAttempt]=useState(0),render=useRef(false);
- const lazy=!!onOpen;
- useEffect(()=>{
-  let controller:AbortController|undefined,complete=false;
-  setThumbnail(undefined);setError('');
-  const start=()=>{
-   if(controller||complete)return;
-   const current=controller=new AbortController();
-   void load(row,current.signal,render.current).then(value=>{if(!current.signal.aborted){complete=true;setThumbnail(value);}}).catch(reason=>{if(!current.signal.aborted){complete=true;setError(reason instanceof Error?reason.message:'预览暂不可用');}});
-  };
-  const stop=()=>{controller?.abort();controller=undefined;};
-  if(!lazy||typeof IntersectionObserver==='undefined')start();
-  const observer=lazy&&typeof IntersectionObserver!=='undefined'?new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting))start();else stop();}):undefined;
-  if(host.current)observer?.observe(host.current);
-  return ()=>{stop();observer?.disconnect();};
- },[load,row,attempt,lazy]);
- const content=thumbnail?<img src={thumbnail.image} alt={`${row.name} 团队固定版本 v${row.version}${onOpen?'缩略图':'预览'}`} onError={()=>{render.current=true;setThumbnail(undefined);setError('预览图片无法显示，请重试生成');}}/>:<span className="team-resource-image-status">{error?'预览不可用':'正在读取真实预览…'}</span>;
- return <div ref={host} className={onOpen?'team-resource-cover':'team-preview-image'}>{onOpen?<button className="team-resource-preview-button" aria-label={`预览 ${row.name}`} onClick={onOpen}>{content}</button>:content}{error?<div className="team-resource-image-error"><span role="status">{error}</span><Button size="small" aria-label={`重试 ${row.name} 预览`} onClick={()=>setAttempt(value=>value+1)}>重试预览</Button></div>:thumbnail?.notice&&<span className="team-resource-image-notice">{thumbnail.notice}</span>}</div>;
-}
 
 export function TeamLibraryPane({kind,onCopied,showPublish=true}:{kind:'asset'|'scene';onCopied?:()=>void;showPublish?:boolean}){
  const client=useSyncExternalStore(subscribeTeamSession,getTeamSession,getTeamSession),[listing,setListing]=useState<{client:TeamClient;kind:'asset'|'scene';rows:TeamItem[]}>(),[query,setQuery]=useState(''),[view,setView]=useState<'grid'|'list'>('grid'),[filter,setFilter]=useState<'all'|'linked'|'updates'>('all'),[selected,setSelected]=useState<Set<string>>(new Set()),[links,setLinks]=useState<LocalTeamResourceState[]>([]),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[previewSelection,setPreview]=useState<{client:TeamClient;item:TeamItem}>(),[transfer,setTransfer]=useState<{mode:'publish'|'acquire';items?:TeamItem[]}>();const lock=useRef(false),request=useRef(0);

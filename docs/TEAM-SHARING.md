@@ -36,7 +36,7 @@ Dockerfile 同时包含团队校验器。容器部署时将受限持久卷挂载
 
 - 地址示例：`https://portal.jiezi-ai.com/team/`（同域调用 `/api/team/`，无需在网页里填写端口）。
 - 能力：登录、搜索、预览固定版本、**下载桌面导入包**（资产 JSON / 场景 `.chat3d.json`，含新 id，不写入浏览器 IndexedDB）。
-- 浏览器团队库在页头显示当前账号，在资源区并列提供资产／场景切换和搜索；窄屏自动改为上下布局。资源卡片标注固定版本，点「预览」打开独立弹窗，可直接下载当前版本的桌面导入包。仅更新网页时，重新构建并部署 `dist-team-web/`，无需重装桌面客户端。
+- 浏览器团队库直接显示资源网格，资产和场景卡片按可见范围加载固定版本缩略图：资产优先使用发布时的缩略图；未附图的资产和场景使用该版本的模型生成。点击缩略图可放大，并下载对应版本的桌面导入包。仅更新网页时，重新构建并部署 `dist-team-web/`，无需重装桌面客户端。
 - 不在 Web 端提供 AI 生成、工作台编辑或选择性发布；发布仍在桌面客户端顶部导航 **团队** 页完成。
 - OAuth 回调页 `/team/sso/callback` 先清除 URL 中的凭据，再携带 `state` 单次调用 `/api/team/login/sso/code`。服务端兑换成功后按 `state` 暂存平台令牌（约 5 分钟、一次性）；成功后仍可通过 BroadcastChannel/localStorage 通知**同域**等待页。桌面端系统浏览器与 Tauri 不同源，BroadcastChannel/localStorage 不可达，因此桌面用同一 `state` 轮询 `POST /api/team/login/sso/claim` 领取平台令牌，再调用 `/api/team/login/sso` 建立自己的团队会话，不再二次兑换授权码。回调页兑换成功后只提示可关闭本页并返回 Scenivo，**不进入**门户团队库浏览。回调失败后请回桌面重新点「登录授权」。
 - 单次兑换回归：`node tests/team-oauth-callback.mjs`（本地 HTTP 服务，覆盖回调兑换、令牌优先级、BroadcastChannel/storage/focus，以及跨源桌面 `claim` 轮询）。
