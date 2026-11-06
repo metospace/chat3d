@@ -8417,22 +8417,6 @@ body:has(.frosted-studio) .background-color-swatch.is-dark {
   grid-row: 1;
   grid-column: 1/-1
 }
-.canvas-studio.frosted-studio.editor-mode>.workbench-global-header {
-  position: absolute;
-  grid-column: auto;
-  grid-row: auto;
-  right: 15px;
-  height: 30px;
-  padding: 0;
-  border: 0;
-  z-index: 35;
-  background: transparent;
-  pointer-events: none
-}
-.canvas-studio.frosted-studio.editor-mode>.workbench-global-header .studio-global-utilities {
-  pointer-events: auto;
-  gap: 5px
-}
 @media(max-width:1200px) {
 .canvas-studio.frosted-studio {
   --studio-sidebar: 200px
@@ -8488,17 +8472,9 @@ body:has(.frosted-studio) .background-color-swatch.is-dark {
 .canvas-studio.frosted-studio .studio-global-utilities {
   gap: 4px
 }
-.canvas-studio.frosted-studio.editor-mode>.workbench-global-header {
-  right: 8px;
-  top: 10px;
-  padding: 0
-}
 .canvas-studio.frosted-studio.editor-mode .global-task-label {
   display: none
 }
-}
-.canvas-studio.frosted-studio.editor-mode>.workbench-global-header {
-  top: 12px
 }
 @media(max-width:720px) {
 .canvas-studio.frosted-studio .studio-shell-brand>svg {
@@ -8510,9 +8486,6 @@ body:has(.frosted-studio) .background-color-swatch.is-dark {
 }
 .canvas-studio.frosted-studio .studio-shell-nav {
   gap: var(--sidebar-gap-in)
-}
-.canvas-studio.frosted-studio.editor-mode>.workbench-global-header {
-  top: 12px
 }
 }
 .dark .canvas-studio.frosted-studio .navigation-pages.studio-shell-nav {
@@ -10425,7 +10398,6 @@ body:has(.frosted-studio) .background-color-swatch.is-dark {
   min-height: 0;
   height: 60px;
   padding: 0 15px;
-  padding-right: 140px;
   background: var(--sc-surface-elevated)!important;
   border: 0;
   border-bottom: 1px solid var(--sc-border-subtle);
@@ -11052,8 +11024,7 @@ body:has(.frosted-studio) .background-color-swatch.is-dark {
 @media(max-width:720px) {
 .canvas-studio.frosted-studio.editor-mode .workbench-project-actions {
   padding: 0 8px;
-  gap: 5px;
-  padding-right: 78px
+  gap: 5px
 }
 .canvas-studio.frosted-studio .workbench-project-actions>.workbench-back {
   width: 24px;

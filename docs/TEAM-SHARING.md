@@ -36,7 +36,7 @@ Dockerfile 同时包含团队校验器。容器部署时将受限持久卷挂载
 
 - 地址示例：`https://portal.jiezi-ai.com/team/`（同域调用 `/api/team/`，无需在网页里填写端口）。
 - 能力：登录、搜索、预览固定版本、**下载桌面导入包**（资产 JSON / 场景 `.chat3d.json`，含新 id，不写入浏览器 IndexedDB）。
-- 浏览器团队库在页头显示当前账号，在资源区并列提供资产／场景切换和搜索；窄屏自动改为上下布局。资源卡片标注固定版本，点「预览」打开独立弹窗，可直接下载当前版本的桌面导入包。仅更新网页时，重新构建并部署 `dist-team-web/`，无需重装桌面客户端。
+- 浏览器团队库直接显示资源网格，资产和场景卡片按可见范围加载固定版本缩略图：资产优先使用发布时的缩略图；未附图的资产和场景使用该版本的模型生成。点击缩略图可放大，并下载对应版本的桌面导入包。仅更新网页时，重新构建并部署 `dist-team-web/`，无需重装桌面客户端。
 - 不在 Web 端提供 AI 生成、工作台编辑或选择性发布；发布仍在桌面客户端顶部导航 **团队** 页完成。
 - OAuth 回调页 `/team/sso/callback` 先清除 URL 中的凭据，再携带 `state` 单次调用 `/api/team/login/sso/code`。服务端兑换成功后按 `state` 暂存平台令牌（约 5 分钟、一次性）；成功后仍可通过 BroadcastChannel/localStorage 通知**同域**等待页。桌面端系统浏览器与 Tauri 不同源，BroadcastChannel/localStorage 不可达，因此桌面用同一 `state` 轮询 `POST /api/team/login/sso/claim` 领取平台令牌，再调用 `/api/team/login/sso` 建立自己的团队会话，不再二次兑换授权码。回调页兑换成功后只提示可关闭本页并返回 Scenivo，**不进入**门户团队库浏览。回调失败后请回桌面重新点「登录授权」。
 - 单次兑换回归：`node tests/team-oauth-callback.mjs`（本地 HTTP 服务，覆盖回调兑换、令牌优先级、BroadcastChannel/storage/focus，以及跨源桌面 `claim` 轮询）。
@@ -98,6 +98,7 @@ node server/team/admin.mjs disable alice
 
 - 备份：停止服务后复制整个持久目录（含 SQLite、WAL、SHM）；恢复到受限目录，保持相同 Node 版本后启动。在线备份须使用 SQLite 的备份工具，不要仅复制正在写入的主文件。备份含密码哈希与有效会话，应按内部敏感数据保管。
 - 限制：单进程服务，单团队，没有实时协作、外部客户租户、发布撤回或在线用户管理。登录主路径是 **登录授权**：打开协同 SSO 页 `{SSO_UI}/#/sso?client_id=scenivo&redirect_uri=…&response_type=code&state=…`（**hash 路由** `/#/sso`，勿用 path `/sso`；不传 `scope`，避免协同自动授权跳转，等待用户点击同意授权或拒绝）；默认 SSO UI `http://pm.jiezi365.com:48001`，API `http://36.133.218.210:48080`。回调 `/team/sso/callback` 带回 code 后服务端 `/api/team/login/sso/code` 兑换。新账号为 member，已有账号保留角色；停用账号与平台 401 均拒绝。SSO 会话超过 5 分钟或发布时会用同一用户 token 复核 `get-permission-info`，平台 401 删除会话。本地团队密码登录默认隐藏，仅 `VITE_CHAT3D_TEAM_SHOW_PASSWORD_LOGIN=1` 调试展示；服务端可用 `CHAT3D_TEAM_PASSWORD_LOGIN=0` 关闭。单次发布的 HTTP 请求体上限为 55 MiB，团队格式校验上限为 50 MiB。容量规划与磁盘配额由部署方管理。
+- 团队登录失效后，工作台右上角会显示独立的警告图标。点击可重新授权；本地项目的编辑、保存和导出不受影响。
 - 防护：服务端认证、数据库事务、不可变版本、逐原件写权限、跨源白名单；登录错误累计8次暂时限流15分钟。生产代理还应限制连接与登录速率。TLS在公司反向代理终止。
 - 测试仅创建临时账号与临时数据库，不触及真实个人数据、不调用真实收费模型。
 

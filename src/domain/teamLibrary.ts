@@ -1,6 +1,6 @@
 import {buildTeamCopyExport} from './teamCopyExport';
 import {teamFetch} from './teamTransport';
-import {parseModelAsset,type ModelAssetVersion} from './modelAssets';
+import {MAX_TEAM_ASSET_BYTES,parseModelAsset,type ModelAssetVersion} from './modelAssets';
 import {MAX_TEAM_SCENE_BYTES,parseProject,serializeProject} from './project';
 import {saveModelAsset} from './modelAssetStorage';
 import {createSession,flushWorkspace,useWorkspaceStore} from '../workspace';
@@ -221,7 +221,7 @@ export async function refreshLinkedTeamResources(kind:'asset'|'scene'):Promise<L
 // Explicit allowlist prevents session/chat/settings data from entering a publication.
 export function assetPublication(source:ModelAssetVersion):ModelAssetVersion {
  const safe=publicSnapshot(source,{format:true,schemaVersion:true,id:true,version:true,name:true,category:true,description:true,createdAt:true,unit:true,upAxis:true,front:true,quality:true,size:vectorShape,nodes:[nodeShape],materials:[materialShape],thumbnail:true,externalConnectionsRemoved:true,contract:{purpose:true,features:vectorShape,anchors:[{id:true,name:true,kind:true,nodeId:true,point:vectorShape,normal:vectorShape}],clearance:{min:vectorShape,max:vectorShape}}});
- return parseModelAsset(JSON.stringify(safe));
+ return parseModelAsset(JSON.stringify(safe),MAX_TEAM_ASSET_BYTES);
 }
 export async function copyTeamVersion(item:TeamVersion){
  assertLibraryReady();
