@@ -1,5 +1,6 @@
 import {isThumbnailImage} from './thumbnailImage';
 import {validCategory} from './libraryMetadata';
+import {validPublishedCategoryPath} from './teamCategories';
 import {validateAssetContract,type AssetContract} from './assetContract';
 import {Euler,Matrix4,Quaternion,Vector3} from 'three';
 import {assemblyBounds} from './assemblyEditing';
@@ -51,7 +52,17 @@ export function instantiateAsset(a:ModelAssetVersion,position:Vec3,yaw=0):Comman
  const nodes=structuredClone(a.nodes).map(n=>{n.assemblyName=singleGroup?a.name:(a.name+' / '+(n.assemblyName??n.name)).slice(0,200);const p=new Vector3(),q=new Quaternion(),s=new Vector3();new Matrix4().compose(new Vector3(...n.transform.position),new Quaternion(...n.transform.rotationQuaternion),new Vector3(...n.transform.scale)).premultiply(matrix).decompose(p,q,s);n.transform={position:p.toArray() as Vec3,rotationQuaternion:q.toArray() as [number,number,number,number],scale:s.toArray() as Vec3};n.modelAsset={id:a.id,version:a.version,instanceId,sourceNodeId:n.id};return n;});
  return {op:'importComponentDraft',nodes,materials:structuredClone(a.materials)};
 }
-export function parseModelAsset(text:string,maxBytes=MAX_ASSET_BYTES):ModelAssetVersion{if(text.length>maxBytes||new TextEncoder().encode(text).length>maxBytes)throw Error(assetSizeError(maxBytes));let a:ModelAssetVersion;try{a=JSON.parse(text);}catch{throw Error('资产不是有效JSON');}validateModelAsset(a);return a;}
+export interface ParsedModelAssetFile {asset:ModelAssetVersion;teamCategoryPath?:string[]}
+export function parseModelAssetFile(text:string,maxBytes=MAX_ASSET_BYTES):ParsedModelAssetFile{
+ if(text.length>maxBytes||new TextEncoder().encode(text).length>maxBytes)throw Error(assetSizeError(maxBytes));
+ let asset:ModelAssetVersion&{teamCategoryPath?:unknown};try{asset=JSON.parse(text);}catch{throw Error('资产不是有效JSON');}
+ const path=asset?.teamCategoryPath;
+ if(path!==undefined&&!validPublishedCategoryPath(path))throw Error('团队分类路径无效');
+ validateModelAsset(asset);
+ delete asset.teamCategoryPath;
+ return {asset,...(path!==undefined?{teamCategoryPath:[...path]}:{})};
+}
+export function parseModelAsset(text:string,maxBytes=MAX_ASSET_BYTES):ModelAssetVersion{return parseModelAssetFile(text,maxBytes).asset;}
 
 // A newly saved independent copy retains the actual editor node IDs. Its source
 // can therefore create the next revision even if those nodes came from an older asset.

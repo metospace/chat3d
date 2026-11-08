@@ -1,9 +1,8 @@
 import {useEffect,useState} from 'react';
+import type {BlenderResult as Result} from '../../scene/blenderModeling';
 import './blender-result.css';
 
 const files=[['blend','.blend'],['glb','.glb'],['render','.png']] as const;
-
-type Result={name:string;blend:Blob;glb:Blob;render:Blob};
 
 export function BlenderResult({result}:{result:Result}){
   const [links,setLinks]=useState<{result:Result;urls:Record<(typeof files)[number][0],string>}|null>(null);
@@ -14,9 +13,14 @@ export function BlenderResult({result}:{result:Result}){
   },[result]);
   const urls=links?.result===result?links.urls:null;
   const filename=result.name.replace(/\.(blend|glb|png)$/i,'').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').trim()||'blender-model';
+  const review=result.review;
+  const status=!review||review.status==='pending'?'待视觉复核':review.status==='issues'?'存在已知问题':'已完成视觉复核';
   return <section className="adx-blender-result" aria-label="最新 Blender 建模结果">
     <strong>最新 Blender 建模结果 · {result.name}</strong>
-    <p>若主工作台中有可编辑预览，请应用后继续编辑；下方原始文件与渲染仅供辅助参考。</p>
+    <p role="status">{status}{review?` · ${review.version}`:''}</p>
+    <p>视觉复核仅表示查看 Blender 渲染，不代表工程验收或工作台导入质量验收；工作台预览仍需确认后应用。</p>
+    {review?.observations&&<p>{review.observations}</p>}
+    {!!review?.issues.length&&<ul aria-label="Blender 已知问题">{review.issues.map((issue,index)=><li key={index}>{issue}</li>)}</ul>}
     <details className="adx-blender-auxiliary" key={urls?.blend??'loading'}>
       <summary>原始文件与 Blender 渲染</summary>
       <div className="adx-blender-actions">

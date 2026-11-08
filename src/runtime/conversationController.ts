@@ -205,14 +205,14 @@ function createConversationController(editor:EditorStore) {
         const {runBlenderAgent}=await import('../ai/blenderAgent');
         const previous=ui.getState().blenderResult;
         const delivery:{result?:BlenderResult}={};
-        const summary=await runBlenderAgent({text:modelText,config:cfg,images,history,previous,signal:controller.signal,confirm:async(_request,signal)=>!signal?.aborted,
+        const summary=await runBlenderAgent({text:sendMode==='question'?'只回答问题，禁止建模：'+modelText:modelText,questionOnly:sendMode==='question',config:cfg,images,history,previous,signal:controller.signal,confirm:async(_request,signal)=>!signal?.aborted,
           onDiagnostic:record,
           onControl:control=>{if(alive()){controlRef.current=control;setCanSteer(!!control);}},
           onSteeringApplied:id=>{if(alive())markSteering(id,'received');},
           onActivity:event=>{if(alive()){armTimeout();queueAgentActivity(event);}},
-          onResult:result=>{delivery.result=result;}});
+          onResult:result=>{if(alive()){delivery.result=result;ui.setState({blenderResult:result});}}});
         if(!alive())return;
-        if(delivery.result){
+        if(delivery.result&&sendMode!=='question'){
           record('blender_artifacts',{name:delivery.result.name,blendBytes:delivery.result.blend.size,glbBytes:delivery.result.glb.size,renderBytes:delivery.result.render.size});
           ui.setState({blenderResult:delivery.result});
           setNotice('正在将 Blender 模型载入工作台…');
@@ -221,7 +221,11 @@ function createConversationController(editor:EditorStore) {
           try{
             const {operations,warnings}=await blenderWorkbenchCommands(delivery.result,controller.signal);
             if(!alive())return;
-            const batch:CommandBatch={requestId:makeId(),projectId,baseRevision,selectedIds,summary:'Blender 模型已载入工作台预览。应用后可选择零件编辑和保存。',operations,qualityIssues:[]};
+            const review=delivery.result.review;
+            const pending=!review||review.status==='pending';
+            const qualityIssues=[...(pending?['Blender 渲染尚未完成视觉复核。']:[]),...(review?.status==='issues'&&!review.issues.length?['Blender 视觉复核标记存在问题，尚待修正。']:[]),...(review?.issues??[])];
+            const incomplete=pending||review?.status==='issues'||qualityIssues.length>0;
+            const batch:CommandBatch={requestId:makeId(),projectId,baseRevision,selectedIds,summary,operations,qualityIssues,taskStatus:incomplete?'partial':'submitted',incomplete};
             combined=continueDraft(original,parent,batch);
             setNotice(warnings.find(w=>w.includes('动画未导入'))??'');
           }catch(error){

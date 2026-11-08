@@ -1,4 +1,5 @@
 import type {DiagnosticEntry} from './runTraceLog';
+import type {BlenderActivityProgress} from './blenderProgress';
 import {commandSchema,validateCommandOperations,CommandContractError,commandContractGuide} from './commandContract';
 import {EvidenceContext} from './evidenceContext';
 import {buildRepairAgenda} from './repairAgenda';
@@ -89,6 +90,7 @@ export { AGENT_LIMITS } from './agentPolicy';
 export interface ActivityTiming { summary?:string;phase?:'planning'|'building'|'reviewing'|'repairing'; failureCategory?:ToolFailureCategory;toolName?:string;repeatedInput?:boolean;argumentsChars?:number;resultChars?:number;sceneRevision?:number;firstContentAt?:number;responseAt?:number;usageState?:UsageState;uncachedInputTokens?:number;cacheReadTokens?:number;cacheWriteTokens?:number; id:string; kind:'model'|'tool'; label:string; startedAt:number; firstDataAt?:number; endedAt?:number; failed?:boolean; detail?:string; inputTokens?:number; outputTokens?:number; requestFootprint?:RequestFootprint }
 export interface DesignBrief {flow:string[];layout:string;equipment:{name:string;count:number;features:string[]}[];checks:string[];composition?:CompositionPlan}
 export interface AgentActivity {
+  blenderProgress?:BlenderActivityProgress;
   diagnostics?:DiagnosticEntry[];
   phase?:'planning'|'building'|'reviewing'|'repairing';
   lastModelEditAt?:number;

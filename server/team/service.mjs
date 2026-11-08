@@ -5,6 +5,10 @@ import {dirname} from 'node:path';
 const MAX_HTTP_BODY_BYTES=55*1024*1024;
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const fail=(status,message)=>{throw Object.assign(Error(message),{status});};
+const categoryId=/^category-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function categoryLabel(value){if(typeof value!=='string'||/[\u0000-\u001f\u007f-\u009f]/.test(value))return;const label=value.trim();if(!label||label.length>80||label==='全部'||label==='未分类'||categoryId.test(label))return;return label;}
+function legacyCategoryPath(kind,payload){const label=kind==='asset'?categoryLabel(payload?.category):undefined;return label?[label]:[];}
+function publishCategoryPath(kind,payload,path){if(path===undefined)return legacyCategoryPath(kind,payload);if(!Array.isArray(path)||path.length>2)fail(400,'分类路径无效');return Array.from(path,value=>{const label=categoryLabel(value);if(label===undefined)fail(400,'分类路径无效');return label;});}
 export function openTeam(path,options={}){
  mkdirSync(dirname(path),{recursive:true,mode:0o700});
  const db=new DatabaseSync(path);db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
@@ -14,6 +18,13 @@ CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY,user TEXT NOT NULL RE
  CREATE TABLE IF NOT EXISTS versions(item TEXT NOT NULL REFERENCES items(id),version INTEGER NOT NULL,name TEXT NOT NULL,description TEXT NOT NULL,created TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(item,version));
  CREATE TABLE IF NOT EXISTS requests(user TEXT NOT NULL,key TEXT NOT NULL,digest TEXT NOT NULL,result TEXT NOT NULL,PRIMARY KEY(user,key));`);
 for(const [column,type] of [['platform_access','TEXT'],['platform_tenant','TEXT'],['platform_checked','INTEGER']]){try{db.exec(`ALTER TABLE sessions ADD COLUMN ${column} ${type}`);}catch(e){if(!/duplicate column/i.test(e.message))throw e;}}
+// Migrate only the snapshot column; payloads and retry digests remain byte-for-byte unchanged.
+db.exec('BEGIN IMMEDIATE');
+try{
+ let added=false;try{db.exec("ALTER TABLE versions ADD COLUMN category_path TEXT NOT NULL DEFAULT '[]'");added=true;}catch(e){if(!/duplicate column/i.test(e.message))throw e;}
+ if(added){const update=db.prepare('UPDATE versions SET category_path=? WHERE item=? AND version=?');for(const row of db.prepare("SELECT v.item,v.version,v.payload FROM versions v JOIN items i ON i.id=v.item WHERE i.kind='asset'").all()){let payload;try{payload=JSON.parse(row.payload);}catch{continue;}const path=legacyCategoryPath('asset',payload);if(path.length)update.run(JSON.stringify(path),row.item,row.version);}}
+ db.exec('COMMIT');
+}catch(e){db.exec('ROLLBACK');throw e;}
 const platformAuthBase=(options.platformAuthBase??process.env.CHAT3D_PLATFORM_AUTH_BASE??'http://36.133.218.210:48080').replace(/\/$/,'');
 const platformTenant=String(options.platformTenantId??process.env.CHAT3D_PLATFORM_TENANT_ID??'1');
 const passwordLogin=options.passwordLogin??process.env.CHAT3D_TEAM_PASSWORD_LOGIN!=='0';
@@ -96,13 +107,14 @@ async function recheck(row,force){
  db.prepare('UPDATE sessions SET platform_checked=? WHERE token=?').run(now,row.token);
 }
 function authenticate(token,options={}){const row=db.prepare('SELECT s.token,s.platform_access,s.platform_tenant,s.platform_checked,u.id,u.name,u.role FROM sessions s JOIN users u ON u.id=s.user WHERE s.token=? AND s.expires>? AND u.disabled=0').get(hash(token??''),Date.now());if(!row)fail(401,'请重新登录团队服务');const user={id:row.id,name:row.name,role:row.role};if(!row.platform_access)return user;return recheck(row,options.force).then(()=>user);}
- function list(kind,query=''){return db.prepare('SELECT i.id,i.owner,i.kind,i.head AS version,v.name,v.description,v.created FROM items i JOIN versions v ON v.item=i.id AND v.version=i.head WHERE i.kind=? AND (instr(lower(v.name),lower(?))>0 OR instr(lower(v.description),lower(?))>0) ORDER BY v.created DESC LIMIT 500').all(kind,query,query);}
- function read(id,version){const row=db.prepare('SELECT i.id,i.owner,i.kind,v.version,v.name,v.description,v.created,v.payload FROM items i JOIN versions v ON v.item=i.id WHERE i.id=? AND v.version=?').get(id,version);if(!row)fail(404,'找不到发布版本');return {...row,payload:JSON.parse(row.payload)};}
+ function list(kind,query=''){return db.prepare('SELECT i.id,i.owner,i.kind,i.head AS version,v.name,v.description,v.created,v.category_path FROM items i JOIN versions v ON v.item=i.id AND v.version=i.head WHERE i.kind=? AND (instr(lower(v.name),lower(?))>0 OR instr(lower(v.description),lower(?))>0) ORDER BY v.created DESC LIMIT 500').all(kind,query,query).map(({category_path,...row})=>({...row,categoryPath:JSON.parse(category_path)}));}
+ function read(id,version){const row=db.prepare('SELECT i.id,i.owner,i.kind,v.version,v.name,v.description,v.created,v.payload,v.category_path FROM items i JOIN versions v ON v.item=i.id WHERE i.id=? AND v.version=?').get(id,version);if(!row)fail(404,'找不到发布版本');const {category_path,...value}=row;return {...value,payload:JSON.parse(value.payload),categoryPath:JSON.parse(category_path)};}
 function publish(user,body,validate,token){
  const gate=token?authenticate(token,{force:true}):undefined;if(gate&&typeof gate.then==='function')return gate.then(()=>publish(user,body,validate));
   if(!['admin','member'].includes(user.role))fail(403,'只读成员不能发布');
   const {kind,name,description='',payload,key,itemId,expectedVersion=0}=body;
   if(!['asset','scene'].includes(kind)||typeof name!=='string'||!name.trim()||name.length>80||typeof description!=='string'||description.length>2000||typeof key!=='string'||!/^[a-zA-Z0-9-]{16,80}$/.test(key)||!Number.isSafeInteger(expectedVersion)||expectedVersion<0)fail(400,'发布信息无效');
+  const categoryPath=publishCategoryPath(kind,payload,body.categoryPath);
   validate(kind,payload);
   const digest=hash(JSON.stringify(body));
   return transaction(()=>{
@@ -113,7 +125,7 @@ function publish(user,body,validate,token){
    if(item&&(item.kind!==kind||item.head!==expectedVersion)||!item&&expectedVersion!==0)fail(409,'原件已有新版本，请刷新后重试');
    const id=item?.id??randomUUID(),version=(item?.head??0)+1;
    if(!item)db.prepare('INSERT INTO items VALUES(?,?,?,?)').run(id,user.id,kind,version);else db.prepare('UPDATE items SET head=? WHERE id=?').run(version,id);
-   db.prepare('INSERT INTO versions VALUES(?,?,?,?,?,?)').run(id,version,name.trim(),description,new Date().toISOString(),JSON.stringify(payload));
+   db.prepare('INSERT INTO versions(item,version,name,description,created,payload,category_path) VALUES(?,?,?,?,?,?,?)').run(id,version,name.trim(),description,new Date().toISOString(),JSON.stringify(payload),JSON.stringify(categoryPath));
    const result={id,version};db.prepare('INSERT INTO requests VALUES(?,?,?,?)').run(user.id,key,digest,JSON.stringify(result));return result;
   });
 }

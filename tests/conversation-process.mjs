@@ -45,5 +45,15 @@ try{
  ui.rerender(React.createElement(ConversationRun,{run:{...run,activity:{...activity,explanations:[{id:'legacy',text:'旧版公开工作说明。'}]}}}));
  assert.ok(ui.getByText('时间未记录'));assert.equal(section.querySelector('.adx-work-entry').dataset.status,'recorded');
  console.log('PASS tool-only histories remain compact and legacy public prose never receives an invented timestamp');
+ const blender={stage:'receiving',instruction:'正在生成 Python 脚本（尚未执行）',script:'import bpy\nwidth = 2\nbpy.ops.mesh.primitive_cube_add(size=width)',receivedChars:72,updatedAt:Date.now(),events:[{stage:'receiving',message:'已开始接收脚本',at:start}]};
+ ui.rerender(React.createElement(ConversationRun,{run:{...run,activity:{...activity,blenderProgress:blender,explanations:[]}}}));
+ const panel=ui.getByRole('region',{name:'Blender 脚本与执行阶段'});
+ assert.match(panel.textContent,/尚未执行/);assert.match(panel.querySelector('[aria-label="脚本末尾预览"]').textContent,/primitive_cube_add/);
+ const scriptDetails=panel.querySelector('details');assert.equal(scriptDetails.open,false);scriptDetails.open=true;
+ ui.rerender(React.createElement(ConversationRun,{run:{...run,activity:{...activity,blenderProgress:{...blender,stage:'rendering',instruction:'正在渲染预览',updatedAt:Date.now()}}}}));
+ assert.equal(scriptDetails.open,true);assert.match(panel.textContent,/正在渲染预览/);
+ ui.rerender(React.createElement(ConversationRun,{run:{...run,status:'stopped',activity:{...activity,blenderProgress:{...blender,stage:'rendering',instruction:'正在渲染预览'}}}}));
+ assert.match(panel.textContent,/已停止/);assert.equal(panel.querySelector('.adx-live-dot'),null);assert.equal(scriptDetails.open,true);
+ console.log('PASS Blender code is visible before execution, disclosure survives stage changes and stopped history has no active indicator');
  cleanup();
 }finally{await server.close();dom.window.close()}

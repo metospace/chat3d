@@ -1,5 +1,7 @@
 import {buildTeamCopyExport} from './teamCopyExport';
 import {teamFetch} from './teamTransport';
+import {sendTeamPublication,type TeamUploadProgress} from './teamPublish';
+import {localPublishedCategoryPath,publishedCategoryPath,acquirePublishedCategory} from './teamCategories';
 import {MAX_TEAM_ASSET_BYTES,parseModelAsset,type ModelAssetVersion} from './modelAssets';
 import {MAX_TEAM_SCENE_BYTES,parseProject,serializeProject} from './project';
 import {saveModelAsset} from './modelAssetStorage';
@@ -27,9 +29,9 @@ function publicSnapshot(value:unknown,shape:PublicationShape):unknown{
  return result;
 }
 export interface TeamUser {id:string;name:string;role:'admin'|'member'|'viewer'}
-export interface TeamItem {id:string;owner:string;kind:'asset'|'scene';version:number;name:string;description:string;created:string}
+export interface TeamItem {id:string;owner:string;kind:'asset'|'scene';version:number;name:string;description:string;created:string;categoryPath?:string[]}
 export interface TeamVersion extends TeamItem {payload:unknown}
-export interface TeamPublish {kind:'asset'|'scene';name:string;description:string;payload:unknown;key:string;itemId?:string;expectedVersion:number}
+export interface TeamPublish {kind:'asset'|'scene';name:string;description:string;payload:unknown;key:string;itemId?:string;expectedVersion:number;categoryPath?:string[]}
 export class TeamServiceError extends Error {
  constructor(readonly status:number,message:string){super(message);this.name='TeamServiceError';}
 }
@@ -48,12 +50,15 @@ export function rememberTeamServiceBase(base:string){localStorage.setItem(TEAM_A
 export class TeamClient {
  readonly base:string;private token='';user?:TeamUser;
  constructor(base:string){this.base=teamAddress(base);}
- async request<T>(path:string,body?:unknown):Promise<T>{
-  const response=await teamFetch(this.base+'/api/team/'+path,{method:body===undefined?'GET':'POST',headers:{...(body===undefined?{}:{'Content-Type':'application/json'}),...(this.token?{Authorization:'Bearer '+this.token}:{})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(60000),redirect:'error',credentials:'omit'});
-  const data=await response.json().catch(()=>null);
+ async request<T>(path:string,body?:unknown,onProgress?:(progress:TeamUploadProgress)=>void):Promise<T>{
+  const serialized=body===undefined?undefined:JSON.stringify(body);
+  const response=path==='publish'&&serialized!==undefined
+   ?await sendTeamPublication(this.base,this.token,serialized,onProgress)
+   :await teamFetch(this.base+'/api/team/'+path,{method:body===undefined?'GET':'POST',headers:{...(body===undefined?{}:{'Content-Type':'application/json'}),...(this.token?{Authorization:'Bearer '+this.token}:{})},body:serialized,signal:AbortSignal.timeout(60000),redirect:'error',credentials:'omit'});
+  let data:unknown;try{data=await response.json();}catch{throw Error('团队服务响应未完整返回，尚未确认操作结果；可重试同一项。');}
   if(!response.ok){
    if(response.status===401&&this.token&&sharedClient===this){expireTeamSession(this);throw new TeamServiceError(401,'团队登录已失效，请重新登录。');}
-   throw new TeamServiceError(response.status,typeof data?.error==='string'?data.error:'团队服务请求失败');
+   throw new TeamServiceError(response.status,data&&typeof data==='object'&&'error' in data&&typeof data.error==='string'?data.error:'团队服务请求失败');
   }
   return data as T;
  }
@@ -64,7 +69,7 @@ async loginWithPlatform(auth:{accessToken:string;tenantId:string}){const result=
  async logout(){const pending=this.request('logout',{});this.token='';this.user=undefined;await pending;}
  list(kind:'asset'|'scene',q=''){return this.request<TeamItem[]>('items?kind='+kind+'&q='+encodeURIComponent(q));}
  async read(item:TeamItem){const value=await this.request<TeamVersion>(`items/${encodeURIComponent(item.id)}/${item.version}`);if(value.id!==item.id||value.kind!==item.kind||value.version!==item.version)throw Error('团队服务返回的固定版本不匹配');return value;}
- publish(body:TeamPublish){return this.request<{id:string;version:number}>('publish',body);}
+ publish(body:TeamPublish,onProgress?:(progress:TeamUploadProgress)=>void){return this.request<{id:string;version:number}>('publish',body,onProgress);}
 }
 const sessionListeners=new Set<()=>void>();
 let sharedClient:TeamClient|undefined;
@@ -227,10 +232,11 @@ export async function copyTeamVersion(item:TeamVersion){
  assertLibraryReady();
  if(item.kind==='asset'){
   const asset=parseModelAsset(buildTeamCopyExport({...item,kind:'asset'}));
+  asset.category=await acquirePublishedCategory('asset',publishedCategoryPath(item))??'其他';
   await saveModelAsset(asset);return asset.id;
  }
  const doc=parseProject(buildTeamCopyExport({...item,kind:'scene'}));
- if(!createSession(doc,{moduleKind:'scene',title:item.name+' 副本',libraryDescription:item.description,librarySavedAt:Date.now(),savedRevision:doc.revision}))throw Error('无法创建本地副本');
+ if(!createSession(doc,{moduleKind:'scene',title:item.name+' 副本',sceneCategory:await acquirePublishedCategory('scene',publishedCategoryPath(item)),libraryDescription:item.description,librarySavedAt:Date.now(),savedRevision:doc.revision}))throw Error('无法创建本地副本');
  await flushWorkspace();if(useWorkspaceStore.getState().error)throw Error('副本已创建，但本地保存失败，请先修复存储再继续');return doc.projectId;
 }
 export function scenePublication(doc:Parameters<typeof serializeProject>[0]){const safe=publicSnapshot(doc,{schemaVersion:true,projectId:true,revision:true,unit:true,upAxis:true,nodes:[nodeShape],materials:[materialShape],assets:[],animation:animationShape,viewState:{cameraPosition:vectorShape,cameraTarget:vectorShape,projection:true,displayUnit:true}}) as Parameters<typeof serializeProject>[0];return JSON.parse(serializeProject(safe,undefined,MAX_TEAM_SCENE_BYTES));}
@@ -240,6 +246,7 @@ export interface TeamPublishSource extends TeamLocalSource {name:string;kind:'as
 export interface PreparedTeamPublication {
  source:TeamLocalSource;request:TeamPublish;serviceOrigin:string;userId:string;baselineFingerprint:string;sceneRevision?:number;
  status:'ready'|'running'|'success'|'error';error?:string;serverResult?:{id:string;version:number};
+ upload?:TeamUploadProgress;bytes?:number;startedAt?:number;endedAt?:number;
 }
 export async function listTeamPublishSources(kind:'asset'|'scene'):Promise<TeamPublishSource[]>{
  assertLibraryReady();await flushWorkspace();if(useWorkspaceStore.getState().error)throw Error('请先修复本地保存错误');
@@ -262,20 +269,20 @@ export async function prepareTeamPublications(client:TeamClient,kind:'asset'|'sc
    if(!session?.librarySavedAt||session.savedRevision!==session.snapshot.doc.revision||session.snapshot.pendingBatch||session.snapshot.wasRunning)throw Error('场景包含未保存修改或预览，请先保存到本地库后再发布');
    name=session.title;description=session.libraryDescription??'';category=session.sceneCategory;sceneRevision=session.snapshot.doc.revision;payload=scenePublication(session.snapshot.doc);localPayload=JSON.parse(serializeProject(session.snapshot.doc));
   }
-  const request:TeamPublish={kind,name,description,payload,key:crypto.randomUUID(),expectedVersion:target?.version??0,...(target?{itemId:target.id}:{})};
-  return {source,request,serviceOrigin:client.base,userId:client.user!.id,baselineFingerprint:await teamLocalFingerprint({kind,payload:localPayload,name,description,category}),sceneRevision,status:'ready' as const};
+  const request:TeamPublish={kind,name,description,payload,categoryPath:await localPublishedCategoryPath(kind,category),key:crypto.randomUUID(),expectedVersion:target?.version??0,...(target?{itemId:target.id}:{})};
+  return {source,request,bytes:new TextEncoder().encode(JSON.stringify(request)).byteLength,serviceOrigin:client.base,userId:client.user!.id,baselineFingerprint:await teamLocalFingerprint({kind,payload:localPayload,name,description,category}),sceneRevision,status:'ready' as const};
  }));
 }
 /** Retrying never re-freezes local content or changes keys, and successful entries are skipped. */
 export async function publishPreparedTeamBatch(client:TeamClient,entries:PreparedTeamPublication[],onChange?:()=>void){
  if(!client.user||client.user.role==='viewer')throw Error('当前账号没有发布权限');
  if(entries.some(e=>e.serviceOrigin!==client.base||e.userId!==client.user!.id))throw Error('团队登录已变化，请重新准备发布');
- for(const entry of entries){if(entry.status==='success')continue;entry.status='running';entry.error=undefined;onChange?.();
+ for(const entry of entries){if(entry.status==='success')continue;entry.status='running';entry.error=undefined;entry.startedAt=Date.now();entry.endedAt=undefined;entry.upload={phase:'preparing',loaded:0,total:entry.bytes??0};onChange?.();
   try{
-   entry.serverResult??=await client.publish(entry.request);
+   entry.serverResult??=await client.publish(entry.request,progress=>{entry.upload=progress;entry.bytes=progress.total;onChange?.();});
    await saveTeamResourceLink({serviceOrigin:client.base,kind:entry.request.kind,teamItemId:entry.serverResult.id,teamVersion:entry.serverResult.version,teamName:entry.request.name,localId:entry.source.id,localVersion:entry.source.version,sceneRevision:entry.sceneRevision,baselineFingerprint:entry.baselineFingerprint,direction:'publish',active:true,status:'ready',createdAt:new Date().toISOString(),latestVersion:entry.serverResult.version});
    entry.status='success';
-  }catch(error){entry.status='error';entry.error=error instanceof Error?error.message:'发布失败，可重试同一项';}onChange?.();
+  }catch(error){entry.status='error';entry.error=error instanceof Error?error.message:'发布失败，可重试同一项';}entry.endedAt=Date.now();onChange?.();
  }
 }
 const acquisitionFlights=new Map<string,Promise<{link:TeamResourceLink;reused:boolean}>>();
@@ -294,13 +301,13 @@ export function acquireLinkedTeamVersion(client:TeamClient,item:TeamVersion):Pro
   let payload:unknown,name:string,description:string|undefined,category:string|undefined;
   if(item.kind==='asset'){
    let asset=(await listModelAssets()).find(x=>x.id===link.localId)?await readModelAsset(link.localId,1):undefined;
-   if(!asset){asset=parseModelAsset(buildTeamCopyExport({...item,kind:'asset'}));asset.id=link.localId;await saveModelAsset(asset);}
+   if(!asset){asset=parseModelAsset(buildTeamCopyExport({...item,kind:'asset'}));asset.id=link.localId;asset.category=await acquirePublishedCategory('asset',publishedCategoryPath(item))??'其他';await saveModelAsset(asset);}
    payload=asset;name=asset.name;description=asset.description;category=asset.category;
   }else{
    let session=useWorkspaceStore.getState().sessions.find(x=>x.snapshot.doc.projectId===link.localProjectId);
    if(session?.deletedAt)throw Error('该版本已获取后移入回收站，请恢复旧副本');
    if(!session){const doc=parseProject(buildTeamCopyExport({...item,kind:'scene'}));doc.projectId=link.localProjectId!;
-    if(!createSession(doc,{moduleKind:'scene',title:item.name.slice(0,76)+' 副本',libraryDescription:item.description,librarySavedAt:Date.now(),savedRevision:doc.revision}))throw Error('无法创建本地副本');session=useWorkspaceStore.getState().sessions.find(x=>x.snapshot.doc.projectId===doc.projectId)!;}
+    if(!createSession(doc,{moduleKind:'scene',title:item.name.slice(0,76)+' 副本',sceneCategory:await acquirePublishedCategory('scene',publishedCategoryPath(item)),libraryDescription:item.description,librarySavedAt:Date.now(),savedRevision:doc.revision}))throw Error('无法创建本地副本');session=useWorkspaceStore.getState().sessions.find(x=>x.snapshot.doc.projectId===doc.projectId)!;}
    await flushWorkspace();if(useWorkspaceStore.getState().error)throw Error('副本已创建，但本地保存失败；修复后重试同一项');
    link={...link,localId:session.id};payload=scenePublication(session.snapshot.doc);name=session.title;description=session.libraryDescription;category=session.sceneCategory;
   }

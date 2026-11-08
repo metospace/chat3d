@@ -3,7 +3,7 @@ import {createPortal} from 'react-dom';
 import {PreviewDecision} from './PreviewDecision';
 import {BlenderResult} from './BlenderResult';
 import {FailureReason} from './FailureReason';
-import {blenderPythonStatus} from '../../scene/blenderModeling';
+import {blenderPythonStatus,connectBlenderPython} from '../../scene/blenderModeling';
 import {focusSceneObjects} from '../../scene/focus';
 import {prepareReference,MAX_ATTACHMENT_BYTES,isReferenceImage} from '../../domain/referenceAttachments';
 import {REFERENCE_IMAGE_JPEG_QUALITY,REFERENCE_IMAGE_MAX_SIDE} from '../../domain/referenceImageLimits';
@@ -87,15 +87,22 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
   const [lockPlacement,setLockPlacement]=useState(false);
   const [blenderModeling,setBlenderModeling]=useState(autoStartRequest?.projectId===doc.projectId&&autoStartRequest.blenderModeling===true);
   const [blenderStatus,setBlenderStatus]=useState<'checking'|'online'|'offline'>('checking');
-  const [blenderProbe,setBlenderProbe]=useState(0);
+  const [blenderConnecting,setBlenderConnecting]=useState(false);
   const [blenderReason,setBlenderReason]=useState('');
   useEffect(()=>{
-    if(!blenderModeling)return;
+    if(!blenderModeling||blenderConnecting)return;
     const controller=new AbortController();
     const signal=AbortSignal.any([controller.signal,AbortSignal.timeout(5000)]);
     void blenderPythonStatus(signal).then(({available,reason})=>{if(!controller.signal.aborted){setBlenderReason(reason??'');setBlenderStatus(available?'online':'offline');}},()=>{if(!controller.signal.aborted){setBlenderReason('');setBlenderStatus('offline');}});
     return()=>controller.abort();
-  },[blenderModeling,blenderProbe]);
+  },[blenderModeling,blenderConnecting]);
+  const connectBlender=async()=>{
+    if(blenderConnecting)return;
+    setBlenderConnecting(true);setBlenderStatus('checking');
+    try{const {available,reason}=await connectBlenderPython();if(aliveRef.current){setBlenderReason(reason??'');setBlenderStatus(available?'online':'offline');}}
+    catch(error){if(aliveRef.current){setBlenderReason(error instanceof Error?error.message:String(error));setBlenderStatus('offline');}}
+    finally{if(aliveRef.current)setBlenderConnecting(false);}
+  };
   const [scopeMode,setScopeMode]=useState<'scene'|'selection'>('scene');
   const [reviewHost,setReviewHost]=useState<HTMLElement|null>(null);
   useEffect(()=>{setReviewHost(canvasMode?document.querySelector<HTMLElement>('.workbench-review-slot'):null);},[canvasMode,doc.projectId]);
@@ -151,7 +158,7 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
   const send=async(mode:'guide'|'question'|'later'='guide')=>{
     if(imageBusyRef.current)return;
     const previousMessages=store().messages;
-    if(!busy&&blenderModeling&&blenderStatus!=='online'){setNotice('本机 Blender 未连接，请重新连接，或在生成方式菜单中选择“直接生成”。输入已保留。');return;}
+    if(!busy&&blenderModeling&&blenderStatus!=='online'){setNotice('本机 Blender 尚未就绪，请点击“连接 Blender”，或在生成方式菜单中选择“直接生成”。输入已保留。');return;}
     stickRef.current=true;scrollAfterSend.current=true;setNewMessages(false);await runtime.send(mode,{scopeMode:blenderModeling?'scene':scopeMode,lockPlacement:!blenderModeling&&lockPlacement,reuseReference:true,blenderModeling});
     if(store().messages===previousMessages)scrollAfterSend.current=false;
     if(aliveRef.current)focusComposer();
@@ -249,7 +256,7 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
     {canvasMode&&!expanded&&previewing&&<div className="adx-compact-strip"><span>修改结果待确认</span><Button size="small" onClick={onExpand}>查看详情</Button><Button size="small" type="primary" disabled={compareBefore} onClick={commit}>应用修改</Button><Button size="small" onClick={discard}>放弃修改</Button></div>}
     {canvasMode&&!expanded&&busy&&<div className="adx-compact-strip"><Button size="small" onClick={onExpand}>查看过程</Button></div>}
     <div className="adx-composer">
-      {blenderModeling&&<div className="instruction-context blender-connection"><span role="status">{blenderStatus==='checking'?'正在连接本机 Blender…':blenderStatus==='online'?'本机 Blender 已连接':blenderReason||'本机 Blender 未连接'}</span>{blenderStatus!=='checking'&&blenderStatus!=='online'&&<Button size="small" type="text" disabled={busy} onClick={()=>{setBlenderStatus('checking');setBlenderProbe(v=>v+1);}}>重新连接</Button>}</div>}
+      {blenderModeling&&<div className="instruction-context blender-connection"><span role="status">{blenderStatus==='checking'?'正在连接本机 Blender…':blenderStatus==='online'?'本机 Blender 已连接':blenderReason||'本机 Blender 未连接'}</span>{blenderStatus!=='checking'&&blenderStatus!=='online'&&<Button size="small" type="text" disabled={busy||blenderConnecting} onClick={()=>void connectBlender()}>连接 Blender</Button>}</div>}
       {(selectedNames.length>0||!blenderModeling&&(contextDoc.nodes.length>0||scopeMode==='selection'||lockPlacement))&&<div className="instruction-context" role="group" aria-label="本次修改范围">
         <div>{selectedNames.length>0&&<span aria-label="当前选中对象" title={selectedNames.join('、')}>当前选中：{selectedNames.length===1?selectedNames[0]:`${selectedNames.length} 个部件 · ${selectedNames.slice(0,3).join('、')}${selectedNames.length>3?' 等':''}`}</span>}{!blenderModeling&&lockPlacement&&<span>已锁定位置与朝向</span>}</div>
         {!blenderModeling&&<label>修改范围<Select aria-label="对话修改范围" size="small" value={scopeMode} disabled={busy} onChange={setScopeMode} popupMatchSelectWidth={false} popupRender={menu=><>{menu}<div className="adx-scope-options" onMouseDown={event=>event.preventDefault()}><Checkbox disabled={busy} checked={lockPlacement} onChange={event=>setLockPlacement(event.target.checked)}>锁定已有对象的位置与朝向</Checkbox><p>选中对象用于指代；选择“仅选中对象”才会限制修改范围。</p></div></>} options={[{value:'scene',label:'全场景'},{value:'selection',label:`仅选中对象（${selection.length}）`}]}/></label>}

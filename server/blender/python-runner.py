@@ -9,6 +9,7 @@ from mathutils import Vector
 
 root = os.getcwd()
 bpy.ops.wm.read_factory_settings(use_empty=True)
+print("@@SCENIVO_BLENDER_STAGE@@executing", flush=True)
 runpy.run_path(os.path.join(root, "user.py"), run_name="__main__")
 if bpy.context.object and bpy.context.object.mode != "OBJECT":
     bpy.ops.object.mode_set(mode="OBJECT")
@@ -30,12 +31,14 @@ if "FINISHED" not in bpy.ops.file.pack_all():
 for image in bpy.data.images:
     if image.library is None and image.source in {"GENERATED", "FILE", "TILED"} and not image.packed_files:
         raise RuntimeError("Image could not be packed: " + image.name)
+print("@@SCENIVO_BLENDER_STAGE@@saving", flush=True)
 if "FINISHED" not in bpy.ops.wm.save_as_mainfile(
         filepath=os.path.join(root, "result.blend"), check_existing=False, compress=False):
     raise RuntimeError("Saving Blender project failed")
 
 # The exporter evaluates modifiers on temporary meshes without applying them to
 # the saved Blender project. In particular, bevels must survive static export.
+print("@@SCENIVO_BLENDER_STAGE@@exporting", flush=True)
 if "FINISHED" not in bpy.ops.export_scene.gltf(
         filepath=os.path.join(root, "result.glb"), export_format="GLB",
         export_apply=True, export_current_frame=True, export_cameras=True, export_lights=True):
@@ -117,5 +120,6 @@ scene.render.image_settings.color_mode = "RGBA"
 scene.render.image_settings.color_depth = "8"
 scene.render.filepath = os.path.join(root, "render.png")
 scene.render.use_file_extension = True
+print("@@SCENIVO_BLENDER_STAGE@@rendering", flush=True)
 if "FINISHED" not in bpy.ops.render.render(write_still=True):
     raise RuntimeError("Blender preview render failed")

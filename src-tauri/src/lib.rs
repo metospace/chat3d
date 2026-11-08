@@ -2,6 +2,10 @@ use tauri::Manager;
 use std::io::Write;
 mod export_file;
 use export_file::{cancel_export_destination, commit_export_file, select_export_destination, PendingExports};
+#[cfg(desktop)]
+mod blender;
+#[cfg(desktop)]
+mod team_publish;
 
 #[cfg(desktop)]
 #[macro_use]
@@ -51,6 +55,8 @@ pub fn run() {
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 window.state::<PendingExports>().remove_window(window.label());
+                #[cfg(desktop)]
+                window.state::<blender::BlenderState>().remove_window(window.label());
             }
         })
         .plugin(tauri_plugin_opener::init())
@@ -60,11 +66,14 @@ pub fn run() {
     // and minisign public key. The private signing key stays in the build environment.
     #[cfg(desktop)]
     let builder = builder
+        .manage(blender::BlenderState::default())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build());
     #[cfg(desktop)]
     let builder = {
         use updater_mirror::{download_and_install_mirrored_update, update_download_url};
+        use blender::{desktop_blender_cancel, desktop_blender_connect, desktop_blender_run, desktop_blender_status};
+        use team_publish::desktop_team_publish;
         builder.invoke_handler(tauri::generate_handler![
             greet,
             save_support_json,
@@ -72,14 +81,25 @@ pub fn run() {
             commit_export_file,
             cancel_export_destination,
             update_download_url,
-            download_and_install_mirrored_update
+            download_and_install_mirrored_update,
+            desktop_team_publish,
+            desktop_blender_status,
+            desktop_blender_connect,
+            desktop_blender_run,
+            desktop_blender_cancel
         ])
     };
     #[cfg(not(desktop))]
     let builder = builder.invoke_handler(tauri::generate_handler![
         greet, save_support_json, select_export_destination, commit_export_file, cancel_export_destination
     ]);
-    builder
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    let app = builder
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+    app.run(|_app, event| {
+        #[cfg(desktop)]
+        if matches!(event, tauri::RunEvent::Exit) {
+            _app.state::<blender::BlenderState>().shutdown();
+        }
+    });
 }

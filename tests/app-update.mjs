@@ -205,6 +205,15 @@ try {
   const uiModule = await vite.ssrLoadModule('/src/ui/AppUpdateNotice.tsx');
   const client = await vite.ssrLoadModule('/src/domain/appUpdateClient.ts');
   client.useAppUpdate.setState({busy: false, dirty: false, release: null, dismissed: null, remind: null, phase: 'idle', progress: '', progressMetrics: null, error: '', checking: false, checkMessage: '', panelOpen: false});
+  const {formatUpdateHistoryDate} = await vite.ssrLoadModule('/src/domain/updateHistory.ts');
+  assert.equal(formatUpdateHistoryDate('2026-11-06T15:30:42Z'), '2026-11-06 23:30:42');
+  assert.equal(formatUpdateHistoryDate('2026-12-31T16:00:09Z'), '2027-01-01 00:00:09');
+  assert.equal(formatUpdateHistoryDate('2026-11-06T23:30:42+08:00'), formatUpdateHistoryDate('2026-11-06T10:30:42-05:00'));
+  const historyPanel = renderInTheme(React.createElement(uiModule.AppUpdatePanel));
+  const historyRegion = historyPanel.getByRole('region', {name: '更新日志'});
+  assert.equal(historyRegion.textContent.includes('开发中'), false);
+  historyPanel.unmount();
+  console.log('PASS release history converts offsets to Shanghai time with seconds and handles year rollover at midnight');
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async url => { assert.equal(url, '/api/version'); return new Response(JSON.stringify({version: '99.0.0', notes: '可以稍后更新'}), {headers: {'content-type': 'application/json'}}); };
   const settings = renderInTheme(React.createElement(uiModule.AppUpdateSettings));

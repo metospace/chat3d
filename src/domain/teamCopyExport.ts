@@ -1,21 +1,26 @@
-import {parseModelAsset} from './modelAssets';
+import {ASSET_SIZE_ERROR,MAX_ASSET_BYTES,parseModelAsset} from './modelAssets';
 import {parseProject,serializeProject} from './project';
 import type {TeamVersion} from './teamLibrary';
+import {publishedCategoryPath} from './teamCategories';
 
 /** Desktop/Web handoff: new ids so imports never overwrite local originals. */
 export function buildTeamCopyExport(item:TeamVersion):string{
+ const teamCategoryPath=publishedCategoryPath(item);
  if(item.kind==='asset'){
   const asset=parseModelAsset(JSON.stringify(item.payload));
   asset.id=crypto.randomUUID();
   asset.version=1;
   asset.name=item.name.slice(0,76)+' 副本';
   asset.createdAt=new Date().toISOString();
-  return JSON.stringify(asset);
+  asset.category=teamCategoryPath[teamCategoryPath.length-1]??'其他';
+  const text=JSON.stringify({...asset,teamCategoryPath});
+  if(text.length>MAX_ASSET_BYTES||new TextEncoder().encode(text).length>MAX_ASSET_BYTES)throw Error(ASSET_SIZE_ERROR);
+  return text;
  }
  const doc=parseProject(JSON.stringify(item.payload));
  doc.projectId=crypto.randomUUID();
  doc.revision=0;
- return serializeProject(doc);
+ return serializeProject(doc,undefined,undefined,teamCategoryPath);
 }
 
 export function teamCopyFilename(item:TeamVersion):string{

@@ -19,13 +19,13 @@
     "test:full-scenes": "node tests/full-scene-replay.mjs",
     "build:team": "node scripts/build-team.mjs",
     "build:team-web": "node scripts/build-team-web.mjs",
-    "test:team": "npm run build:team && npm run build:team-web && node tests/auth-transport.mjs && node tests/team-auth-resources.mjs && node tests/team-library.mjs && node tests/team-client.mjs && node tests/team-resource-links.mjs && node tests/team-ui.mjs && node tests/team-web.mjs && node tests/team-oauth-callback.mjs && node tests/team-static.mjs",
+    "test:team": "npm run build:team && npm run build:team-web && node tests/auth-transport.mjs && node tests/team-publish.mjs && node tests/team-categories.mjs && node tests/team-auth-resources.mjs && node tests/team-library.mjs && node tests/team-client.mjs && node tests/team-resource-links.mjs && node tests/team-ui.mjs && node tests/team-web.mjs && node tests/team-oauth-callback.mjs && node tests/team-static.mjs",
     "test:scene-quality": "node tests/scene-quality-browser.mjs",
     "test:realistic-rendering": "node tests/realistic-rendering.mjs",
     "test:runtime": "node tests/docker-runtime.mjs",
     "test:product-ui": "node tests/product-redesign-browser.mjs",
     "test:glb-interaction": "node tests/glb-interaction-browser.mjs",
-    "test:blender": "node tests/blender-direct.mjs && node tests/blender-modeling-frontend.mjs && node tests/blender-python-security.mjs",
+    "test:blender": "node tests/blender-direct.mjs && node tests/blender-modeling-frontend.mjs && node tests/blender-desktop.mjs && node tests/blender-python-security.mjs",
     "test:streaming-ui": "node tests/progress-notifications.mjs && node tests/streaming-ui-browser.mjs"
   },
   "dependencies": {

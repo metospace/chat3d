@@ -23,6 +23,8 @@
 .team-browser-toolbar{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}
 .team-browser-toolbar .team-search-input{width:320px;max-width:100%;flex:1;min-width:min(240px,100%)}
 .team-toolbar-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.team-category-select{flex:0 1 190px;min-width:140px;max-width:100%}
+.team-result-body .team-category-path,.team-preview .team-category-path{margin:6px 0;color:var(--team-muted);font-size:11px;line-height:1.5;overflow-wrap:anywhere}
 .team-view-switch{display:flex;gap:2px;padding:2px;border:1px solid var(--team-line);border-radius:6px}
 .team-view-switch .ant-btn{width:29px;min-height:29px;padding:0;border:0;background:transparent;color:var(--team-muted);border-radius:4px}
 .team-view-switch .ant-btn[aria-pressed=true]{background:var(--sc-surface-muted,var(--gray-3));color:var(--team-ink)}
@@ -111,6 +113,15 @@
 .team-transfer-result strong{display:block;font-size:12px;font-weight:500;overflow-wrap:anywhere}
 .team-transfer-result span{font-size:11px;color:var(--team-muted)}
 .team-transfer-result .ant-tag{flex-shrink:0;font-size:10px;font-weight:400}
+.team-publish-result{align-items:flex-start}
+.team-publish-content{flex:1}
+.team-publish-progress{margin-top:10px}
+.team-publish-progress-label{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;margin-bottom:4px;font-variant-numeric:tabular-nums}
+.team-publish-progress progress{display:block;width:100%;height:6px;border:0;border-radius:3px;overflow:hidden;accent-color:var(--sc-accent,var(--gray-12));background:var(--team-muted-fill)}
+.team-publish-progress progress::-webkit-progress-bar{background:var(--team-muted-fill);border-radius:3px}
+.team-publish-progress progress::-webkit-progress-value{background:var(--sc-accent,var(--gray-12));border-radius:3px}
+.team-publish-progress progress::-moz-progress-bar{background:var(--sc-accent,var(--gray-12));border-radius:3px}
+.team-publish-elapsed{display:block;margin-top:4px;font-variant-numeric:tabular-nums}
 .team-transfer-safety{margin:14px 0 0;color:var(--team-muted);font-size:11px;line-height:1.8}
 .team-transfer-actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:22px;padding-top:18px;border-top:1px solid var(--team-line)}
 .team-transfer-dialog .team-empty{margin:0;padding:22px;color:var(--team-muted);font-size:12px}

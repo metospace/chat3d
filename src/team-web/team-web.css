@@ -24,15 +24,17 @@ body { margin: 0; }
 .team-web-page-title { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
 .team-web-page-title h1 { margin: 0; font-size: clamp(22px, 2.2vw, 30px); line-height: 1.25; }
 .team-web-page-title > span { color: var(--sc-ink-muted); font-size: 13px; }
-.team-web-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+.team-web-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
 .team-web-kind { display: inline-flex; align-items: center; gap: 4px; padding: 4px; border: 1px solid var(--sc-border-subtle); border-radius: 10px; background: var(--sc-surface-elevated); }
 .team-web-kind .ant-btn { height: 36px; padding-inline: 13px; color: var(--sc-ink-muted); }
 .team-web-kind .ant-btn[aria-pressed=true] { background: var(--sc-accent-soft); color: var(--team-web-link); font-weight: 600; }
 .team-web-shell, .team-web-modal { --team-web-link: color-mix(in srgb, var(--sc-accent) 68%, var(--sc-ink)); }
-.team-web-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; flex: 0 1 370px; min-width: 0; }
+.team-web-search { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(120px, 170px) auto; gap: 8px; flex: 1 1 480px; min-width: 0; }
 .team-web-search .ant-input-affix-wrapper { min-width: 0; height: 42px; background: var(--sc-surface-elevated); }
 .team-web-search .ant-input-prefix { color: var(--sc-ink-muted); margin-inline-end: 8px; }
 .team-web-search .ant-btn { height: 42px; padding-inline: 17px; }
+.team-web-category-select { width: 100%; min-width: 0; height: 42px; }
+.team-web-card-body .team-web-category-path, .team-web-modal .team-web-category-path { color: var(--sc-ink-muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; margin-block: 8px; }
 .team-web-primary.ant-btn { font-weight: 600; }
 .team-web-signin h2 { margin: 0; font-size: 21px; line-height: 1.3; }
 .team-web-results { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 12px; }
@@ -87,6 +89,8 @@ body { margin: 0; }
   .team-web-toolbar, .team-web-signin { flex-direction: column; align-items: stretch; }
   .team-web-kind { align-self: flex-start; }
   .team-web-search, .team-web-login-form { flex: auto; }
+  .team-web-search { grid-template-columns: minmax(0, 1fr) auto; }
+  .team-web-search .ant-input-affix-wrapper { grid-column: 1 / -1; }
   .team-web-results { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .team-web-card-body { padding-inline: 8px; }
 }
