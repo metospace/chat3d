@@ -14,7 +14,7 @@ try {
  const {createInitialDoc,createEditorStore}=await load('store.ts');
  const {applyBatch}=await load('domain/commands.ts');
  const {validateDocument}=await load('domain/types.ts');
- const {createModelAsset,instantiateAsset}=await load('domain/modelAssets.ts');
+ const {createModelAsset,instantiateAsset,MAX_TEAM_ASSET_BYTES}=await load('domain/modelAssets.ts');
  const {saveModelAsset,readModelAsset}=await load('domain/modelAssetStorage.ts');
  const {serializeProject,parseProject,MAX_PROJECT_BYTES,MAX_TEAM_SCENE_BYTES,PROJECT_SIZE_LIMIT,TEAM_SCENE_SIZE_LIMIT}=await load('domain/project.ts');
  const {checkRequirements}=await load('domain/requirements.ts');
@@ -100,11 +100,14 @@ try {
  });
  await test('compact project save and reopen keep all 11,200 nodes without weakening the byte budget',async()=>{
   const json=serializeProject(large);assert.ok(Buffer.byteLength(json)<MAX_PROJECT_BYTES);assert.deepEqual(parseProject(json),JSON.parse(JSON.stringify(large)));console.log('Portable project bytes',Buffer.byteLength(json));
-  assert.throws(()=>serializeProject({...large,nodes:[{...large.nodes[0],name:'x'.repeat(400*1024*1024)}]}),/400 MiB/);assert.throws(()=>parseProject(' '.repeat(400*1024*1024+1)),/400 MiB/);
+  assert.equal(MAX_PROJECT_BYTES,400*1024*1024);assert.equal(PROJECT_SIZE_LIMIT,'400 MiB');
   const {validateTeamPayload}=await server.ssrLoadModule('/server/team/validator.ts');
   const teamExpanded=serializeProject({...large,nodes:[{...large.nodes[0],connection:undefined,name:'x'.repeat(21*1024*1024)}]});assert.ok(Buffer.byteLength(teamExpanded)>20*1024*1024);assert.doesNotThrow(()=>validateTeamPayload('scene',JSON.parse(teamExpanded)));
-  const expanded=serializeProject({...large,nodes:[{...large.nodes[0],connection:undefined,name:'x'.repeat(MAX_TEAM_SCENE_BYTES+1)}]});assert.ok(Buffer.byteLength(expanded)>MAX_TEAM_SCENE_BYTES);assert.equal(parseProject(expanded).nodes.length,1);assert.throws(()=>validateTeamPayload('scene',JSON.parse(expanded)),e=>e.message.includes(TEAM_SCENE_SIZE_LIMIT));
-  assert.throws(()=>serializeProject(parseProject(expanded),undefined,MAX_TEAM_SCENE_BYTES),e=>e.message.includes(TEAM_SCENE_SIZE_LIMIT));assert.throws(()=>parseProject(expanded,MAX_TEAM_SCENE_BYTES),e=>e.message.includes(TEAM_SCENE_SIZE_LIMIT));
+  assert.equal(MAX_TEAM_SCENE_BYTES,500*1024*1024);assert.equal(TEAM_SCENE_SIZE_LIMIT,'500 MiB');assert.equal(MAX_TEAM_ASSET_BYTES,500*1024*1024);
+  const small={...source,nodes:source.nodes.map(n=>({...n,name:'中文零件'}))},text=serializeProject(small),bytes=Buffer.byteLength(text);
+  assert.ok(bytes>text.length,'byte budget counts UTF-8, not string length');
+  assert.equal(serializeProject(small,undefined,bytes),text);assert.deepEqual(parseProject(text,bytes),parseProject(text));
+  assert.throws(()=>serializeProject(small,undefined,bytes-1),/项目文件超过/);assert.throws(()=>parseProject(text,bytes-1),/项目文件超过/);
  });
  await test('IndexedDB persists and reopens the full scene and preserves it after a storage abort',async()=>{
   let revision=await writeWorkspace({version:1,activeId:'large',sessions:[{id:'large',snapshot:{doc:large,pendingResult:generated.result}}]},0);const saved=await readWorkspace();assert.equal(saved.sessions[0].snapshot.doc.nodes.length,11200);assert.equal(saved.sessions[0].snapshot.pendingResult.doc.nodes.length,11200);

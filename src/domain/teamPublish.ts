@@ -12,7 +12,7 @@ const interrupted='上传连接已中断，尚未确认服务器是否保存。�
 /** Fixed publication endpoint; no automatic retry or browser fallback from native failure. */
 export async function sendTeamPublication(origin:string,token:string,body:string,onProgress?:(progress:TeamUploadProgress)=>void):Promise<Response>{
  const bytes=new TextEncoder().encode(body),total=bytes.byteLength;
- if(total>55*1024*1024)throw Error('上传内容超过 55 MiB，请精简模型后重新准备发布。');
+ if(total>500*1024*1024)throw Error('上传内容超过 500 MiB，请精简模型后重新准备发布。');
  onProgress?.({phase:'preparing',loaded:0,total});
  if(isTauri()){
   let active=true,lastLoaded=0;
