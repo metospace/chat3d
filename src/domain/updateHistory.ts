@@ -1,6 +1,7 @@
 export interface UpdateHistoryEntry {version:string;date:string;changes:readonly string[]}
 /** Historical dates are version-commit times, not asserted deployment times. Newest first. */
 export const UPDATE_HISTORY:readonly UpdateHistoryEntry[]=[
+ {version:'0.2.41',date:'2026-11-10T01:03:08+08:00',changes:['新增看板接入：管理员可上传 HTML、ZIP 或文件夹模板；在场景对话输入 /看板，把当前模型嵌入大屏三维区域或叠加显示，可调整模型大小、位置、旋转和俯视角度，也可拖动编辑三维区域，并导出组合 HTML','看板按固定版本管理，支持所属系统筛选、隔离预览和源码导出；这是静态大屏与三维场景的展示组合，不是 WMS/MES 实时数据连接','大型模型本地保存改为分块写入，避免浏览器单条记录写不下导致自动保存或入库失败；进出工作台不再重建当前场景视口','保存大模型和团队发布时显示真实准备、压缩和上传进度；发布改为后台压缩并分块上传，减少主线程长时间卡住','GLB 导入不再按总顶点或单网格顶点数、三角形数截断，文件上限提高到 512 MiB；默认保留 4K/8K 原图，并保留顶点色、高亮度发光和零缩放等特殊变换','工作台备份与资产库备份总上限提高到 400 MiB']},
  {version:'0.2.40',date:'2026-11-09T17:13:40+08:00',changes:['贴图宽高上限提高到 4096，更大贴图导入时自动缩放','团队发布/资产/场景与 HTTP 体上限提高到 500 MiB','团队发布失败时显示 HTTP 状态与回包预览，便于诊断断流']},
  {version:'0.2.39',date:'2026-11-08T20:42:00+08:00',changes:['改进桌面 Blender 工作流与结果预览应用','团队发布支持分类与发布流程增强','补充相关桌面与团队测试']},
  {version:'0.2.38',date:'2026-11-06T23:30:42+08:00',changes:['团队门户资源卡片显示固定版本模型预览缩略图','恢复桌面资产拖放导入','提高本地导入与相关体积上限']},
