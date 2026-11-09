@@ -48,7 +48,8 @@ import {TaskCenter,StudioSettings} from './ui/StudioPages';
 import {downloadJson} from './util/downloadJson';
 import {exportFile} from './util/exportFile';
 import {initializeWorkspace,useWorkspaceStore,createSession,anySessionRunning,exportWorkspaceBackup} from './workspace';
-import { MAX_PROJECT_BYTES, PROJECT_SIZE_ERROR, parseProject, serializeProject } from './domain/project';
+import { MAX_PROJECT_BYTES, PROJECT_SIZE_ERROR, parseProjectFile, serializeProject } from './domain/project';
+import {acquirePublishedCategory} from './domain/teamCategories';
 import {activityProgress} from './domain/customerProgress';
 
 function CanvasDraftStatus(){
@@ -126,8 +127,9 @@ export default function App() {
   const openProject = async (file: File) => {
     try {
       if (file.size > MAX_PROJECT_BYTES) throw new Error(PROJECT_SIZE_ERROR);
-      const doc = parseProject(await file.text());
-      if (!createSession(doc)) throw new Error('请先完成当前操作，或检查会话存储状态');
+      const {doc,teamCategoryPath} = parseProjectFile(await file.text());
+      const sceneCategory = teamCategoryPath === undefined ? undefined : await acquirePublishedCategory('scene',teamCategoryPath);
+      if (!createSession(doc,sceneCategory === undefined ? {} : {sceneCategory})) throw new Error('请先完成当前操作，或检查会话存储状态');
       setProjectNotice(`已导入新会话，共 ${doc.nodes.length} 个对象`);
     } catch (e) { setProjectNotice(`打开失败：${e instanceof Error ? e.message : String(e)}`); }
   };
@@ -139,7 +141,7 @@ export default function App() {
     return () => window.removeEventListener('beforeunload', warn);
   }, []);
 
-  const [autoStartRequest,setAutoStartRequest]=useState<{id:string;projectId:string}|null>(null);
+  const [autoStartRequest,setAutoStartRequest]=useState<{id:string;projectId:string;blenderModeling?:boolean}|null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showTools,setShowTools]=useState(false);const [showHistory,setShowHistory]=useState(false);
 
@@ -194,7 +196,7 @@ export default function App() {
   return <AppearanceProvider>
     <div style={{'--objects-width':`${objectsWidth}px`,'--inspector-width':`${inspectorWidth}px`,'--chat-width':`${assistantWidth}px`,'--chat-space':assistantOpen?`${assistantWidth}px`:'0px','--navigator-width':`${inspectorOpen?inspectorWidth:structureOpen?objectsWidth:shelfOpen?300:0}px`} as CSSProperties} className={`studio redesigned-studio canvas-studio frosted-studio pro-v6 product-v3 ${modulePage==='workbench'?'editor-mode':'manager-mode'} ${focusScene?'focus-scene':''}`}>
       <StudioShell activePage={modulePage} disabled={librarySaving||!workspace.ready} taskQueueRequest={taskQueueRequest} onNavigate={navigateStudio} onTaskOpen={()=>{setModulePage('workbench');setFocusScene(false);setAssistantOpen(true);}} onTaskHistory={()=>{setModulePage('tasks');setFocusScene(false);}}>
-      <StudioMain>
+      {workbenchUtilities=><StudioMain>
 
         <AppUpdateNotice onBackup={()=>setShowTools(true)}/>
         {saveNotice&&!workspace.error&&<SaveToast message={projectNotice} onClose={closeSaveNotice}/>}
@@ -203,7 +205,7 @@ export default function App() {
         {workspace.error&&!conflictDismissed&&<div role="alert" className="workspace-notice is-error"><div className="workspace-conflict-copy"><span>{workspace.error}</span><small>请关闭其他标签页，下载备份后刷新本页。</small>{backupStatus&&<span role="status">{backupStatus}</span>}</div><Button disabled={backupBusy} onClick={()=>void backupConflict()}>下载工作台备份</Button><Button type="primary" onClick={()=>window.location.reload()}>我已备份，刷新本页</Button><Button type="text" aria-label="隐藏冲突提示" icon={<Cross1Icon/>} onClick={()=>setConflictDismissed(true)}/></div>}
         {!workspace.error&&(autosaveError||(projectNotice&&!saveNotice))&&<div role="status" className={`workspace-notice ${autosaveError?'is-error':''}`}><span>{autosaveError||projectNotice}</span>{!autosaveError&&<Button type="text" aria-label="关闭通知" icon={<Cross1Icon/>} onClick={()=>setProjectNotice('')}/>}</div>}
         {!workspace.ready&&<div className="workspace-loading"><Spin size="large"/><p>正在恢复项目…</p></div>}
-        {workspace.ready&&<StudioHome onImport={()=>modelFileRef.current?.click()} onTasks={()=>setTaskQueueRequest(v=>v+1)} onConfigure={()=>setShowSettings(true)} onGenerate={projectId=>setAutoStartRequest({id:makeId(),projectId})} hidden={modulePage!=='home'} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);}}/>}
+        {workspace.ready&&<StudioHome onImport={()=>modelFileRef.current?.click()} onTasks={()=>setTaskQueueRequest(v=>v+1)} onConfigure={()=>setShowSettings(true)} onGenerate={(projectId,blenderModeling)=>setAutoStartRequest({id:makeId(),projectId,blenderModeling})} hidden={modulePage!=='home'} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);}}/>}
         {workspace.ready&&(modulePage==='asset'||modulePage==='scene')&&<ProjectLibrary key={modulePage+libraryRefresh} kind={modulePage} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);}} onManage={()=>setShowAssets(true)}/>}
         {workspace.ready&&modulePage==='team'&&<TeamStudioPage onCopied={()=>setLibraryRefresh(v=>v+1)}/>}
         {workspace.ready&&modulePage==='tasks'&&<TaskCenter locked={locked} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);}}/>}
@@ -224,6 +226,7 @@ export default function App() {
           <Dropdown trigger={['click']} menu={{items:exportItems}} disabled={locked||!workspace.ready}><Button className="workbench-export" aria-label="导出与更多" disabled={locked||!workspace.ready}>导出 <ChevronDownIcon/></Button></Dropdown>
           <Button className="workbench-save" type="primary" aria-label={librarySaving?'正在保存…':active?.moduleKind==='asset'?'保存资产':'保存场景'} disabled={locked||librarySaving||!workspace.ready} onClick={()=>{if(active?.moduleKind==='asset'&&!useEditorStore.getState().doc.nodes.length){setProjectNotice('还没有可保存的模型。请先创建或导入模型，再保存到资产库。');setAssistantOpen(true);return;}setShowLibrarySave(true);}}>{librarySaving?'保存中…':active?.moduleKind==='asset'?'保存资产':'保存场景'}</Button>
           </div>
+          {workbenchUtilities}
           <input ref={fileRef} type="file" accept=".json,.chat3d.json" className="hidden" onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void openProject(file);}}/>
           <input ref={modelFileRef} type="file" accept=".glb" className="hidden" onChange={async e=>{const file=e.target.files?.[0];e.target.value='';if(!file)return;try{assertGlbSize(file.size);setProjectNotice('正在校验并导入网格模型…');const result=await importGlb(await file.arrayBuffer(),file.name);if(!createSession(result.doc,{moduleKind:'asset',title:file.name.replace(/\.glb$/i,'')||'导入模型',assetCategory:'其他'}))throw Error('请结束当前生成后再导入');setModulePage('workbench');useCompositionTool.setState({mode:'orbit'});setProjectNotice(`已导入 ${result.doc.nodes.length} 个网格部件到新会话。${result.warnings.join(' ')}`);}catch(error){setProjectNotice(`网格导入失败：${error instanceof Error?error.message:String(error)}`);}}}/>
         </header>
@@ -257,9 +260,9 @@ export default function App() {
           {inspectorOpen&&selection.length>0&&<CanvasInspector resize={<PanelResize label="调整属性面板宽度" width={inspectorWidth} min={260} max={400} side="right" onChange={setInspectorWidth}/>} onClose={()=>setInspectorOpen(false)} onAdvanced={()=>setAdvancedOpen(true)} tab={propertyTab} setTab={setPropertyTab}/>}
 
         </div>
-          <aside className="conversation-region" aria-label="AI 助手" hidden={!assistantOpen}><ConversationResize width={assistantWidth} onChange={setAssistantWidth}/><header className="conversation-panel-title"><strong><ChatBubbleIcon/>AI 助手</strong><div><Button type="text" size="small" aria-label="本项目任务记录" onClick={()=>setTaskDetailsOpen(true)}>任务记录</Button><Button type="text" aria-label="收起对话区" icon={<Cross1Icon/>} onClick={()=>setAssistantOpen(false)}/></div></header><div id="chat-content" className="assistant-content"><ChatPanel autoStartRequest={autoStartRequest} onAutoStartConsumed={id=>setAutoStartRequest(current=>current?.id===id?null:current)} key={workspace.activeId} canvasMode expanded onExpand={()=>setAssistantOpen(true)} executionDetails={false} onConfigure={()=>setShowSettings(true)}/></div></aside>
+          <aside className="conversation-region" aria-label="AI 助手" hidden={!assistantOpen}><ConversationResize width={assistantWidth} onChange={setAssistantWidth}/><header className="conversation-panel-title"><strong><ChatBubbleIcon/>AI 助手</strong><div><Button className="task-record-button" type="text" size="small" aria-label="本项目任务记录" onClick={()=>setTaskDetailsOpen(true)}>任务记录</Button><Button className="close-conversation-button" type="text" aria-label="收起对话区" icon={<Cross1Icon/>} onClick={()=>setAssistantOpen(false)}/></div></header><div id="chat-content" className="assistant-content"><ChatPanel autoStartRequest={autoStartRequest} onAutoStartConsumed={id=>setAutoStartRequest(current=>current?.id===id?null:current)} key={workspace.activeId} canvasMode expanded onExpand={()=>setAssistantOpen(true)} executionDetails={false} onConfigure={()=>setShowSettings(true)}/></div></aside>
         </div>}
-      </StudioMain>
+      </StudioMain>}
       </StudioShell>
       <Drawer open={taskDetailsOpen} onClose={()=>setTaskDetailsOpen(false)} title="本项目任务记录" size={480}><TaskPanel onConversation={()=>setTaskDetailsOpen(false)}/></Drawer>
       {advancedOpen&&<Modal open title="对象与属性" onCancel={()=>setAdvancedOpen(false)} width={640} footer={<Button onClick={()=>setAdvancedOpen(false)}>关闭高级属性</Button>}><p>精确编辑几何参数、外观和组件关系。</p><PropertiesPanel/></Modal>}

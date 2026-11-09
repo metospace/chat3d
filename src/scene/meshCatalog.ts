@@ -10,7 +10,7 @@ export async function loadMeshComponent(args:MeshPlacement,signal?:AbortSignal,f
  if(!args.name?.trim()||args.name.length>80||!Array.isArray(args.position)||args.position.length!==3||args.position.some(x=>!Number.isFinite(x)||Math.abs(x)>10000)||!Number.isFinite(args.yaw??0)||!Number.isFinite(args.scaleFactor??1)||(args.scaleFactor??1)<.1||(args.scaleFactor??1)>10)throw Error('模型名称、位置、角度或比例无效');
  if(signal?.aborted)throw new DOMException('已停止','AbortError');
  let data=bytesCache.get(entry.key);
- if(!data){const response=await fetcher('/model-assets/'+entry.key+'.glb',{signal});if(!response.ok)throw Error('精细模型载入失败，请稍后重试');data=await response.arrayBuffer();bytesCache.set(entry.key,data);}
+ if(!data){const response=await fetcher((import.meta.env?.BASE_URL??'/')+'model-assets/'+entry.key+'.glb',{signal});if(!response.ok)throw Error('精细模型载入失败，请稍后重试');data=await response.arrayBuffer();bytesCache.set(entry.key,data);}
  if(signal?.aborted)throw new DOMException('已停止','AbortError');
  const {doc}=await importGlb(data,args.name);
  const styles:Record<string,InteractionStyle>={'production-worker':'operate','quality-worker':'inspect','warehouse-worker':'scan','packing-worker':'pack'};

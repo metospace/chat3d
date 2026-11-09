@@ -96,6 +96,73 @@ try{
   const edit={role:'toolResult',toolName:'edit_scene',toolCallId:'edit',isError:false,timestamp:0,details:{revision:19},content:[{type:'text',text:'scene changed'}]};
   assert.equal(images(context.project([fresh,edit])).length,0);
  });
+ check('metadata-only carry-forward projects current revisions while retaining immutable original provenance',()=>{
+  const context=new EvidenceContext(),source=packet('metadata',{details:{capturedTurn:4,keys:['18:front:whole'],reviewState:{status:'unknown'}},text:'original capture limitations'}),original=structuredClone(source);
+  context.prepare([source],undefined,18);const captureId=context.list().captures[0].captureId;
+  context.carryForward(18,19);
+  const projected=context.prepare([source],undefined,19),active=context.active()[0];
+  assert.deepEqual(pixels(projected),pixels([original]));assert.equal(active.revision,19);assert.equal(active.originalRevision,18);
+  assert.ok(active.images.every(item=>item.revision===19&&item.originalRevision===18));assert.equal(active.toolCallId,source.toolCallId);
+  assert.equal(projected[0].details.revision,18);assert.equal(projected[0].details.evidenceProjection.revision,19);assert.equal(projected[0].details.evidenceProjection.originalRevision,18);
+  assert.match(texts(projected),/revision=19, originalRevision=18/);assert.ok(texts(projected).includes(original.content[0].text));
+  const before=context.active(),page=context.recall({captureId},19);
+  assert.equal(page.details.evidenceRecall.revision,19);assert.equal(page.details.evidenceRecall.originalRevision,18);assert.equal(page.details.evidenceRecall.originalToolCallId,source.toolCallId);
+  for(const [key,value] of Object.entries(original.details))assert.deepEqual(page.details[key],value);
+  assert.deepEqual(pixels([page]),pixels([original]));assert.deepEqual(context.active(),before);assert.deepEqual(source,original);assert.equal(context.list().captures[0].revision,18);
+  page.content.find(part=>part.type==='image').data='tampered';active.images[0].revision=999;
+  assert.deepEqual(pixels([context.recall({captureId},19)]),pixels([original]));assert.equal(context.active()[0].images[0].revision,19);
+ });
+ check('metadata chains apply to captures ingested after carry-forward without rewriting any source revision',()=>{
+  const context=new EvidenceContext(),first=packet('pending18'),second=packet('pending19',{revision:19,scope:'part'}),originals=structuredClone([first,second]);
+  context.carryForward(18,19);context.carryForward(19,20);context.carryForward(18,20);context.carryForward(20,20);
+  assert.equal(context.list().total,0);
+  const projected=context.prepare([first,second],undefined,20);
+  assert.deepEqual(pixels(projected),pixels(originals));assert.deepEqual([first,second],originals);assert.deepEqual(context.list().captures.map(entry=>entry.revision),[18,19]);
+  assert.deepEqual(context.active().map(entry=>[entry.revision,entry.originalRevision]),[[20,18],[20,19]]);
+  assert.ok(context.active().every(entry=>entry.images.every(item=>item.revision===20&&item.originalRevision===entry.originalRevision)));
+  for(const entry of context.list().captures){const page=context.recall({captureId:entry.captureId},20);assert.equal(page.details.evidenceRecall.originalRevision,entry.revision);assert.equal(page.details.evidenceRecall.revision,20);}
+  const compacted=[first,second].map(source=>({...source,content:[{type:'text',text:'legacy screenshots omitted'}]}));
+  assert.deepEqual(pixels(context.prepare([first,second],compacted,20)),pixels(originals));assert.deepEqual([first,second],originals);
+  context.carryForward(20,21);
+  assert.equal(images(context.project([first,second])).length,4);assert.ok(context.active().every(entry=>entry.revision===21&&entry.images.every(item=>item.revision===21)));
+  assert.throws(()=>context.carryForward(-1,22),/revision/i);assert.throws(()=>context.carryForward(21,22.5),/revision/i);
+ });
+ check('previously recalled pages survive metadata chains with priority but become stale across a real geometry change',()=>{
+  const context=new EvidenceContext(),source=packet('beforeMetadata',{scope:'target'});context.prepare([source],undefined,18);
+  const captureId=context.list().captures[0].captureId,page=recallMessage(context.recall({captureId,count:1},18)),originalPage=structuredClone(page);
+  context.carryForward(18,19);context.carryForward(19,20);
+  const newer=Array.from({length:4},(_,index)=>packet('metadataNew'+index,{revision:20,scope:'new'+index})),messages=[source,...newer,page,packet('followingCapture',{revision:20,views:['front','side','back']})];
+  const projected=context.prepare(messages,undefined,20),recalled=projected.at(-2);
+  assert.equal(images(projected).length,6);assert.equal(images([recalled]).length,1);assert.equal(recalled.details.evidenceRecall.revision,20);assert.equal(recalled.details.evidenceRecall.originalRevision,18);
+  assert.deepEqual(page,originalPage);assert.ok(context.active().every(entry=>entry.revision===20&&entry.images.every(item=>item.revision===20)));
+  assert.ok(context.active().some(entry=>entry.captureId===captureId&&entry.originalRevision===18));
+  assert.equal(images(context.prepare(messages,undefined,21)).length,0);assert.equal(context.activeImageCount,0);assert.throws(()=>context.recall({captureId},21),/stale screenshots/);
+  context.carryForward(21,22);
+  const changed=packet('realGeometry',{revision:21});
+  assert.deepEqual(pixels(context.prepare([...messages,changed],undefined,22)),pixels([changed]));assert.throws(()=>context.recall({captureId},22),/stale screenshots/);
+  assert.deepEqual(context.list().captures.slice(0,5).map(entry=>entry.revision),[18,20,20,20,20]);
+ });
+ check('carry-forward preserves three-image recall cursors and six-image animation packets',()=>{
+  const context=new EvidenceContext(),source=packet('aliasedPages',{views:['front','side','back','left','top','bottom','underside']});
+  context.carryForward(18,19);context.prepare([source],undefined,19);const captureId=context.list().captures[0].captureId;
+  const first=context.recall({captureId,count:99},19),second=context.recall({captureId,startImage:first.details.evidenceRecall.nextImage},19),last=context.recall({captureId,startImage:second.details.evidenceRecall.nextImage},19);
+  assert.deepEqual([first,second,last].map(page=>images([page]).length),[3,3,1]);assert.deepEqual(pixels([first,second,last]),pixels([source]));assert.equal(last.details.evidenceRecall.nextImage,null);
+  assert.ok([first,second,last].every(page=>page.details.evidenceRecall.revision===19&&page.details.evidenceRecall.originalRevision===18));
+  const animation=packet('aliasedAnimation',{tool:'preview_animation',views:['front','side','back','left','top','bottom'],details:{times:[0,1,2,3,4,5]},text:'动态样本 不是完整碰撞或动画验收'});
+  const projected=context.prepare([source,animation],undefined,19);
+  assert.deepEqual(pixels(projected),pixels([animation]));assert.equal(context.activeImageCount,6);assert.deepEqual(context.active().map(entry=>entry.toolCallId),['aliasedAnimation']);
+  assert.ok(context.active()[0].images.every(item=>item.revision===19&&item.originalRevision===18));assert.match(texts(projected),/不是完整碰撞或动画验收/);
+  const withRecall=context.prepare([source,animation,recallMessage(first)],undefined,19);
+  assert.equal(images([withRecall.at(-1)]).length,3);assert.ok(images(withRecall).length<=6);
+ });
+ check('revision aliases remain run-local and never make unknown provenance recallable',()=>{
+  const a=new EvidenceContext(),b=new EvidenceContext(),source=packet('runLocal');a.carryForward(18,19);
+  assert.equal(images(a.prepare([source],undefined,19)).length,2);assert.equal(images(b.prepare([source],undefined,19)).length,0);assert.throws(()=>b.recall({captureId:'capture-1'},19),/stale screenshots/);
+  const missing=packet('aliasUnknown');missing.details={};missing.content=[{type:'text',text:'no revision'},image('unknown')];
+  assert.equal(images(a.prepare([missing],undefined,19)).length,0);assert.throws(()=>a.recall({captureId:'capture-2'},19),/unknown/);
+  const mixed=packet('aliasMixed');mixed.content[2].text='revision=19 scope=whole view=side';a.prepare([mixed],undefined,19);
+  assert.equal(a.list().captures[2].revision,null);assert.throws(()=>a.recall({captureId:'capture-3'},19),/unknown/);
+ });
  check('explicit recalled old packet is active on the next request rather than immediately archived',()=>{
   const context=new EvidenceContext(),old=packet('recalled',{scope:'oldTarget'}),newer=Array.from({length:5},(_,index)=>packet('new'+index,{scope:'newTarget'+index}));
   context.project([old,...newer]);const id=context.list().captures[0].captureId,page=recallMessage(context.recall({captureId:id,count:1},18));

@@ -5,10 +5,8 @@ const server=await createServer({server:{middlewareMode:true,hmr:false},appType:
 let passed=0;
 const test=async(name,fn)=>{await fn();console.log('PASS '+name);passed++;};
 try{
- const style=await server.ssrLoadModule('/src/ai/generationStyle.ts');
- const {buildMessages,parseModelResponse}=await server.ssrLoadModule('/src/ai/provider.ts');
- const {buildModelingPrompt}=await server.ssrLoadModule('/src/ai/agentPrompt.ts');
- const {saveModelConfig,loadModelConfig}=await server.ssrLoadModule('/src/ai/modelConfigStorage.ts');
+ const {parseModelResponse}=await server.ssrLoadModule('/src/ai/provider.ts');
+ const {MODEL_CONFIG_KEY,saveModelConfig,loadModelConfig}=await server.ssrLoadModule('/src/ai/modelConfigStorage.ts');
  const {createInitialDoc}=await server.ssrLoadModule('/src/store.ts');
  const {validateMaterial,validateDocument}=await server.ssrLoadModule('/src/domain/types.ts');
  const {applyBatch}=await server.ssrLoadModule('/src/domain/commands.ts');
@@ -20,27 +18,20 @@ try{
  const {proceduralMaps}=await server.ssrLoadModule('/src/scene/surfaceTextures.ts');
  const {serializeProject,parseProject}=await server.ssrLoadModule('/src/domain/project.ts');
  const {normalizeRenderPreset,loadRenderPreset,saveRenderPreset}=await server.ssrLoadModule('/src/scene/renderPreset.ts');
- const config={baseURL:'https://example.invalid/v1',apiKey:'private-test-key',model:'test',generationQuality:'fast',generationStyle:'illustrative'};
+ const config={baseURL:'https://example.invalid/v1',apiKey:'private-test-key',model:'test'};
  const base=createInitialDoc();
 
- await test('style defaults to realism and reaches single, agent and isolated prompts independently of quality',()=>{
-  for(const value of [undefined,null,'bad',{},'realistic'])assert.equal(style.normalizeGenerationStyle(value),'realistic');
-  for(const quality of ['fast','fine'])for(const generationStyle of ['realistic','illustrative']){
-   const label=generationStyle==='realistic'?'写实':'简洁';
-   const messages=buildMessages('用户指定风格优先',{nodes:[],selection:[]},[],[],quality,generationStyle);
-   assert.match(messages[0].content,new RegExp('本次生成风格：'+label));
-   for(const workerTask of [false,true]){
-    const prompt=buildModelingPrompt({draft:base,base,selection:[],generationQuality:quality,generationStyle,workerTask,wantsAnimation:false,visualAvailable:true,parallelEnabled:false,preserveAssetShape:false});
-    assert.match(prompt,new RegExp('本次生成风格：'+label));
-    assert.ok(!prompt.includes('人物用胶囊四肢、椭球头部'));
-    assert.match(prompt,/不能自动替换、重建或改色已有资产/);
-   }
-  }
- });
- await test('style persistence preserves detail preference and never persists an unapproved API key',()=>{
+ await test('legacy quality and style are discarded while respecting API key consent',()=>{
   const values=new Map();globalThis.localStorage={getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,String(v)),removeItem:k=>values.delete(k)};
-  saveModelConfig(config);const loaded=loadModelConfig();assert.equal(loaded.generationStyle,'illustrative');assert.equal(loaded.generationQuality,'fast');assert.equal(loaded.apiKey,'');assert.ok(!JSON.stringify([...values]).includes(config.apiKey));
-  saveModelConfig({...config,generationStyle:undefined});assert.equal(loadModelConfig().generationStyle,'realistic');
+  for(const rememberApiKey of [false,true]){
+   const legacy={...config,generationQuality:'fast',generationStyle:'illustrative',rememberApiKey};
+   saveModelConfig(legacy);const saved=JSON.parse(values.get(MODEL_CONFIG_KEY)),loaded=loadModelConfig();
+   for(const value of [saved,loaded]){assert.equal(Object.hasOwn(value,'generationQuality'),false);assert.equal(Object.hasOwn(value,'generationStyle'),false);assert.equal(value.baseURL,config.baseURL);assert.equal(value.model,config.model);}
+   assert.equal(loaded.apiKey,rememberApiKey?config.apiKey:'');assert.equal(saved.apiKey,rememberApiKey?config.apiKey:undefined);assert.equal(JSON.stringify([...values]).includes(config.apiKey),rememberApiKey);
+   values.set(MODEL_CONFIG_KEY,JSON.stringify(legacy));const migrated=loadModelConfig(),persisted=JSON.parse(values.get(MODEL_CONFIG_KEY));
+   for(const value of [migrated,persisted]){assert.equal(Object.hasOwn(value,'generationQuality'),false);assert.equal(Object.hasOwn(value,'generationStyle'),false);assert.equal(value.baseURL,config.baseURL);assert.equal(value.model,config.model);}
+   assert.equal(migrated.apiKey,config.apiKey);assert.equal(persisted.apiKey,rememberApiKey?config.apiKey:undefined);assert.equal(JSON.stringify([...values]).includes(config.apiKey),rememberApiKey);
+  }
   assert.equal(normalizeRenderPreset('invalid'),'studio');saveRenderPreset('classic');assert.equal(loadRenderPreset(),'classic');
   globalThis.localStorage={getItem(){throw Error('blocked')},setItem(){throw Error('blocked')}};assert.equal(loadRenderPreset(),'classic');assert.doesNotThrow(()=>saveRenderPreset('studio'));assert.equal(loadRenderPreset(),'studio');delete globalThis.localStorage;
  });

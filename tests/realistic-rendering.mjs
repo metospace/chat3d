@@ -80,19 +80,19 @@ try{
  await offline.waitForFunction(()=>document.querySelector('#reset')?.disabled===false&&document.querySelector('#status')?.hidden===true,{},{timeout:30000});
  assert.deepEqual(offlineErrors,[]);await offline.screenshot({path:resolve(output,'realistic-offline.png')});
  const ui=await browser.newPage({viewport:{width:1280,height:800}});
- await ui.addInitScript(()=>localStorage.setItem('chat3d.modelConfig',JSON.stringify({baseURL:'https://example.invalid/v1',model:'test',apiKey:'ui-only-test-key',generationQuality:'fine',generationStyle:'realistic'})));
+ await ui.addInitScript(()=>localStorage.setItem('chat3d.modelConfig',JSON.stringify({baseURL:'https://example.invalid/v1',model:'test',apiKey:'ui-only-test-key'})));
  let modelRequests=0;await ui.route('**/chat/completions',route=>{modelRequests++;return route.abort();});
  ui.on('pageerror',error=>console.error('UI '+error.message));
  await ui.goto('http://127.0.0.1:'+port+'/');
  
- const picker=ui.getByRole('button',{name:'生成档位，当前精细'}).first();await picker.click();
- assert.equal(await ui.getByRole('menuitemradio',{name:'写实风格'}).getAttribute('aria-checked'),'true');
- await ui.getByRole('menuitemradio',{name:'简洁风格'}).click();
- assert.equal(await ui.evaluate(()=>JSON.parse(localStorage.getItem('chat3d.modelConfig')).generationStyle),'illustrative');
- await picker.click();await ui.getByRole('menuitemradio',{name:'写实风格'}).click();
+ const picker=ui.locator('.generation-method-picker-trigger').first();assert.equal(await picker.getAttribute('aria-label'),'生成方式，当前直接生成');await picker.click();
+ assert.equal(await ui.getByRole('menuitemradio',{name:'直接生成'}).getAttribute('aria-checked'),'true');
+ assert.equal(await ui.getByRole('menuitemradio').count(),2);
+ await ui.getByRole('menuitemradio',{name:'Blender 生成'}).click();assert.equal(await picker.getAttribute('aria-label'),'生成方式，当前Blender 生成');
+ await picker.click();await ui.getByRole('menuitemradio',{name:'直接生成'}).click();assert.equal(await picker.getAttribute('aria-label'),'生成方式，当前直接生成');
  await picker.click();await ui.waitForTimeout(250);await ui.screenshot({path:resolve(output,'realistic-menu-desktop.png')});
  await ui.keyboard.press('Escape');await ui.setViewportSize({width:390,height:844});await picker.click();
- const menu=ui.getByRole('menu',{name:'生成档位'});const bounds=await menu.boundingBox();assert.ok(bounds.x>=0&&bounds.x+bounds.width<=391);await ui.waitForTimeout(250);await ui.screenshot({path:resolve(output,'realistic-menu-mobile.png')});
+ const menu=ui.getByRole('menu',{name:'生成方式',exact:true});const bounds=await menu.boundingBox();assert.ok(bounds.x>=0&&bounds.x+bounds.width<=391);await ui.waitForTimeout(250);await ui.screenshot({path:resolve(output,'realistic-menu-mobile.png')});
  await ui.keyboard.press('Escape');await ui.setViewportSize({width:1280,height:800});await ui.getByRole('button',{name:'新建项目',exact:true}).click();await ui.getByRole('menuitem',{name:/新建空白/}).click();
  await ui.getByRole('button',{name:'显示选项',exact:true}).click();
  const display=ui.getByRole('dialog',{name:'显示设置'});await display.getByRole('radio',{name:'流畅',exact:true}).click();

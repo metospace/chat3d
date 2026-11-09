@@ -77,8 +77,8 @@ export function ViewportPanel() {
     let vp: Viewport | undefined;
     try { vp = new Viewport(hostRef.current, (nodeId,additive) => {
       // Modifiers toggle nodes across successive clicks; read the live selection.
-      const state=useEditorStore.getState(),node=state.doc.nodes.find(n=>n.id===nodeId);
-      const picked=nodeId?(node?.modelAsset?wholeObjectIds(state.doc,[nodeId]):[nodeId]):[];
+      const state=useEditorStore.getState();
+      const picked=nodeId?[nodeId]:[];
       if(additive){if(nodeId){const ids=new Set(state.selection),remove=picked.every(id=>ids.has(id));picked.forEach(id=>remove?ids.delete(id):ids.add(id));select([...ids]);}}
       else select(picked);
     });

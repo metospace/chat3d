@@ -16,7 +16,17 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(({mode}) => ({
   define: {__APP_BUILD_COMMIT__: JSON.stringify(process.env.GITHUB_SHA ?? "local")},
-  plugins: [react(), tailwindcss(), modelProxyPlugin(loadEnv(mode, process.cwd(), "CHAT3D_").CHAT3D_ALLOWED_UPSTREAMS), appVersionPlugin(), {
+  plugins: [react(), tailwindcss(), {
+    name: 'scenivo-web-entry',
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        const url=new URL(request.url??'/', 'http://localhost');
+        if(url.pathname==='/team'){response.writeHead(302,{Location:'/team/'+url.search});response.end();return;}
+        if(url.pathname.startsWith('/team/')&&!url.pathname.split('/').pop()?.includes('.'))request.url='/team-web.html'+url.search;
+        next();
+      });
+    },
+  }, modelProxyPlugin(loadEnv(mode, process.cwd(), "CHAT3D_").CHAT3D_ALLOWED_UPSTREAMS), appVersionPlugin(), {
     name: "chat3d-emit-app-version",
     apply: "build",
     generateBundle() {
@@ -37,6 +47,9 @@ export default defineConfig(({mode}) => ({
     allowedHosts: ["terminal.local"],
     strictPort: true,
     host: host || false,
+    proxy: loadEnv(mode, process.cwd(), 'CHAT3D_').CHAT3D_TEAM_DEV_BASE ? {
+      '/api/team': {target:loadEnv(mode, process.cwd(), 'CHAT3D_').CHAT3D_TEAM_DEV_BASE,changeOrigin:true},
+    } : undefined,
     hmr: host
       ? {
           protocol: "ws",

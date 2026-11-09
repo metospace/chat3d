@@ -26,7 +26,7 @@ try{
  const agentModule=await server.ssrLoadModule('/src/ai/modelingAgent.ts');
  assert.equal(typeof agentModule.runModelingAgent,'function');
  if(importDelay>0)assert.equal(delayedAgentImport,true,'cold-bootstrap probe must delay the real SSR module load');
- const config={baseURL:'https://example.test/v1',apiKey:'only-A-secret',model:'A-model',agentMode:'pi',stream:true,generationQuality:'fast',taskBudget:{maxMinutes:10,maxRounds:12,maxReportedTokens:12345}};
+ const config={baseURL:'https://example.test/v1',apiKey:'only-A-secret',model:'A-model',agentMode:'pi',stream:true,taskBudget:{maxMinutes:10,maxRounds:12,maxReportedTokens:12345}};
  editor.setState({aiConfig:config});await w.initializeWorkspace();const a=w.useWorkspaceStore.getState().activeId;
  function Harness(){const activeId=w.useWorkspaceStore(s=>s.activeId);return React.createElement(Theme,null,React.createElement(ChatPanel,{key:activeId}));}
  let ui=render(React.createElement(React.StrictMode,null,React.createElement(Harness)));
@@ -34,7 +34,7 @@ try{
  handler=item=>new Promise(resolve=>item.resolve=resolve);
  send('讨论 A 货架');await waitFor(()=>assert.equal(requests.length,1));
  fireEvent.change(ui.getByLabelText('建模描述'),{target:{value:'A 要蓝色'}});fireEvent.click(ui.getByRole('button',{name:'加入消息队列'}));assert.ok(ui.getByRole('region',{name:'排队消息'}));
- await act(async()=>{w.createSession();editor.setState({aiConfig:{...config,apiKey:'only-B-secret',model:'B-model',generationQuality:'fine'}});});const b=w.useWorkspaceStore.getState().activeId;
+ await act(async()=>{w.createSession();editor.setState({aiConfig:{...config,apiKey:'only-B-secret',model:'B-model'}});});const b=w.useWorkspaceStore.getState().activeId;
  assert.equal(requests[0].args[1].signal.aborted,false);send('讨论 B 托盘');await waitFor(()=>assert.equal(requests.length,2));assert.equal(useConversationRuns.getState().activeCount,2);
  console.log('PASS keyed ChatPanel unmount/navigation preserves A while B begins its own mocked stream');
  fireEvent.change(ui.getByLabelText('建模描述'),{target:{value:'B 材质问题'}});fireEvent.click(ui.getByRole('button',{name:'加入消息队列'}));fireEvent.keyDown(ui.getByRole('button',{name:'消息选项 B 材质问题'}),{key:'Enter'});fireEvent.click(ui.getByRole('menuitem',{name:'只提问，不修改模型'}));
@@ -44,9 +44,9 @@ try{
  await act(async()=>requests[1].resolve(response('LATE B SHOULD BE IGNORED')));assert.equal(w.getSessionEditor(b).getState().messages.some(m=>m.text.includes('LATE B')),false);
  console.log('PASS cap refusal preserves input; steering and cancellation follow the original conversation after remount');
  handler=async()=>response('已收到 A 蓝色要求');await act(async()=>requests[0].resolve(response('A 初步建议')));await waitFor(()=>assert.equal(w.getSessionEditor(a).getState().aiStatus,'idle'));
- assert.equal(requests.length,3);assert.match(requests[2].args[1].body,/A 要蓝色/);assert.doesNotMatch(requests[2].args[1].body,/B 材质问题|讨论 B/);assert.equal(JSON.parse(requests[2].args[1].body).model,'A-model');assert.equal(new Headers(requests[2].args[1].headers).get('authorization'),'Bearer only-A-secret');assert.equal(w.getSessionEditor(a).getState().messages[0].run.generationQuality,'fast');
+ assert.equal(requests.length,3);assert.match(requests[2].args[1].body,/A 要蓝色/);assert.doesNotMatch(requests[2].args[1].body,/B 材质问题|讨论 B/);assert.equal(JSON.parse(requests[2].args[1].body).model,'A-model');assert.equal(new Headers(requests[2].args[1].headers).get('authorization'),'Bearer only-A-secret');
  await act(async()=>w.switchSession(c));assert.equal(ui.getByLabelText('建模描述').value,'C 输入不能丢');await act(async()=>new Promise(r=>setTimeout(r,30)));assert.equal(requests.length,3);
- console.log('PASS resumed A retains original model/key/quality and refused C never auto-runs');
+ console.log('PASS resumed A retains original model/key and refused C never auto-runs');
  await act(async()=>{w.switchSession(a);editor.getState().setComposerText('保留 A 草稿');});ui.unmount();assert.equal(w.getSessionEditor(a).getState().composerText,'保留 A 草稿');ui=render(React.createElement(Harness));assert.equal(ui.getByLabelText('建模描述').value,'保留 A 草稿');
  await act(async()=>w.flushWorkspace());assert.equal(useConversationRuns.getState().activeCount,0);
  console.log('4 parallel conversation UI checks passed (mocked models only)');

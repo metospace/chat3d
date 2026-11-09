@@ -1,6 +1,11 @@
 import {safeRequestFootprint} from '../ai/requestFootprint';
 import {safeExecutionMetadata,safeToolFailureCategory} from '../ai/executionTelemetry';
 import type {AgentActivity} from '../ai/modelingAgent';
+import type {EditorState} from '../store';
+import type {DiagnosticEntry} from '../ai/runTraceLog';
+import {createDiagnosticBundle,type DiagnosticExportSnapshot} from './diagnosticBundle';
+export {expandDiagnosticBundle} from './diagnosticBundle';
+export type {DiagnosticBundle,DiagnosticExportSnapshot,DiagnosticOmission} from './diagnosticBundle';
 // Only allowlisted operational metadata. Never export messages, raw errors, URLs,
 // tool arguments, scene content, images or credentials (even if an error echoed them).
 const finite=(v:unknown)=>typeof v==='number'&&Number.isFinite(v)&&v>=0?v:undefined;
@@ -25,6 +30,7 @@ export function runDiagnostics(status:string,activity:AgentActivity|null,error:s
    toolCalls:finite(activity.toolCalls),inputTokens:finite(activity.inputTokens),outputTokens:finite(activity.outputTokens),
    timings:timings.map(t=>({
     kind:oneOf(t.kind,['model','tool']),toolName:t.kind==='tool'?oneOf(t.toolName,TOOL_NAMES):undefined,
+    pendingToolName:t.kind==='model'?oneOf(t.pendingToolName,TOOL_NAMES):undefined,
     failureCategory:t.kind==='tool'&&t.failed===true?(safeToolFailureCategory(t.failureCategory)??'other'):undefined,
     repeatedInput:typeof t.repeatedInput==='boolean'?t.repeatedInput:undefined,
     argumentsChars:finite(t.argumentsChars),resultChars:finite(t.resultChars),sceneRevision:finite(t.sceneRevision),
@@ -36,4 +42,12 @@ export function runDiagnostics(status:string,activity:AgentActivity|null,error:s
    })),
   }:null,
  };
+}
+
+export type FullDiagnosticsSnapshot=Pick<EditorState,'aiStatus'|'lastRun'|'aiError'|'messages'|'doc'|'pendingBatch'|'pendingResult'|'past'|'future'|'aiConfig'>;
+
+// Keep runDiagnostics above as the unchanged metadata-only export contract.
+// Full task diagnostics are losslessly interned after documented snapshot omissions.
+export function fullRunDiagnostics(snapshot:DiagnosticExportSnapshot,liveDiagnostics?:readonly DiagnosticEntry[]){
+ return createDiagnosticBundle(snapshot,liveDiagnostics);
 }

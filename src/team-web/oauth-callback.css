@@ -1,0 +1,7 @@
+.oauth-callback-page{box-sizing:border-box;display:grid;place-items:center;min-height:100%;padding:24px;background:var(--sc-surface-page);color:var(--sc-ink);font-family:"Microsoft YaHei","Segoe UI",sans-serif}
+.oauth-callback-card{box-sizing:border-box;width:min(100%,540px);padding:28px;border:1px solid var(--sc-border-subtle);border-radius:14px;background:var(--sc-surface-elevated)}
+.oauth-callback-brand{font-weight:600;color:var(--sc-ink-muted)}
+.oauth-callback-card h1{font-size:24px;line-height:1.4}
+.oauth-callback-card p{line-height:1.8;overflow-wrap:anywhere}
+.oauth-callback-card a{color:var(--sc-accent)}
+.oauth-callback-error{color:var(--red-11)}

@@ -50,7 +50,7 @@ export type AiTaskStatus =
   | 'cancelled';
 
 export interface MessageRun {
-  mode?:'demo'|'single'|'pi'; generationQuality?:'fast'|'fine'; startedAt:number; endedAt?:number; status:'running'|'preview'|'completed'|'failed'|'stopped'; activity?:AgentActivity;
+  mode?:'demo'|'single'|'pi'; startedAt:number; endedAt?:number; status:'running'|'preview'|'completed'|'failed'|'stopped'; activity?:AgentActivity;
 }
 export interface ChatMessage {
   id: string;

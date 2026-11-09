@@ -7,7 +7,7 @@ import {makeId} from '../util/ids';
 import {withStockMaterials} from '../domain/materials';
 import {PHYSICAL_MATERIAL_KEYS} from '../domain/physicalMaterial';
 
-export const MAX_GLB_BYTES=50*1024*1024;
+export const MAX_GLB_BYTES=200*1024*1024;
 export const GLB_SIZE_ERROR=`GLB文件不能超过${MAX_GLB_BYTES/1024/1024} MiB`;
 export function assertGlbSize(size:number):void{if(size>MAX_GLB_BYTES)throw Error(GLB_SIZE_ERROR);}
 export function inspectGlbBytes(data:ArrayBuffer){

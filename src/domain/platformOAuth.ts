@@ -27,7 +27,14 @@ function globalFlag(name:string){
 
 export function configuredTeamServiceBase(){
  const fromEnv=env().VITE_CHAT3D_TEAM_DEFAULT_BASE?.trim();
- return (fromEnv||DEFAULT_TEAM_SERVICE_BASE).replace(/\/$/,'');
+ if(fromEnv)return fromEnv.replace(/\/$/,'');
+ // Web and desktop share the app, but only web serves the API on its running origin.
+ const desktop=Boolean(Reflect.get(globalThis,'__TAURI_INTERNALS__'));
+ if(!desktop&&typeof window!=='undefined'){
+  const origin=window.location?.origin??'';
+  if(/^https?:\/\//i.test(origin))return origin;
+ }
+ return DEFAULT_TEAM_SERVICE_BASE;
 }
 
 /** Local team password fields: off by default; Vite env or test global may enable. */
@@ -50,11 +57,6 @@ export function platformSsoUiBase(){
 export function platformOAuthRedirectUri(teamBase:string){
  const configured=env().VITE_CHAT3D_PLATFORM_OAUTH_REDIRECT_URI?.trim();
  if(configured)return configured;
- // Local dev/desktop always callbacks to the running origin (e.g. http://127.0.0.1:1420/…).
- if(typeof window!=='undefined'){
-  const origin=window.location?.origin??'';
-  if(/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin))return origin+SSO_CALLBACK_PATH;
- }
  return (teamBase||configuredTeamServiceBase()).replace(/\/$/,'')+SSO_CALLBACK_PATH;
 }
 
@@ -127,29 +129,35 @@ const PENDING_KEY='chat3d.platform.oauth.pending';
 
 export function publishPlatformOAuthResult(result:PlatformOAuthCallback){
  try{localStorage.setItem(PENDING_KEY,JSON.stringify({...result,at:Date.now()}));}catch{/* ignore */}
- try{new BroadcastChannel(CHANNEL).postMessage(result);}catch{/* ignore */}
+ let channel:BroadcastChannel|undefined;
+ try{channel=new BroadcastChannel(CHANNEL);channel.postMessage(result);}catch{/* ignore */}
+ finally{channel?.close();}
 }
 
 export function clearPendingPlatformOAuth(){
  try{localStorage.removeItem(PENDING_KEY);}catch{/* ignore */}
 }
+function parsePendingPlatformOAuth(raw:string|null):PlatformOAuthCallback|undefined{
+ if(!raw)return undefined;
+ try{
+  const parsed=JSON.parse(raw) as PlatformOAuthCallback & {at?:number};
+  if(!parsed||typeof parsed.at!=='number'||!Number.isFinite(parsed.at)||Date.now()-parsed.at>600000||parsed.at>Date.now())return undefined;
+  if(!parsed.code&&!parsed.accessToken&&!parsed.error)return undefined;
+  return parsed;
+ }catch{return undefined;}
+}
 export function consumePendingPlatformOAuth():PlatformOAuthCallback|undefined{
  try{
-  const raw=localStorage.getItem(PENDING_KEY);if(!raw)return undefined;
+  const raw=localStorage.getItem(PENDING_KEY);
   localStorage.removeItem(PENDING_KEY);
-  const parsed=JSON.parse(raw) as PlatformOAuthCallback & {at?:number};
-  if(parsed.at&&Date.now()-parsed.at>600000)return undefined;
-  // After clearing remember / failed attempts, ignore leftovers without a usable credential.
-  if(parsed.error&&!parsed.code&&!parsed.accessToken)return undefined;
-  if(!parsed.code&&!parsed.accessToken)return undefined;
-  return parsed;
+  return parsePendingPlatformOAuth(raw);
  }catch{return undefined;}
 }
 
 export function watchPlatformOAuthResult(onResult:(result:PlatformOAuthCallback)=>void):()=>void{
  const onStorage=(event:StorageEvent)=>{
   if(event.key!==PENDING_KEY||!event.newValue)return;
-  const result=consumePendingPlatformOAuth();if(result)onResult(result);
+  const result=parsePendingPlatformOAuth(event.newValue);if(result)onResult(result);
  };
  window.addEventListener('storage',onStorage);
  let channel:BroadcastChannel|undefined;
@@ -162,7 +170,7 @@ export function watchPlatformOAuthResult(onResult:(result:PlatformOAuthCallback)
 
 /** Open the platform authorize/login page in the system browser (desktop) or a new tab (web). */
 export async function openPlatformAuthorizationWindow(url:string){
- const desktop=Boolean((globalThis as {__TAURI_INTERNALS__?:unknown}).__TAURI_INTERNALS__);
+ const desktop=Boolean(Reflect.get(globalThis,'__TAURI_INTERNALS__'));
  if(desktop){
   const {openUrl}=await import('@tauri-apps/plugin-opener');
   await openUrl(url);

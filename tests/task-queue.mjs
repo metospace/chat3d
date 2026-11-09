@@ -21,9 +21,9 @@ try{
  const w=await server.ssrLoadModule('/src/workspace.ts'),{useEditorStore:editor}=await server.ssrLoadModule('/src/store.ts');
  const {TaskQueue,taskSummary}=await server.ssrLoadModule('/src/ui/TaskQueue.tsx');
  const {ModelPicker}=await server.ssrLoadModule('/src/ui/ModelPicker.tsx');
- const {QualityPicker}=await server.ssrLoadModule('/src/ui/QualityPicker.tsx');
+ const {GenerationMethodPicker}=await server.ssrLoadModule('/src/ui/GenerationMethodPicker.tsx');
  const {conversationController,useConversationRuns}=await server.ssrLoadModule('/src/runtime/conversationController.ts');
- const cfg={baseURL:'https://example.test/v1',apiKey:'fixture-only',model:'model-a',agentMode:'single',stream:false,useMock:false,generationQuality:'fine'};
+ const cfg={baseURL:'https://example.test/v1',apiKey:'fixture-only',model:'model-a',agentMode:'single',stream:false,useMock:false};
  editor.setState({aiConfig:cfg});await w.initializeWorkspace();
  w.createSession(undefined,{title:'A 仓库',moduleKind:'scene'});const a=w.useWorkspaceStore.getState().activeId,sa=w.getSessionEditor(a),ca=conversationController(sa);
  sa.getState().setComposerText('创建仓库');let pa,pb;
@@ -45,10 +45,10 @@ try{
  fireEvent.click(ui.getByRole('button',{name:'停止任务 B 设备'}));assert.ok(ui.getByRole('alertdialog'));fireEvent.click(ui.getByRole('button',{name:'继续执行'}));assert.equal(useConversationRuns.getState().activeCount,2);check('dismissed stop confirmation leaves both tasks running');
  fireEvent.click(ui.getByRole('button',{name:'停止任务 B 设备'}));await act(async()=>{fireEvent.click(ui.getByRole('button',{name:'确认停止'}));await pb;});assert.equal(useConversationRuns.getState().activeCount,1);assert.equal(requests[1].init.signal.aborted,true);assert.equal(requests[0].init.signal.aborted,false);assert.ok(ui.getByRole('region',{name:'已结束任务'}).textContent.includes('已停止'));check('confirmed stop targets the chosen background task only and moves it out of running');
  fireEvent.click(ui.getByRole('button',{name:'全部执行记录'}));assert.equal(history,1);cleanup();
- const pick=render(React.createElement(Theme,null,React.createElement(ModelPicker,{forNewProject:true}),React.createElement(QualityPicker,{forNewProject:true})));
- const modelButton=pick.getByRole('button',{name:'切换模型，当前 model-a'});assert.equal(modelButton.disabled,false);assert.equal(pick.getByRole('button',{name:'生成档位，当前精细'}).disabled,false);
+ const pick=render(React.createElement(Theme,null,React.createElement(ModelPicker,{forNewProject:true}),React.createElement(GenerationMethodPicker,{forNewProject:true})));
+ const modelButton=pick.getByRole('button',{name:'切换模型，当前 model-a'});assert.equal(modelButton.disabled,false);assert.equal(pick.getByRole('button',{name:'生成方式，当前直接生成'}).disabled,false);
  fireEvent.click(modelButton);await waitFor(()=>assert.ok(pick.getByRole('button',{name:'使用模型 model-b'})));fireEvent.click(pick.getByRole('button',{name:'使用模型 model-b'}));assert.equal(editor.getState().aiConfig.model,'model-b');assert.equal(JSON.parse(requests[0].init.body).model,'model-a');assert.equal(ca.ui.getState().running,true);check('home model choice remains available and cannot alter an in-flight request configuration');cleanup();
- const locked=render(React.createElement(Theme,null,React.createElement(ModelPicker),React.createElement(QualityPicker)));assert.equal(locked.getByRole('button',{name:'切换模型，当前 model-b'}).disabled,true);assert.equal(locked.getByRole('button',{name:'生成档位，当前精细'}).disabled,true);check('current workbench model and quality remain locked during its own run');cleanup();
+ const locked=render(React.createElement(Theme,null,React.createElement(ModelPicker),React.createElement(GenerationMethodPicker)));assert.equal(locked.getByRole('button',{name:'切换模型，当前 model-b'}).disabled,true);assert.equal(locked.getByRole('button',{name:'生成方式，当前直接生成'}).disabled,true);check('current workbench model and generation method remain locked during its own run');cleanup();
  await act(async()=>{ca.cancel();await pa;});
  await act(async()=>{sb.setState({aiStatus:'previewing',pendingBatch:{projectId:sb.getState().doc.projectId,baseRevision:sb.getState().doc.revision,commands:[]}});});assert.equal(taskSummary(w.useWorkspaceStore.getState().sessions.find(s=>s.id===b)).group,'review');check('pending preview is distinguished from running and ended');
  await act(async()=>{sb.setState({pendingBatch:null,aiStatus:'idle'});w.useWorkspaceStore.setState(s=>({sessions:s.sessions.map(x=>x.id===b?{...x,deletedAt:Date.now()}:x)}));});

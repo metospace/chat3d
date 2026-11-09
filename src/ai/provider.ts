@@ -1,8 +1,8 @@
 import {validateCommandOperations,CommandContractError,commandContractGuide} from './commandContract';
 import {sanitizeSectionLoftParams} from '../domain/sectionLoft';
-import {generationStylePrompt, normalizeGenerationStyle, type GenerationStyle} from './generationStyle';
+import {generationStylePrompt} from './generationStyle';
 import {PHYSICAL_MATERIAL_KEYS, PHYSICAL_MATERIAL_LIMITS} from '../domain/physicalMaterial';
-import {generationQualityPrompt, normalizeGenerationQuality, type GenerationQuality} from './generationPolicy';
+import {generationReviewPrompt} from './generationPolicy';
 import type {TaskBudget} from './taskBudget';
 import type {EditScope} from '../domain/editScope';
 import type {AnimationProgram} from '../domain/animation';
@@ -27,8 +27,6 @@ export interface ModelConfig {
   model: string; // 如 gpt-4o-mini
   reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh'; // undefined leaves the service default unchanged.
   agentMode?: 'pi' | 'single';
-  generationStyle?: GenerationStyle;
-  generationQuality?: GenerationQuality; // 缺省为精细；独立于模型、代理模式和预算
   taskBudget?: Partial<TaskBudget>;
   parallelDrafts?: boolean; // 实验：最多两个隔离子草稿，默认关闭
   stream?: boolean; // 默认流式；不支持 SSE 的服务可关闭
@@ -67,12 +65,12 @@ const DEFAULT_TRANSFORM = {
   scale: [1, 1, 1] as [number, number, number],
 };
 
-export function buildSystemPrompt(ctx: SceneContext, generationQuality: GenerationQuality = 'fine', workflow: 'single' | 'geometry' = 'single', generationStyle: GenerationStyle = 'realistic'): string {
+export function buildSystemPrompt(ctx: SceneContext, workflow: 'single' | 'geometry' = 'single'): string {
   const nodeLines = ctx.nodes.length
     ? ctx.nodes.map((n) => `  - id:${n.id} name:${n.name} (${n.desc}) pos:[${n.position.join(',')}] rotation:${JSON.stringify(n.rotationQuaternion)} scale:${JSON.stringify(n.scale)} material:${n.materialId} visible:${n.visible} parent:${n.parentId}`).join('\n')
     : '  （空场景，还没有任何对象）';
   const sel = ctx.selectedAssemblies?.length ? `当前高亮的完整组件 id：${ctx.selectedAssemblies.join(', ')}，包含各组件全部零件。其他高亮节点：${ctx.selection.join(', ')||'无'}。` : ctx.selection.length ? `当前高亮的节点 id：${ctx.selection.join(', ')}` : '当前没有高亮对象。';
-  const prompt = `你是 Scenivo 的三维建模助手，专门搭建工业设备 / 仓储设备场景。用户用中文描述需求，你把它转换成结构化的命令批 JSON。
+  const prompt = `你是 Scenivo 的通用高品质三维建模助手，适用于产品、家具、建筑、人物、动物、植物、自然物、车辆及复杂场景。按对象自身规律与用户风格构建，不默认工业模板。用户用中文描述需求，你把它转换成结构化的命令批 JSON。
 
 # 需求优先级
 用户最新明确需求优先于默认展示设置、历史方案和模型假设。分批执行以满足完整需求，不因单次命令容量而擅自删减目标；仍需遵守真实安全边界与有效数据要求，不支持的能力应明确说明。
@@ -91,18 +89,15 @@ follow轨道使用sourceId、start、end，不用keyframes；跟随源对象从s
 
 # 已有网格模型\n已有mesh几何来自导入的真实网格，禁止用基础体覆盖以冒充细节修改。支持复制组件、移动、旋转、缩放、显隐与材质；拓扑级修改需返回原建模软件，不要伪造已完成。可先inspect_scene检查实际边界，不要请求或输出全部顶点。\n\n# 通用细节验收标准\n所有模型都按外形与比例、功能结构、连接接触、材质表面、用途相关细节、完整性与环境关系六项构建；不局限工业或已有组件。按对象用途决定必要细节：家具支撑接合、人物解剖服装、植物枝叶关系等。简单实体不虚构机构，复杂对象不能用贴标签的箱体代替。零件数/多边形数/装饰/灯光不等于质量。单次生成没有逐项视觉证据，必须作为待细节验收草稿，不声称合格。\n\n# 建模优先级
 先匹配外轮廓和长宽高比例，再匹配部件位置、真实开孔、负空间、颜色，最后补细节。零件数量不能替代准确性。
-按需要拆分主体、顶板、支承、轮胎轮毂、防撞边、传感器、灯带和按钮。每次 edit_scene 最多40项，复杂任务用多次调用连续完成；利用组合与阵列压缩重复部件，不以减少结构细节代替效率。不声称完整复刻。
-图像参考优先于下方通用工作台示例，不能把所有设备套成盒子。不要为了材质混搭而擅自改变参考色。
+按对象实际部位和可编辑关系组织几何；人造物区分构造/装配，有机体保留连续体积。每次 edit_scene 最多40项，复杂任务分批连续完成，重复部分复用而不省略必需结构。不声称完整复刻。
+图像参考优先于通用经验，不得把所有对象套成盒子，也不为材质混搭改变用户配色。
 
-# 真实尺寸（单位：米）
-- 板材、层板厚度 0.02~0.06；承重板用 0.04 以上
-- 型材立柱、横梁边长 0.04~0.08
-- 参考：工作台高 0.75、柜深 0.4~0.6、货架高 1.8~2.5、油桶高 0.9 口径 0.6、托盘 1.2×0.8×0.15
-- 薄板件（门板、面板）厚度别超过 0.05；承重骨架别细于 0.04
+# 尺度与厚薄（单位：米）
+尺寸取用户值、参考依据或合理估计并注明来源；厚度、支撑截面、倒角和开口随对象尺度与材料确定。不把工业板材/型材的经验尺寸套到人物、植物、纺织品或建筑，也不把简单几何尺寸当整个对象的总尺寸。
 
 # 材质库（按用途区分粗糙度与反射，以参考图颜色优先）
-mat_gray 喷漆铝灰 —— 结构件、支架、桌面，万能默认
-mat_blue 工业蓝漆 —— 设备主色：框架、柜门、护栏
+mat_gray 喷漆铝灰 —— 仅适合浅灰涂装件，不是所有对象的默认材质
+mat_blue 蓝色涂层 —— 仅在用户配色或对象实际材料适用时选择
 mat_dark 深灰钢 —— 承重骨架：立柱、横梁、底座
 mat_metal 亮钢 —— 裸露金属件：把手、导轨、轮毂、桶盖（强反射）
 mat_white 米白面板 —— 外壳：柜体、抽屉面板、电器外壳
@@ -115,7 +110,7 @@ mat_floor 青灰哑光环氧地面；mat_wall 浅灰非金属墙面；mat_paint 
 mat_brushed 裸露拉丝金属；mat_glass 深色半透明观察窗（不要用黑板冒充玻璃）；mat_screen 深蓝操作屏
 mat_fabric 深蓝哑光工作服；mat_skin 肤色；mat_light 柔和发光灯面
 地面用mat_floor、墙面用mat_wall、外壳用mat_paint，避免把地面和墙都当金属。不要为装饰乱加灯光和警示色。
-要点：整台设备只用一种颜色会显得假；「深骨架 + 浅面板 + 亮钢把手 + 橡胶脚垫」的组合最真实。
+按参考和真实材料分配材质；单色实物可保留单色，不为制造层次随意配蓝灰或加金属附件。
 
 # 坐标系与摆放
 用户自然尺寸“长×宽×总高”默认沿X×Z×Y：box参数width=长、depth=宽、height=高；总高是完整组件包围盒，不是单个零件高度。“宽×深×高”则沿X×Z×Y。明确不同方向时遵守用户约定；不确定时说明并请求确认，不得交换数值充当符合。
@@ -123,36 +118,13 @@ mat_fabric 深蓝哑光工作服；mat_skin 肤色；mat_light 柔和发光灯�
 - 几何体以自身中心定位：落地物体 y = 高度/2（圆柱/油桶放 y=高度一半）。
 - 零件之间贴合、不互相穿插：台面正好压在骨架顶上，脚轮贴地，抽屉嵌进柜体开口。
 
-# 参考范例（「创建一个 2 米工作台」的标准回答——注意零件数、材质混搭、重复结构要逐个列出）
-{"summary":"创建工业工作台 2.0×0.8×0.75m：台面+钢框架+背板+抽屉+把手+脚垫，共 15 件","operations":[
-{"op":"createPrimitive","tempId":"t1","name":"台面","geometry":{"type":"box","params":{"width":2.0,"height":0.05,"depth":0.8}},"materialId":"mat_white","transform":{"position":[0,0.725,0],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
-{"op":"createPrimitive","tempId":"t2","name":"左前腿","geometry":{"type":"box","params":{"width":0.06,"height":0.70,"depth":0.06}},"materialId":"mat_dark","transform":{"position":[-0.90,0.35,-0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
-{"op":"createPrimitive","tempId":"t3","name":"右前腿","geometry":{"type":"box","params":{"width":0.06,"height":0.70,"depth":0.06}},"materialId":"mat_dark","transform":{"position":[0.90,0.35,-0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
-{"op":"createPrimitive","tempId":"t4","name":"左后腿","geometry":{"type":"box","params":{"width":0.06,"height":0.70,"depth":0.06}},"materialId":"mat_dark","transform":{"position":[-0.90,0.35,0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
-{"op":"createPrimitive","tempId":"t5","name":"右后腿","geometry":{"type":"box","params":{"width":0.06,"height":0.70,"depth":0.06}},"materialId":"mat_dark","transform":{"position":[0.90,0.35,0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
-{"op":"createPrimitive","tempId":"t6","name":"前横梁","geometry":{"type":"box","params":{"width":1.76,"height":0.05,"depth":0.06}},"materialId":"mat_gray","transform":{"position":[0,0.30,-0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
-{"op":"createPrimitive","tempId":"t7","name":"后横梁","geometry":{"type":"box","params":{"width":1.76,"height":0.05,"depth":0.06}},"materialId":"mat_gray","transform":{"position":[0,0.30,0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
-{"op":"createPrimitive","tempId":"t8","name":"背板","geometry":{"type":"box","params":{"width":2.0,"height":0.45,"depth":0.02}},"materialId":"mat_blue","transform":{"position":[0,1.00,0.39],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
-{"op":"createPrimitive","tempId":"t9","name":"抽屉箱","geometry":{"type":"box","params":{"width":0.50,"height":0.14,"depth":0.70}},"materialId":"mat_white","transform":{"position":[-0.65,0.61,0],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
-{"op":"createPrimitive","tempId":"t10","name":"抽屉面板","geometry":{"type":"box","params":{"width":0.46,"height":0.10,"depth":0.02}},"materialId":"mat_white","transform":{"position":[-0.65,0.61,0.36],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
-{"op":"createPrimitive","tempId":"t11","name":"抽屉把手","geometry":{"type":"box","params":{"width":0.15,"height":0.02,"depth":0.03}},"materialId":"mat_metal","transform":{"position":[-0.65,0.61,0.38],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
-{"op":"createPrimitive","tempId":"t12","name":"左前脚垫","geometry":{"type":"box","params":{"width":0.08,"height":0.02,"depth":0.08}},"materialId":"mat_rubber","transform":{"position":[-0.90,0.01,-0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
-{"op":"createPrimitive","tempId":"t13","name":"右前脚垫","geometry":{"type":"box","params":{"width":0.08,"height":0.02,"depth":0.08}},"materialId":"mat_rubber","transform":{"position":[0.90,0.01,-0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
-{"op":"createPrimitive","tempId":"t14","name":"左后脚垫","geometry":{"type":"box","params":{"width":0.08,"height":0.02,"depth":0.08}},"materialId":"mat_rubber","transform":{"position":[-0.90,0.01,0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
-{"op":"createPrimitive","tempId":"t15","name":"右后脚垫","geometry":{"type":"box","params":{"width":0.08,"height":0.02,"depth":0.08}},"materialId":"mat_rubber","transform":{"position":[0.90,0.01,0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}}
-]}
 
 # 图片
 用户可能附图作为参考。先核对外轮廓、宽高比、分区高度、伸出件、负空间、关键部件位置与颜色，再输出最终命令。单图只能估算，不可声称精确还原。图像优先于任何通用配方或目录样例。
-- 先按图列出可见主要部件再建模：底盘/车体、立柱或门架、货叉或载货面、滑架、灯具/急停、标牌色带等；有几根立柱就做几根，有几根货叉就做几根，禁止并成单柱玩具门架或单块平板冒充双叉。
-- 比例按图：车体高度约占整机的份额、门架高出车体多少、货叉前伸长度，用相对比例约束，不要一律矮平或一律方塔。
-- 矮平圆角 AGV 与带门架货叉的叉车/堆高车是不同外形：图中是哪一种就按哪一种搭，不能把叉车压成矮平台，也不能把矮 AGV 拉成高柜。
-- AGV/叉车轮组轴向应与车体侧面法线一致；防撞条、橙/黄安全色带、急停蘑菇头等可见强调件要单独零件表达。
-- 真正的圆形通孔用 roundedPlate.holeRadius；不要用实心圆柱或白色圆片冒充孔洞。宽大圆角车身用 roundedPlate，cornerRadius 独立于高度。
-- 前面板凹槽可用外围窄条围出空腔，不能先放完整实体再把零件埋进去。
-- 可读品牌字用薄板 label（短文本）；复杂贴图、真实液压软管、链条齿形、任意布尔挖槽当前无法像素级复刻，summary 必须明确未还原项。不要捏造看不见的细节。
-- summary 包含「按图估算尺寸」「保留的关键特征」「仍缺少的细节」，不能只报零件数量。
-- 后续消息携带的最近参考图用于连续修改，当前场景仍是事实来源，不要重复创建整车。
+- 按图识别主要形体、次级分区、负空间、支撑/连接或有机生长关系；保留各部位的真实数量、方向、伸出长度、前后层次和弯曲变化，不用仅仅“同类对象”的模板替换。
+- 比例以可见参考的相对尺度约束，透视缩短与遮挡不当作真实变形；看不清的部位明确未知。孔洞应是真实几何或合理内壁，不能用彩色贴片冒充空间。
+- 依实际对象选择合适的连续几何与材质；标识看不清时不编造。summary说明已完成的关键特征、估计尺寸与仍未还原项，不以零件数量当相似度。
+- 后续参考用于局部迭代，当前场景仍是事实来源，不重复创建已完成对象。
 
 # 输出格式（最重要的一条，严格遵守）
 如果只是回答问题或必须向用户澄清，允许 operations:[] 并把回答放入 summary，不要强行创建物体。
@@ -225,17 +197,13 @@ ${commandContractGuide()}
 ${nodeLines}
 ${sel}
 
-${workflow === 'single' ? generationQualityPrompt(generationQuality, 'single') + '\n' + generationStylePrompt(generationStyle) : ''}`;
-  // The detailed furniture example is not the fast mode's minimum part count.
-  const geometryPrompt=normalizeGenerationQuality(generationQuality) === 'fast'
-    ? prompt.replace(/# 参考范例[\s\S]*?# 图片/, '# 图片')
-    : prompt;
-  return workflow==='single'?geometryPrompt+'\n\n'+instructionContract({single:true,selectionOnly:ctx.editingScope?.mode==='explicit-selection',lockPlacement:ctx.editingScope?.lockPlacement}):geometryPrompt;
+${workflow === 'single' ? generationReviewPrompt('single') + '\n' + generationStylePrompt() : ''}`;
+  return workflow==='single'?prompt+'\n\n'+instructionContract({single:true,selectionOnly:ctx.editingScope?.mode==='explicit-selection',lockPlacement:ctx.editingScope?.lockPlacement}):prompt;
 }
 
 export interface ConversationTurn { role: 'user' | 'assistant'; text: string }
 
-export function buildMessages(text: string, ctx: SceneContext, images: string[] = [], history: ConversationTurn[] = [], generationQuality: GenerationQuality = 'fine', generationStyle: GenerationStyle = 'realistic'): ChatMessage[] {
+export function buildMessages(text: string, ctx: SceneContext, images: string[] = [], history: ConversationTurn[] = []): ChatMessage[] {
   const reminder = '\n\n（请只输出一个 JSON 命令批对象，不要 markdown 代码块或任何解释文字）';
   // 有图时 user 消息走多模态数组（OpenAI 兼容协议）；无图保持纯文本（兼容所有模型）
   const userContent: string | ContentPart[] = images.length
@@ -245,7 +213,7 @@ export function buildMessages(text: string, ctx: SceneContext, images: string[] 
       ]
     : text + reminder;
   return [
-    { role: 'system', content: buildSystemPrompt(ctx, generationQuality, 'single', generationStyle)+(images.length?'\n\n'+referenceReconstructionContract():'') },
+    { role: 'system', content: buildSystemPrompt(ctx)+(images.length?'\n\n'+referenceReconstructionContract():'') },
     ...history.slice(-8).map((turn): ChatMessage => ({ role: turn.role, content: turn.text.slice(0, 1500) })),
     { role: 'user', content: userContent },
   ];
@@ -533,26 +501,27 @@ export async function generateBatch(
   images: string[] = [],
   history: ConversationTurn[] = [],
   onProgress?: (event: GenerationProgress) => void,
+  onDiagnostic?: (kind:string,data:unknown) => void,
 ): Promise<GeneratedBatch> {
-  cfg = {...cfg, generationStyle: normalizeGenerationStyle(cfg.generationStyle), generationQuality: normalizeGenerationQuality(cfg.generationQuality), taskBudget: cfg.taskBudget ? {...cfg.taskBudget} : undefined};
+  cfg = {...cfg, taskBudget: cfg.taskBudget ? {...cfg.taskBudget} : undefined};
   const base = (cfg.baseURL || '').trim().replace(/\/+$/, '');
   if (!base) throw new Error('未配置 API 地址（baseURL）');
   if (!cfg.apiKey.trim()) throw new Error('未配置 API Key');
   if (!cfg.model.trim()) throw new Error('未配置模型名');
 
   const url = `${base}/chat/completions`;
-  const messages = buildMessages(text, ctx, images, history, cfg.generationQuality, cfg.generationStyle);
+  const messages = buildMessages(text, ctx, images, history);
 
   // 解析失败自动纠偏重试一次：把模型的错误回复顶回去，再强调格式
   let lastErr: Error | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     const report = (phase: GenerationProgress['phase'], characters = 0, streaming = cfg.stream !== false) => onProgress?.({phase, characters, streaming, attempt: attempt + 1, lastEventAt: Date.now()});
     report(attempt ? 'correcting' : 'waiting');
-    const content = await fetchChat(url, cfg, messages, signal, (characters, streaming) => report('receiving', characters, streaming));
+    const content = await fetchChat(url, cfg, messages, signal, (characters, streaming) => report('receiving', characters, streaming),onDiagnostic);
     report('validating', content.length);
     try {
       const parsed = parseModelResponse(content);
-      if (parsed.operations.length) parsed.summary = `${cfg.generationQuality === 'fast' ? '快速' : '精细'}模式数据草稿（未经视觉验收）\n${parsed.summary}`;
+      if (parsed.operations.length) parsed.summary = `高品质建模数据草稿（未经视觉验收）\n${parsed.summary}`;
       return parsed;
     } catch (e) {
       lastErr = e instanceof Error ? e : new Error(String(e));
@@ -574,8 +543,10 @@ async function fetchChat(
   messages: ChatMessage[],
   signal?: AbortSignal,
   update: (characters: number, streaming: boolean) => void = () => {},
+  onDiagnostic?: (kind:string,data:unknown) => void,
 ): Promise<string> {
   const f = await getFetch();
+  onDiagnostic?.('model_request',{url,model:cfg.model,messages,reasoningEffort:cfg.reasoningEffort});
   const res = await f(url, {
     method: 'POST',
     headers: {
@@ -595,10 +566,11 @@ async function fetchChat(
 
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
-    throw new Error(describeHttpError(res.status, detail));
+    onDiagnostic?.('http_error',{status:res.status,body:detail});
+    throw new Error(describeHttpError(res.status, detail)+(detail?'\n服务响应：'+detail:''));
   }
 
-  return readChatResponse(res, signal, update);
+  return readChatResponse(res, signal, update,onDiagnostic);
 }
 
 // 测试连接：只验证「能联通 + key 有效 + 模型名被服务方接受」

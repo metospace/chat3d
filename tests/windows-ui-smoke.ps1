@@ -189,18 +189,18 @@ Click-Control '资产库'
  Click-Control '本项目任务记录'
  Wait-ControlPresent '问题排查' 60 | Out-Null
  Click-Control '问题排查'
- Find-Control '下载脱敏诊断记录' | Out-Null
+ Find-Control '下载完整诊断记录' | Out-Null
  $diagnosticBefore=@(Get-ChildItem $folder -Filter 'scenivo-diagnostics-*.json' -ErrorAction SilentlyContinue | ForEach-Object FullName)
- Click-Control '下载脱敏诊断记录'
+ Click-Control '下载完整诊断记录'
  $diagnostic=$null
  for($i=0;$i -lt 30;$i++){ $diagnostic=Get-ChildItem $folder -Filter 'scenivo-diagnostics-*.json' -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notin $diagnosticBefore } | Select-Object -First 1;if($diagnostic){break};Start-Sleep -Milliseconds 500 }
  if(!$diagnostic){throw 'Diagnostic button did not save a file'}
  $diagnosticText=Get-Content $diagnostic.FullName -Raw
  $diagnosticData=$diagnosticText | ConvertFrom-Json
- if($diagnosticData.format -ne 'chat3d-diagnostics-v1'){throw 'Wrong diagnostics format'}
+ if($diagnosticData.format -ne 'chat3d-diagnostics-v2'){throw 'Wrong diagnostics format'}
  if($diagnosticText.Contains('smoke-test-not-a-secret')){throw 'Diagnostic export leaked dummy API credential'}
  Shot 'ui-diagnostics-saved';Dump-Controls 'ui-diagnostics-controls'
- $checks.Add(@{name='diagnostic download button saves redacted JSON after synthetic network failure';pass=$true;file=$diagnostic.FullName})
+ $checks.Add(@{name='diagnostic download button saves full diagnostics with credentials stripped after synthetic network failure';pass=$true;file=$diagnostic.FullName})
 
 } catch { $failure=$_.Exception.Message;try{Shot 'ui-failure';if($window){Dump-Controls 'ui-failure-controls'}}catch{};Write-Host "SMOKE FAILURE: $failure"
  foreach($diagnostic in @('ui-failure-controls.json','team-server.log','team-server-error.log')) { $path=Join-Path $out $diagnostic;if(Test-Path $path){Write-Host "DIAGNOSTIC $diagnostic";Get-Content $path | Write-Host} } }

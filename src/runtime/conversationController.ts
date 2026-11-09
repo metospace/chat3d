@@ -1,9 +1,11 @@
 import {isReferenceImage,referenceText} from '../domain/referenceAttachments';
 import {createStore} from 'zustand/vanilla';
 import {buildSceneContext,generateBatch,type ModelConfig} from '../ai/provider';
+import type {BlenderResult} from '../scene/blenderModeling';
 import type {AgentActivity,AgentResult,AgentControl} from '../ai/modelingAgent';
 import type {GenerationProgress} from '../ai/stream';
 import {AGENT_LIMITS} from '../ai/agentPolicy';
+import {createRunTraceLog,sanitizeDiagnostic,type DiagnosticEntry} from '../ai/runTraceLog';
 import {applyBatch,type CommandBatch,type ExecutionResult} from '../domain/commands';
 import {checkEditScope,type EditScope} from '../domain/editScope';
 import {continueDraft,type DraftBaseline} from '../domain/draftContinuation';
@@ -25,14 +27,17 @@ export function conversationController(editor:EditorStore) {
   if(!controller){controller=createConversationController(editor);controllers.set(editor,controller);}
   return controller;
 }
-export interface SendOptions {scopeMode?:'scene'|'selection';lockPlacement?:boolean;reuseReference?:boolean;config?:ModelConfig|null}
+export interface SendOptions {scopeMode?:'scene'|'selection';lockPlacement?:boolean;reuseReference?:boolean;blenderModeling?:boolean;config?:ModelConfig|null}
 interface RuntimeView {
   removedQueueId:string|null;notice:string;agentActivity:AgentActivity|null;runPi:boolean;canSteer:boolean;
+  blenderResult:BlenderResult|null;
   runMessageId:string|null;started:number;lastRequest:{text:string;images:string[]}|null;running:boolean;
 }
 function createConversationController(editor:EditorStore) {
   const store=editor.getState;
-  const ui=createStore<RuntimeView>(()=>({removedQueueId:null,notice:'',agentActivity:store().lastRun,runPi:false,canSteer:false,runMessageId:null,started:0,lastRequest:null,running:false}));
+  const diagnosticRuns=new Map<string,DiagnosticEntry[]>();
+  let recordDiagnostic:(kind:string,data:unknown)=>void=()=>{};
+  const ui=createStore<RuntimeView>(()=>({blenderResult:null,removedQueueId:null,notice:'',agentActivity:store().lastRun,runPi:false,canSteer:false,runMessageId:null,started:0,lastRequest:null,running:false}));
   const setNotice=(notice:string)=>ui.setState({notice});
   // A buffered SSE read can deliver hundreds of deltas in the same microtask chain.
   // Keep processing every event, but publish the latest complete activity snapshot on
@@ -59,8 +64,16 @@ function createConversationController(editor:EditorStore) {
   const setCanSteer=(canSteer:boolean)=>ui.setState({canSteer});
   const setLastRequest=(lastRequest:RuntimeView['lastRequest'])=>ui.setState({lastRequest});
   const setStarted=(started:number)=>ui.setState({started});
-  // Only provider/tool events update progress; there is no simulated backend timer.
-  const setProgress=(_progress:GenerationProgress|null)=>{};
+  const setProgress=(event:GenerationProgress)=>{
+    const now=Date.now(),id=`single-model-${event.attempt}`;
+    const activity=queuedActivity??ui.getState().agentActivity??{title:'等待模型回复',turn:0,toolCalls:0,characters:0,inputTokens:0,outputTokens:0,usageReported:false,lastEventAt:now,plan:[],events:[],timings:[]};
+    const timings=activity.timings.map(t=>t.id!==id&&t.endedAt===undefined?{...t,endedAt:now}:t);
+    let timing=timings.find(t=>t.id===id);
+    if(!timing){timing={id,kind:'model',label:'模型生成',startedAt:now};timings.push(timing);}
+    if(event.characters>0&&timing.firstContentAt===undefined)timing.firstContentAt=now;
+    if(event.phase==='validating')timing.endedAt=now;
+    queueAgentActivity({...activity,title:event.phase==='receiving'?'正在接收建模内容':event.phase==='validating'?'正在整理本轮结果':'等待模型回复',turn:event.attempt,characters:event.characters,lastEventAt:now,timings});
+  };
   const controlRef:{current:AgentControl|null}={current:null};
   const runMessageId:{current:string|null}={current:null};
   const parentDraft:{current:DraftBaseline|null}={current:null};
@@ -72,7 +85,7 @@ function createConversationController(editor:EditorStore) {
   const release=()=>{reservations.delete(editor);ui.setState({running:false});useConversationRuns.setState({activeCount:reservations.size});};
   const markSteering=(id:string,status:'queued'|'received'|'interrupted')=>editor.setState(state=>({messages:state.messages.map(m=>m.id===id?{...m,steering:{runId:runMessageId.current??'',status}}:m)}));
   const clearControl=()=>{controlRef.current=null;setCanSteer(false);editor.setState(state=>({messages:state.messages.map(m=>m.steering?.runId===runMessageId.current&&m.steering.status==='queued'?{...m,steering:{...m.steering,status:'interrupted' as const}}:m)}));};
-  const finishRun=(status:'preview'|'completed'|'failed'|'stopped')=>{const latest=queuedActivity??ui.getState().agentActivity??store().lastRun;if(latest)store().setLastRun(latest);if(runMessageId.current)store().updateMessageRun(runMessageId.current,{status,endedAt:Date.now(),activity:latest??undefined});};
+  const finishRun=(status:'preview'|'completed'|'failed'|'stopped')=>{const id=runMessageId.current,current=queuedActivity??ui.getState().agentActivity??store().lastRun;const latest=current?{...current,diagnostics:(id?diagnosticRuns.get(id):undefined)??current.diagnostics}:undefined;if(latest)store().setLastRun(latest);if(id){store().updateMessageRun(id,{status,endedAt:Date.now(),activity:latest});diagnosticRuns.delete(id);}};
   const recordFailure=(reason:string)=>{
     const now=Date.now(),previous=queuedActivity??ui.getState().agentActivity;
     const activity:AgentActivity=previous??{title:'本次调整未完成',turn:0,toolCalls:0,characters:0,inputTokens:0,outputTokens:0,usageReported:false,lastEventAt:now,plan:[],events:[],timings:[]};
@@ -82,12 +95,13 @@ function createConversationController(editor:EditorStore) {
     setAgentActivity({...activity,outcome:'failed',lastEventAt:now,events:[...activity.events,reason],timings});
   };
   const fail = (reason: string) => {
+    recordDiagnostic('failure',reason);
     recordFailure(reason);
     if(preserveCheckpoint(reason))return;
     const message=generationFailureMessage(reason);
-    finishRun('failed');store().setPreviewDoc(null);store().setPendingBatch(null);store().setPendingResult(null);store().setAiError(message);store().setAiStatus('error');store().addAssistantMessage(message,undefined,message);
+    finishRun('failed');store().setPreviewDoc(null);store().setPendingBatch(null);store().setPendingResult(null);store().setAiError(message);store().setAiStatus('error');store().addAssistantMessage(message,undefined,reason);
   };
-  const finalize = (batch: CommandBatch, prepared?: ExecutionResult) => {
+  const finalize = (batch: CommandBatch, prepared?: ExecutionResult, blenderImport=false) => {
     store().setAiStatus('validating');
     if (store().doc.revision !== batch.baseRevision || store().doc.projectId !== batch.projectId) { fail('场景已变化，本次结果未应用。请重新发送'); return; }
     const result = prepared ?? applyBatch(store().doc, {operations:batch.operations});
@@ -95,8 +109,10 @@ function createConversationController(editor:EditorStore) {
     if(result.errors.length) { fail(`结果未通过校验，场景保持不变：${result.errors.map(e=>e.message).join('；')}`); return; }
     store().setAiError(null);
     if (!batch.operations.length) { store().setPreviewDoc(null); store().setAiStatus('idle'); finishRun('completed'); store().addAssistantMessage(sanitizeGenerationText(batch.summary)); return; }
-    const detail=evaluateDetailAcceptance(store().doc,result.doc,store().lastRun?.detailAcceptance?.reviews??[]);
-    if(detail.issues.length){batch={...batch,qualityIssues:[...new Set([...(batch.qualityIssues??[]),...detail.issues])],continuation:batch.continuation??'继续按通用六项细节标准检查并修正当前模型'};}
+    if(!blenderImport){
+      const detail=evaluateDetailAcceptance(store().doc,result.doc,store().lastRun?.detailAcceptance?.reviews??[]);
+      if(detail.issues.length){batch={...batch,qualityIssues:[...new Set([...(batch.qualityIssues??[]),...detail.issues])],continuation:batch.continuation??'继续按通用六项细节标准检查并修正当前模型'};}
+    }
     batch={...batch,summary:sanitizeGenerationText(batch.summary,{previewRetained:true}),qualityIssues:batch.qualityIssues?.map(issue=>sanitizeGenerationText(issue,{fallback:'本次调整有未完成的内容，可继续描述要修改的地方。'})),continuation:batch.continuation?sanitizeGenerationText(batch.continuation,{fallback:'请继续调整当前预览，保留已完成的部分。'}):undefined};
     if(parentDraft.current&&batch.requestId!==parentDraft.current.batch.requestId){const priorId=parentDraft.current.batch.requestId;editor.setState(state=>({messages:state.messages.map(m=>m.batch?.requestId===priorId?{...m,outcome:'superseded' as const}:m)}));}
     store().setPendingBatch(batch); store().setPendingResult(result); store().setPreviewDoc(result.doc);
@@ -104,12 +120,12 @@ function createConversationController(editor:EditorStore) {
   };
   const preserveCheckpoint = (reason:string) => {
     const cp=restoringCheckpoint?null:checkpointRef.current;
-    if(!cp&&parentDraft.current&&parentDraft.current.batch.baseRevision===store().doc.revision&&parentDraft.current.batch.projectId===store().doc.projectId){const parent=parentDraft.current;store().setPendingBatch(parent.batch);store().setPendingResult(parent.result);store().setPreviewDoc(parent.result.doc);store().setAiStatus('previewing');store().setAiError(generationFailureMessage(reason,{previewRetained:true}));finishRun('stopped');store().addAssistantMessage(generationFailureMessage(reason,{previewRetained:true}));return true;}
+    if(!cp&&parentDraft.current&&parentDraft.current.batch.baseRevision===store().doc.revision&&parentDraft.current.batch.projectId===store().doc.projectId){const parent=parentDraft.current;store().setPendingBatch(parent.batch);store().setPendingResult(parent.result);store().setPreviewDoc(parent.result.doc);store().setAiStatus('previewing');store().setAiError(generationFailureMessage(reason,{previewRetained:true}));finishRun('stopped');store().addAssistantMessage(generationFailureMessage(reason,{previewRetained:true}),undefined,reason);return true;}
     if(!cp || cp.batch.baseRevision!==store().doc.revision || cp.batch.projectId!==store().doc.projectId)return false;
     const message=generationFailureMessage(reason,{previewRetained:true});
     const batch={...cp.batch,summary:sanitizeGenerationText(cp.batch.summary,{previewRetained:true})+'\n'+message};
     restoringCheckpoint=true;
-    try{finalize(batch,cp.result);if(store().aiStatus==='previewing')store().setAiError(message);}finally{restoringCheckpoint=false;}
+    try{finalize(batch,cp.result);if(store().aiStatus==='previewing'){store().setAiError(message);editor.setState(state=>({messages:state.messages.map((m,index)=>index===state.messages.length-1?{...m,error:reason}:m)}));}}finally{restoringCheckpoint=false;}
     return true;
   };
   const send = async (sendMode:'guide'|'question'|'later'='guide',options:SendOptions={}) => {
@@ -130,9 +146,10 @@ function createConversationController(editor:EditorStore) {
       setNotice('请先打开顶部“模型配置”，获取并选择模型；输入和附件已保留'); return;
     }
     const usePi = cfg.agentMode !== 'single';
+    if(options.blenderModeling&&!usePi){setNotice('Blender 建模实验需要 Agent 模式；输入和附件已保留');return;}
     if(usePi && cfg.stream === false) { setNotice('当前生成方式需要实时接收结果，请在模型配置中开启实时输出，或选择单次生成；输入和附件已保留'); return; }
     let requestedScope:EditScope;
-    try{requestedScope=userEditScope(text,store().pendingResult?.doc??store().doc,[...store().selection],scopeMode,lockPlacement,messages.filter(m=>m.role==='user'));}
+    try{requestedScope=options.blenderModeling?{}:userEditScope(text,store().pendingResult?.doc??store().doc,[...store().selection],scopeMode,lockPlacement,messages.filter(m=>m.role==='user'));}
     catch{setNotice('请先选择要修改的对象，或将修改范围切换为全场景；输入和附件已保留');return;}
     if(reservations.size>=MAX_CONCURRENT_CONVERSATIONS){setNotice('已有 2 个会话正在执行。请等待其中一个结束或停止后再发送；输入已保留，不会自动执行。');return;}
     reservations.add(editor);useConversationRuns.setState({activeCount:reservations.size});ui.setState({running:true});
@@ -154,10 +171,15 @@ function createConversationController(editor:EditorStore) {
     const alive = () => myRun === runRef.current;
     runningRef.current = true; 
     setInput(''); setAttachments([]); setNotice(''); setLastRequest({text, images:sentImages});
-    setStarted(Date.now()); setProgress(null);
+    setStarted(Date.now());
     runMessageId.current=store().addUserMessage(text || '请根据参考附件建模', sentImages);
     ui.setState({runMessageId:runMessageId.current});
-    store().updateMessageRun(runMessageId.current,{startedAt:Date.now(),status:'running',generationQuality:cfg.generationQuality==='fast'?'fast':'fine',mode:usePi?'pi':'single'});
+    store().updateMessageRun(runMessageId.current,{startedAt:Date.now(),status:'running',mode:usePi?'pi':'single'});
+    const trace=createRunTraceLog(cfg.apiKey.trim());
+    diagnosticRuns.set(runMessageId.current,trace.entries);
+    const record=(kind:string,data:unknown)=>{if(alive())trace.record(kind,data);};
+    recordDiagnostic=record;
+    record('start',{method:options.blenderModeling?'blender':usePi?'direct-agent':'direct-single',model:cfg.model,endpoint:cfg.baseURL,text:modelText});
     store().setAiError(null); store().setAiStatus('capturing');
     const baseRevision = working.revision;
     const projectId = working.projectId;
@@ -169,6 +191,7 @@ function createConversationController(editor:EditorStore) {
       if(timeoutRef.current)clearTimeout(timeoutRef.current);
       timeoutRef.current=setTimeout(()=>{
         if(!alive())return;
+        recordDiagnostic('timeout','等待超过 3 分钟，已停止本次接收');
         runRef.current++;runningRef.current=false;clearControl();controller.abort();abortRef.current=null;release();
         const reason='等待超过 3 分钟，已停止本次接收';
         fail(reason);
@@ -177,22 +200,63 @@ function createConversationController(editor:EditorStore) {
     armTimeout();
     try {
       store().setAiStatus('context');
+      if(options.blenderModeling){
+        store().setAiStatus('generating');
+        const {runBlenderAgent}=await import('../ai/blenderAgent');
+        const previous=ui.getState().blenderResult;
+        const delivery:{result?:BlenderResult}={};
+        const summary=await runBlenderAgent({text:sendMode==='question'?'只回答问题，禁止建模：'+modelText:modelText,questionOnly:sendMode==='question',config:cfg,images,history,previous,signal:controller.signal,confirm:async(_request,signal)=>!signal?.aborted,
+          onDiagnostic:record,
+          onControl:control=>{if(alive()){controlRef.current=control;setCanSteer(!!control);}},
+          onSteeringApplied:id=>{if(alive())markSteering(id,'received');},
+          onActivity:event=>{if(alive()){armTimeout();queueAgentActivity(event);}},
+          onResult:result=>{if(alive()){delivery.result=result;ui.setState({blenderResult:result});}}});
+        if(!alive())return;
+        if(delivery.result&&sendMode!=='question'){
+          record('blender_artifacts',{name:delivery.result.name,blendBytes:delivery.result.blend.size,glbBytes:delivery.result.glb.size,renderBytes:delivery.result.render.size});
+          ui.setState({blenderResult:delivery.result});
+          setNotice('正在将 Blender 模型载入工作台…');
+          const {blenderWorkbenchCommands}=await import('../scene/blenderWorkbench');
+          let combined:DraftBaseline;
+          try{
+            const {operations,warnings}=await blenderWorkbenchCommands(delivery.result,controller.signal);
+            if(!alive())return;
+            const review=delivery.result.review;
+            const pending=!review||review.status==='pending';
+            const qualityIssues=[...(pending?['Blender 渲染尚未完成视觉复核。']:[]),...(review?.status==='issues'&&!review.issues.length?['Blender 视觉复核标记存在问题，尚待修正。']:[]),...(review?.issues??[])];
+            const incomplete=pending||review?.status==='issues'||qualityIssues.length>0;
+            const batch:CommandBatch={requestId:makeId(),projectId,baseRevision,selectedIds,summary,operations,qualityIssues,taskStatus:incomplete?'partial':'submitted',incomplete};
+            combined=continueDraft(original,parent,batch);
+            setNotice(warnings.find(w=>w.includes('动画未导入'))??'');
+          }catch(error){
+            if(!alive())return;
+            fail(error instanceof Error?error.message:String(error));
+            setNotice('此模型无法载入工作台，原始 Blender 文件仍可在对话中下载。');
+            return;
+          }
+          finalize(combined.batch,combined.result,true);
+        }else{
+          store().setAiStatus(parent?'previewing':'idle');finishRun('completed');store().addAssistantMessage(summary);
+        }
+        parentDraft.current=null;
+        return;
+      }
       const ctx = buildSceneContext(working, selectedIds,editScope);
       store().setAiStatus('generating');
-      setProgress({phase:'waiting',attempt:1,characters:0,lastEventAt:Date.now(),streaming:cfg.stream !== false});
       let batch: CommandBatch;
       let prepared: ExecutionResult | undefined;
       if(usePi) {
         const {runModelingAgent} = await import('../ai/modelingAgent');
         if(!alive()) return;
         const generated = await runModelingAgent({text:modelText,config:cfg,document:working,qualityBaseline:parent?original:working,referenceRepairs,selection:selectedIds,images,history,signal:controller.signal,editScope,captureAvailable:isIsolatedCaptureAvailable,captureEvidence:captureIsolatedSceneEvidence,
+          onDiagnostic:record,
           onControl:control=>{if(alive()){controlRef.current=control;setCanSteer(!!control);if(!control)clearControl();}},
           onSteeringApplied:id=>{if(alive()){markSteering(id,'received');setNotice('补充要求已收到，将在后续调整中参考');}},
           onCheckpoint:cp=>{if(alive()){const combined=continueDraft(original,parent,cp.batch,cp.result);checkpointRef.current={...cp,...combined};editor.setState({pendingBatch:combined.batch,pendingResult:combined.result});}},
           onActivity:event=>{if(alive()){armTimeout();queueAgentActivity(event);if(Date.now()-lastActivitySave>=1000||/暂停|中断|工具失败/.test(event.title)){store().setLastRun(event);if(runMessageId.current)store().updateMessageRun(runMessageId.current,{activity:event});lastActivitySave=Date.now();}if(checkpointRef.current)checkpointRef.current.activity=event;}},onPreview:document=>{if(alive())store().setPreviewDoc(document);}});
         batch=generated.batch;prepared=generated.result;if(alive()){setAgentActivity(generated.activity);store().setLastRun(generated.activity);}
       } else {
-        const generated = await generateBatch(modelText+`\n本次编辑范围约束：${JSON.stringify(editScope)}。${editScope.nodeIds?'只允许修改范围内对象；allowAssemblyAdditions=true时可给完整组件追加部件，不能新增其他组件或改范围外对象。':'允许编辑全场景。高亮对象只是指代参考，不是权限边界，不能因此拒绝其他对象的修改。'}${editScope.lockPlacement?'保留所有已有位置与朝向。':'遵守用户描述中的布局和局部修改要求。'}`, cfg, ctx, controller.signal, images, history, event => { if(alive()) setProgress(event); });
+        const generated = await generateBatch(modelText+`\n本次编辑范围约束：${JSON.stringify(editScope)}。${editScope.nodeIds?'只允许修改范围内对象；allowAssemblyAdditions=true时可给完整组件追加部件，不能新增其他组件或改范围外对象。':'允许编辑全场景。高亮对象只是指代参考，不是权限边界，不能因此拒绝其他对象的修改。'}${editScope.lockPlacement?'保留所有已有位置与朝向。':'遵守用户描述中的布局和局部修改要求。'}`, cfg, ctx, controller.signal, images, history, event => { if(alive()) setProgress(event); },record);
         batch = {requestId:makeId(),projectId,baseRevision,selectedIds,summary:generated.summary,operations:generated.operations};
       }
       batch.editScope=editScope;
@@ -201,8 +265,7 @@ function createConversationController(editor:EditorStore) {
     } catch(e) {
       // An upstream error may echo its Authorization value. Keep the invocation's
       // credential out of messages, retained checkpoint summaries and persistence.
-      const raw=e instanceof Error?e.message:String(e);
-      const reason=cfg.apiKey.trim()?raw.split(cfg.apiKey.trim()).join('[已隐藏]'):raw;
+      const reason=sanitizeDiagnostic(e instanceof Error?e.message:String(e),cfg.apiKey.trim());
       if(alive())fail(reason);
     } finally {
       if(alive()) { clearControl();runningRef.current=false; abortRef.current=null; if(timeoutRef.current) clearTimeout(timeoutRef.current); release(); }
@@ -210,6 +273,7 @@ function createConversationController(editor:EditorStore) {
   };
   const cancel = () => {
     if(!runningRef.current)return;
+    recordDiagnostic('cancel','用户停止生成');
     setAgentActivity(a=>a?{...a,timings:a.timings.map(t=>t.endedAt===undefined?{...t,endedAt:Date.now(),failed:true,detail:'用户停止，操作未完成'}:t)}:a);
     runRef.current++; runningRef.current=false; clearControl();abortRef.current?.abort(); abortRef.current=null;
     if(timeoutRef.current) clearTimeout(timeoutRef.current);release();
@@ -228,7 +292,7 @@ function createConversationController(editor:EditorStore) {
   };
   const removeQueued=(id:string)=>{editor.setState(state=>({messages:state.messages.map(m=>m.id===id&&m.queuedTask?.status==='waiting'?{...m,queuedTask:{status:'cancelled' as const}}:m)}));ui.setState({removedQueueId:id});};
   const restoreQueued=()=>{const id=ui.getState().removedQueueId;if(!id)return;editor.setState(state=>({messages:state.messages.map(m=>m.id===id&&m.queuedTask?.status==='cancelled'?{...m,queuedTask:{status:'waiting' as const}}:m)}));ui.setState({removedQueueId:null});};
-  return {ui,send,cancel,setNotice,promoteQueued,removeQueued,restoreQueued,
+  return {ui,send,cancel,setNotice,promoteQueued,removeQueued,restoreQueued,getDiagnosticEntries:()=>Array.from(diagnosticRuns,([runId,entries])=>entries.map(entry=>({...entry,data:{runId,value:entry.data}}))).flat(),
     commit:()=>{if(runningRef.current)return;store().confirmPending();if(store().aiStatus==='idle')setNotice('修改已应用到当前项目；可撤销。不会继续调用模型。');checkpointRef.current=null;parentDraft.current=null;},
     discard:()=>{if(runningRef.current)return;checkpointRef.current=null;parentDraft.current=null;store().discardPending();setNotice('已放弃预览，原场景保持不变');}
   };

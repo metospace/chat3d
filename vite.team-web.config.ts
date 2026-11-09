@@ -1,14 +1,12 @@
-import {defineConfig} from 'vite';
-import react from '@vitejs/plugin-react';
-import tailwindcss from '@tailwindcss/vite';
+import {defineConfig,mergeConfig} from 'vite';
 import {resolve} from 'node:path';
+import workspaceConfig from './vite.config.ts';
 
-export default defineConfig({
+export default defineConfig(env=>mergeConfig(workspaceConfig(env),{
   base: '/team/',
-  plugins: [react(), tailwindcss()],
   build: {
     outDir: 'dist-team-web',
     emptyOutDir: true,
     rollupOptions: {input: resolve('team-web.html')},
   },
-});
+}));

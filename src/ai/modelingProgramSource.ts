@@ -116,8 +116,9 @@ export function readSource(source:string,options:SourceReadOptions={}):SourceRea
 }
 
 /** Resolve all patches against the same original source before applying any changes. */
-export function editSource(source:string,options:SourceEditOptions):SourceEditResult{
+export function editSource(source:string,options:SourceEditOptions,maxSourceChars=MAX_SOURCE):SourceEditResult{
  if(typeof source!=='string')throw Error('source must be a string');
+ integer(maxSourceChars,'maxSourceChars',1,Number.MAX_SAFE_INTEGER);
  record(options,['expectedVersion','patches'],'edit options');
  if(!own(options,'expectedVersion')||!own(options,'patches'))throw Error('edit options requires expectedVersion and patches');
  if(typeof options.expectedVersion!=='string'||options.expectedVersion!==version(source))throw Error('Stale expectedVersion: read the current source before editing');
@@ -138,7 +139,7 @@ export function editSource(source:string,options:SourceEditOptions):SourceEditRe
  }
  resolved.sort((a,b)=>a.start-b.start);
  for(let i=1;i<resolved.length;i++)if(resolved[i].start<resolved[i-1].end)throw Error('Patches overlap in the original source');
- if(size>MAX_SOURCE)throw Error('Modified source exceeds 80000 chars');
+ if(size>maxSourceChars)throw Error(`Modified source exceeds ${maxSourceChars} chars`);
  let cursor=0;const chunks:string[]=[];
  for(const patch of resolved){chunks.push(source.slice(cursor,patch.start),patch.replace);cursor=patch.end;}
  chunks.push(source.slice(cursor));const modified=chunks.join('');

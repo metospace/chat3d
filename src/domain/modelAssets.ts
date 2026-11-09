@@ -1,5 +1,6 @@
 import {isThumbnailImage} from './thumbnailImage';
 import {validCategory} from './libraryMetadata';
+import {validPublishedCategoryPath} from './teamCategories';
 import {validateAssetContract,type AssetContract} from './assetContract';
 import {Euler,Matrix4,Quaternion,Vector3} from 'three';
 import {assemblyBounds} from './assemblyEditing';
@@ -14,8 +15,10 @@ export interface ModelAssetVersion {
  size:Vec3;nodes:SceneNode[];materials:Material[];thumbnail?:string;externalConnectionsRemoved:number;
 }
 export interface ModelAssetSummary {id:string;version:number;name:string;category:AssetCategory;createdAt:string;size:Vec3;parts:number;thumbnail?:string;quality:'unreviewed';purpose?:string;anchorCount?:number;description?:string;metadataRevision?:number}
-export const MAX_ASSET_BYTES=50*1024*1024;
-export const ASSET_SIZE_ERROR=`资产超过${MAX_ASSET_BYTES/1024/1024} MiB，请精简或分拆模型`;
+export const MAX_ASSET_BYTES=200*1024*1024;
+export const MAX_TEAM_ASSET_BYTES=50*1024*1024;
+const assetSizeError=(maxBytes:number)=>`资产超过${maxBytes/1024/1024} MiB，请精简或分拆模型`;
+export const ASSET_SIZE_ERROR=assetSizeError(MAX_ASSET_BYTES);
 export function assetDocument(asset:ModelAssetVersion):SceneDocument{return {schemaVersion:SCHEMA_VERSION,projectId:asset.id,revision:0,unit:'m',upAxis:'Y',nodes:structuredClone(asset.nodes),materials:structuredClone(asset.materials),assets:[]};}
 export function selectedAssetNodes(doc:SceneDocument,selection:string[]):SceneNode[]{const ids=new Set(selection),groups=new Set(doc.nodes.filter(n=>ids.has(n.id)&&n.assemblyId).map(n=>n.assemblyId));return doc.nodes.filter(n=>ids.has(n.id)||(n.assemblyId&&groups.has(n.assemblyId)));}
 export function createModelAsset(doc:SceneDocument,selection:string[],details:{name:string;category:AssetCategory;front?:ModelAssetVersion['front'];id?:string;version?:number}):ModelAssetVersion{
@@ -49,7 +52,17 @@ export function instantiateAsset(a:ModelAssetVersion,position:Vec3,yaw=0):Comman
  const nodes=structuredClone(a.nodes).map(n=>{n.assemblyName=singleGroup?a.name:(a.name+' / '+(n.assemblyName??n.name)).slice(0,200);const p=new Vector3(),q=new Quaternion(),s=new Vector3();new Matrix4().compose(new Vector3(...n.transform.position),new Quaternion(...n.transform.rotationQuaternion),new Vector3(...n.transform.scale)).premultiply(matrix).decompose(p,q,s);n.transform={position:p.toArray() as Vec3,rotationQuaternion:q.toArray() as [number,number,number,number],scale:s.toArray() as Vec3};n.modelAsset={id:a.id,version:a.version,instanceId,sourceNodeId:n.id};return n;});
  return {op:'importComponentDraft',nodes,materials:structuredClone(a.materials)};
 }
-export function parseModelAsset(text:string):ModelAssetVersion{if(new TextEncoder().encode(text).length>MAX_ASSET_BYTES)throw Error(ASSET_SIZE_ERROR);let a:ModelAssetVersion;try{a=JSON.parse(text);}catch{throw Error('资产不是有效JSON');}validateModelAsset(a);return a;}
+export interface ParsedModelAssetFile {asset:ModelAssetVersion;teamCategoryPath?:string[]}
+export function parseModelAssetFile(text:string,maxBytes=MAX_ASSET_BYTES):ParsedModelAssetFile{
+ if(text.length>maxBytes||new TextEncoder().encode(text).length>maxBytes)throw Error(assetSizeError(maxBytes));
+ let asset:ModelAssetVersion&{teamCategoryPath?:unknown};try{asset=JSON.parse(text);}catch{throw Error('资产不是有效JSON');}
+ const path=asset?.teamCategoryPath;
+ if(path!==undefined&&!validPublishedCategoryPath(path))throw Error('团队分类路径无效');
+ validateModelAsset(asset);
+ delete asset.teamCategoryPath;
+ return {asset,...(path!==undefined?{teamCategoryPath:[...path]}:{})};
+}
+export function parseModelAsset(text:string,maxBytes=MAX_ASSET_BYTES):ModelAssetVersion{return parseModelAssetFile(text,maxBytes).asset;}
 
 // A newly saved independent copy retains the actual editor node IDs. Its source
 // can therefore create the next revision even if those nodes came from an older asset.

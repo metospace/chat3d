@@ -3,12 +3,12 @@ import {inspectContactSurfaces} from './contactQuality';
 import type {SceneDocument} from './types';
 import {connectionReport} from './connections';
 export const DETAIL_CRITERIA=[
- {key:'silhouette',name:'外形与比例',standard:'轮廓、尺度和主要比例应符合对象身份及用户参考，不能只用标签或颜色区分类别。'},
- {key:'structure',name:'功能结构',standard:'按对象用途表达主要结构、开口与工作部位；简单实体无需虚构机械机构，复杂对象不能停在占位外壳。'},
- {key:'connections',name:'连接与接触',standard:'应相接的部件实际连接，避免无依据的悬空/穿插；人物、工具与操作面的关系合理；须看清腕掌连续、拇指与四指、实际包握/单指按压、工具朝向与无穿插。登记接触点合格不代表握持合理。'},
- {key:'materials',name:'材质与表面',standard:'按实际材料体现颜色、粗糙度、金属度/透明度；不靠强光或随机换色掩盖形体。'},
- {key:'details',name:'用途相关细节',standard:'根据对象身份补足近景可辨识的必要细节，不能以多边形数、零件数或无用装饰替代。'},
- {key:'context',name:'完整性与环境关系',standard:'独立模型要完整，场景中要核对落地、朝向、操作空间与相邻对象；不强加用户未要求的环境。'},
+ {key:'silhouette',name:'外形与比例',standard:'整体轮廓、尺度、主次体积与关键负空间应符合对象身份及用户参考；默认真实可信，明确风格化要求优先，不能只用标签或颜色区分类别。'},
+ {key:'structure',name:'功能结构',standard:'按对象身份表达必要的结构、解剖或植物生长关系，以及适用的开口、厚度与工作部位；连续形体不以积木拼接代替，简单实体无需虚构机构，复杂对象不能停在占位外壳。'},
+ {key:'connections',name:'连接与接触',standard:'按对象检查装配、关节、生长连接、支承或接触关系，避免无依据的悬空/穿插与连续表面断裂；涉及人物、工具与操作面时关系须合理，须看清腕掌连续、拇指与四指、实际包握/单指按压、工具朝向与无穿插。登记接触点合格不代表握持合理。'},
+ {key:'materials',name:'材质与表面',standard:'按真实材料或明确风格区分颜色、粗糙度、金属、涂层与透射关系，检查适用的UV、法线和纹理尺度；微表面不替代形体，不靠强光、随机换色或强加噪声磨损掩盖缺陷。'},
+ {key:'details',name:'用途相关细节',standard:'按对象身份、用途和目标画面中的可辨识尺度补足必要细节；先主形与结构再局部细节，不能以多边形数、零件数、无用装饰或无限微细节替代完整性。'},
+ {key:'context',name:'完整性与环境关系',standard:'独立模型在用户范围内完整；场景按需核对尺度、落地、朝向、支承、相邻对象及活动空间，保留已有资产与风格，不强加未要求的环境、隐藏结构或其他类别清单；未知与不可实现项如实保留未完成。'},
 ] as const;
 export type DetailCriterion=typeof DETAIL_CRITERIA[number]['key'];
 export interface DetailCheck {criterion:DetailCriterion;status:'pass'|'fail'|'unknown'|'not_applicable';evidence:string;nodeIds:string[]}

@@ -48,7 +48,7 @@ try{
   const {runModelingAgent}=await server.ssrLoadModule('/src/ai/modelingAgent.ts');let calls=0;
   const steps=[{name:'edit_scene',arguments:{summary:'连续导轨数据草稿',operations:[{op:'createAssembly',name:'折角导轨',parts:[{name:'型材',geometry:geometry([[0,0],[1,0],[1,1]]),materialId:'mat_gray'}]}]}},{name:'submit_data_preview',arguments:{summary:'已生成数据草稿，未经视觉验收'}}];
   const streamFn=async()=>{const step=steps[calls++];const message={role:'assistant',content:step?[{type:'toolCall',id:'offline-'+calls,...step}]:[{type:'text',text:'停止，保留草稿'}],api:'openai-completions',provider:'offline',model:'offline',stopReason:step?'toolUse':'stop',timestamp:Date.now(),usage:{input:20,output:10,cacheRead:0,cacheWrite:0,totalTokens:30,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}};const stream=createAssistantMessageEventStream();queueMicrotask(()=>{stream.push({type:'start',partial:message});stream.push({type:'done',reason:message.stopReason,message});});return stream;};
-  const base=createInitialDoc();const result=await runModelingAgent({text:'生成一根折角导轨',document:base,selection:[],workerTask:true,config:{baseURL:'https://offline.invalid/v1',apiKey:'offline-only',model:'offline',generationQuality:'fast'},streamFn});
+  const base=createInitialDoc();const result=await runModelingAgent({text:'生成一根折角导轨',document:base,selection:[],workerTask:true,config:{baseURL:'https://offline.invalid/v1',apiKey:'offline-only',model:'offline'},streamFn});
   assert.equal(result.result.doc.nodes[0].geometry.type,'profileSweep');assert.equal(base.nodes.length,0);assert.equal(calls,2);assert.equal(result.batch.taskStatus,'partial');assert.equal(result.batch.incomplete,true);
  });
  console.log(`${passed} profile sweep checks passed; no model calls`);
