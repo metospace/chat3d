@@ -1,6 +1,7 @@
 export interface UpdateHistoryEntry {version:string;date:string;changes:readonly string[]}
 /** Historical dates are version-commit times, not asserted deployment times. Newest first. */
 export const UPDATE_HISTORY:readonly UpdateHistoryEntry[]=[
+ {version:'0.2.40',date:'2026-11-09T17:13:40+08:00',changes:['贴图宽高上限提高到 4096，更大贴图导入时自动缩放','团队发布/资产/场景与 HTTP 体上限提高到 500 MiB','团队发布失败时显示 HTTP 状态与回包预览，便于诊断断流']},
  {version:'0.2.39',date:'2026-11-08T20:42:00+08:00',changes:['改进桌面 Blender 工作流与结果预览应用','团队发布支持分类与发布流程增强','补充相关桌面与团队测试']},
  {version:'0.2.38',date:'2026-11-06T23:30:42+08:00',changes:['团队门户资源卡片显示固定版本模型预览缩略图','恢复桌面资产拖放导入','提高本地导入与相关体积上限']},
  {version:'0.2.37',date:'2026-11-06T09:14:13+08:00',changes:['支持 Blender Python MCP 建模与结果预览应用','首页可选 Blender 建模；生成菜单统一为直接生成与 Blender 生成','修复任务诊断导出与空时间轴相关冒烟/回归断言','修复 Windows UI 冒烟全量诊断按钮命名']},
