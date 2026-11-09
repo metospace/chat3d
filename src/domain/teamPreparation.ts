@@ -1,6 +1,6 @@
 /// <reference lib="es2024.promise" />
 import {readModelAsset} from './modelAssetStorage';
-import {constructTeamPreparation,fingerprintSavedTeamContent,type TeamPreparationInput,type TeamPreparationResult} from './teamPreparationCore';
+import {constructTeamPreparation,fingerprintSavedTeamContent,teamPreparationRequest,type TeamPreparationInput,type TeamPreparationResult} from './teamPreparationCore';
 import {fingerprintTeamContent,type TeamFingerprintInput} from './teamFingerprint';
 import {preparationRecords,type PreparationWireRecord,type PreparationWireValue} from './teamPreparationWire';
 import type {TeamPreparationWorkerRequest} from './teamPreparationWorker';
@@ -49,9 +49,7 @@ export async function prepareTeamPublicationSnapshot(input:TeamPreparationInput,
  const {scene,...metadata}=input;
  const result=await runPreparationWorker(metadata,scene,onStage);
  if(result.type!=='result')throw Error('发布后台没有返回准备结果');
- const request=result.request as TeamPublish;
- Object.defineProperty(request,'payload',{enumerable:true,configurable:true,get(){const payload=(JSON.parse(result.serializedBody) as TeamPublish).payload;Object.defineProperty(request,'payload',{value:payload,enumerable:true,configurable:true,writable:true});return payload;}});
- return {...result,request};
+ return {...result,request:teamPreparationRequest(result.request,result.publication)};
 }
 export async function asyncTeamLocalFingerprint(input:TeamFingerprintInput){
  if(import.meta.env.SSR||typeof window==='undefined')return fingerprintTeamContent(input);

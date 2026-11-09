@@ -15,7 +15,7 @@ export interface ModelAssetVersion {
  size:Vec3;nodes:SceneNode[];materials:Material[];thumbnail?:string;externalConnectionsRemoved:number;
 }
 export interface ModelAssetSummary {id:string;version:number;name:string;category:AssetCategory;createdAt:string;size:Vec3;parts:number;thumbnail?:string;quality:'unreviewed';purpose?:string;anchorCount?:number;description?:string;metadataRevision?:number}
-export const MAX_ASSET_BYTES=400*1024*1024;
+export const MAX_ASSET_BYTES=500*1024*1024;
 export const MAX_TEAM_ASSET_BYTES=MAX_ASSET_BYTES;
 const assetSizeError=(maxBytes:number)=>`资产超过${maxBytes/1024/1024} MiB，请精简或分拆模型`;
 export const ASSET_SIZE_ERROR=assetSizeError(MAX_ASSET_BYTES);

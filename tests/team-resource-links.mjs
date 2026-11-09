@@ -3,12 +3,20 @@ import assert from 'node:assert/strict';
 import {createServer} from 'vite';
 import {installBrowserGlobals} from './jsdom-env.mjs';
 import {JSDOM} from 'jsdom';
+import {gunzipSync} from 'node:zlib';
 const dom=new JSDOM('<html><body></body></html>',{url:'https://example.test'});installBrowserGlobals(dom);
 Object.defineProperty(globalThis,'localStorage',{value:dom.window.localStorage,configurable:true});
 const vite=await createServer({server:{middlewareMode:true,hmr:false},appType:'custom'}),originalFetch=globalThis.fetch;
-let requests=[],publications=new Map(),publicationHeads=new Map(),nextId=0,lostName='',lostOnce=false,remoteHeads=[],readOverride;
+let requests=[],publications=new Map(),publicationHeads=new Map(),nextId=0,lostName='',lostOnce=false,remoteHeads=[],readOverride;const uploads=new Map();
 globalThis.fetch=async(url,init={})=>{
- const path=String(url),body=init.body?JSON.parse(init.body):undefined;requests.push({path,body,authorization:init.headers?.Authorization});
+ let path=String(url),body=init.body?JSON.parse(init.body):undefined;
+ if(path.includes('/publish-uploads/')){
+  if(path.endsWith('/start')){assert.equal(body.encoding,'gzip');let upload=uploads.get(body.key);if(!upload){upload={uploadId:'upload-'+uploads.size,offset:0,total:body.total,encoding:'gzip',chunks:[]};uploads.set(body.key,upload);}return Response.json({uploadId:upload.uploadId,offset:upload.offset,total:upload.total,encoding:upload.encoding});}
+  const upload=[...uploads.values()].find(value=>path.includes('/'+value.uploadId+'/'));assert.ok(upload);
+  if(path.endsWith('/chunk')){assert.equal(body.offset,upload.offset);const chunk=Buffer.from(body.data,'base64');upload.chunks.push(chunk);upload.offset+=chunk.length;return Response.json({uploadId:upload.uploadId,offset:upload.offset,total:upload.total,encoding:'gzip'});}
+  assert.ok(path.endsWith('/complete'));assert.equal(upload.offset,upload.total);body=JSON.parse(gunzipSync(Buffer.concat(upload.chunks)).toString('utf8'));path=path.slice(0,path.indexOf('/publish-uploads/'))+'/publish';
+ }
+ requests.push({path,body,authorization:init.headers?.Authorization});
  if(path.endsWith('/login'))return Response.json({token:'private-memory-token',user:{id:'alice',name:'Alice',role:body.name==='viewer'?'viewer':'member'}});
  if(path.endsWith('/logout'))return Response.json({ok:true});
  if(path.includes('/items?'))return Response.json(remoteHeads);

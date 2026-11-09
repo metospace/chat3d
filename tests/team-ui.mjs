@@ -1,17 +1,26 @@
 import 'fake-indexeddb/auto';
 import assert from 'node:assert/strict';import React from 'react';import {JSDOM} from 'jsdom';import {createServer} from 'vite';
 import {installBrowserGlobals} from './jsdom-env.mjs';
+import {gunzipSync} from 'node:zlib';
 const dom=new JSDOM('<html><body></body></html>',{url:'https://example.test'});installBrowserGlobals(dom);for(const n of ['window','document','HTMLElement','Node','MutationObserver','Event','MouseEvent','localStorage','Element','CustomEvent','HTMLInputElement','NodeFilter','DocumentFragment'])Object.defineProperty(globalThis,n,{value:dom.window[n],configurable:true});Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});globalThis.IS_REACT_ACT_ENVIRONMENT=true;globalThis.getComputedStyle=dom.window.getComputedStyle;globalThis.requestAnimationFrame=fn=>setTimeout(fn,0);globalThis.cancelAnimationFrame=clearTimeout;window.requestAnimationFrame=globalThis.requestAnimationFrame;window.cancelAnimationFrame=clearTimeout;globalThis.ResizeObserver=class{observe(){}unobserve(){}disconnect(){}};
 globalThis.__CHAT3D_TEAM_SHOW_PASSWORD_LOGIN__=true;
 const previewObservers=new Set();globalThis.IntersectionObserver=class{constructor(callback){this.callback=callback;previewObservers.add(this);}observe(target){this.target=target;queueMicrotask(()=>{if(this.target)this.callback([{isIntersecting:true,target:this.target}]);});}disconnect(){this.target=undefined;previewObservers.delete(this);}unobserve(){this.target=undefined;}};
 const captured=[];globalThis.__TEAM_CAPTURE__=async doc=>{captured.push(structuredClone(doc));return{image:doc.projectId==='team-scene-preview'?'data:image/png;base64,CCCC':'data:image/png;base64,BBBB',notice:'测试渲染器：核对固定团队快照'};};
 const {render:renderUI,fireEvent,waitFor,cleanup,act,within}=await import('@testing-library/react');const {Theme}=await import('@radix-ui/themes');const render=ui=>renderUI(ui,{wrapper:({children})=>React.createElement(Theme,null,children)});const server=await createServer({plugins:[{name:'team-preview-test-renderer',enforce:'pre',load(id){if(id.replaceAll('\\','/').endsWith('/src/scene/libraryThumbnail.ts'))return 'export const captureLibraryThumbnail=doc=>globalThis.__TEAM_CAPTURE__(doc);';}}],server:{middlewareMode:true,hmr:false},appType:'custom'});
-const originalFetch=globalThis.fetch;let calls=[],loginCalls=0,published=new Map(),failPublish=true,failRead=false,readCalls=[],remote=[],remoteScenes=[],delayedRead;
+const originalFetch=globalThis.fetch;let calls=[],loginCalls=0,published=new Map(),failPublish=true,failRead=false,readCalls=[],remote=[],remoteScenes=[],delayedRead;const uploads=new Map();
 globalThis.fetch=async(url,init={})=>{
- const path=String(url);if(path.endsWith('/login')){loginCalls++;return Response.json({token:'temporary-test-token',user:{id:'alice',name:'alice',role:'member'}});}
+ let path=String(url),publicationBody;
+ if(path.includes('/publish-uploads/')){
+  const data=JSON.parse(init.body);
+  if(path.endsWith('/start')){assert.equal(data.encoding,'gzip');let upload=uploads.get(data.key);if(!upload){upload={uploadId:'upload-'+uploads.size,offset:0,total:data.total,chunks:[]};uploads.set(data.key,upload);}return Response.json({uploadId:upload.uploadId,offset:upload.offset,total:upload.total,encoding:'gzip'});}
+  const upload=[...uploads.values()].find(value=>path.includes('/'+value.uploadId+'/'));assert.ok(upload);
+  if(path.endsWith('/chunk')){assert.equal(data.offset,upload.offset);const chunk=Buffer.from(data.data,'base64');upload.chunks.push(chunk);upload.offset+=chunk.length;return Response.json({uploadId:upload.uploadId,offset:upload.offset,total:upload.total,encoding:'gzip'});}
+  assert.ok(path.endsWith('/complete'));assert.equal(upload.offset,upload.total);publicationBody=JSON.parse(gunzipSync(Buffer.concat(upload.chunks)).toString('utf8'));path=path.slice(0,path.indexOf('/publish-uploads/'))+'/publish';
+ }
+ if(path.endsWith('/login')){loginCalls++;return Response.json({token:'temporary-test-token',user:{id:'alice',name:'alice',role:'member'}});}
  if(path.endsWith('/logout'))return Response.json({ok:true});
  if(path.includes('/items?'))return Response.json((path.includes('kind=asset')?remote:remoteScenes).map(({payload,...item})=>item));
- if(path.endsWith('/publish')){const body=JSON.parse(init.body);calls.push(body);if(failPublish){failPublish=false;throw Error('测试网络故障');}const result=published.get(body.key)??{id:'shared-'+published.size,version:body.expectedVersion+1};published.set(body.key,result);return Response.json(result);}
+ if(path.endsWith('/publish')){const body=publicationBody;calls.push(body);if(failPublish){failPublish=false;throw Error('测试网络故障');}const result=published.get(body.key)??{id:'shared-'+published.size,version:body.expectedVersion+1};published.set(body.key,result);return Response.json(result);}
  const item=[...remote,...remoteScenes].find(item=>path.endsWith(`/items/${item.id}/${item.version}`));if(item){readCalls.push(item.id);if(delayedRead?.id===item.id)return delayedRead.response;if(item.id==='remote-b'&&failRead){failRead=false;throw Error('获取测试故障');}return Response.json(item);}
  throw Error('Unexpected test request '+path);
 };

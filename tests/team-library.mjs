@@ -112,19 +112,19 @@ try{
  const cors=await call('publish',{method:'OPTIONS',headers:{Origin:'http://tauri.localhost'}});assert.equal(cors.status,204);assert.equal(cors.headers.get('access-control-allow-origin'),'http://tauri.localhost');
  assert.equal((await call('publish',{method:'POST',headers:{Authorization:`Bearer ${a.token}`,'Content-Type':'application/json'},body:'null'})).status,400);
  // Stream a tiny JSON object plus whitespace from one reusable chunk: do not
- // construct another 416 MiB string or a large parsed padding property in the client.
+ // construct another 500 MiB string or a large parsed padding property in the client.
  const paddingChunk=Buffer.alloc(1024*1024,0x20);
  const paddedRequest=async function*(bytes){yield Buffer.from('{}');for(let remaining=bytes-2;remaining>0;){const length=Math.min(remaining,paddingChunk.length);yield paddingChunk.subarray(0,length);remaining-=length;}};
  const paddedCall=(path,bytes)=>call(path,{method:'POST',headers:{'Content-Type':'application/json','Content-Length':String(bytes)},body:paddedRequest(bytes),duplex:'half'});
- const withinHttpCap=await paddedCall('login',416*1024*1024);
- assert.equal(withinHttpCap.status,400,'416 MiB body reaches login validation');await withinHttpCap.text();
- const beyondHttpCap=await paddedCall('login',416*1024*1024+1);
- assert.equal(beyondHttpCap.status,413);assert.match(await beyondHttpCap.text(),/416 MiB/);
+ const withinHttpCap=await paddedCall('login',500*1024*1024);
+ assert.equal(withinHttpCap.status,400,'inclusive body reaches login validation');await withinHttpCap.text();
+ const beyondHttpCap=await paddedCall('login',500*1024*1024+1);
+ assert.equal(beyondHttpCap.status,413);assert.match(await beyondHttpCap.text(),/500 MiB/);
  const withinDashboardCap=await paddedCall('dashboards/uploads',2*1024*1024);
  assert.equal(withinDashboardCap.status,401,'2 MiB dashboard body reaches authentication');await withinDashboardCap.text();
  const beyondDashboardCap=await paddedCall('dashboards/uploads',2*1024*1024+1);
  assert.equal(beyondDashboardCap.status,413);assert.match(await beyondDashboardCap.text(),/2 MiB/);
- console.log('PASS HTTP body accepts 416 MiB and rejects overflow; dashboard requests remain capped at 2 MiB');
+ console.log('PASS HTTP body accepts its inclusive boundary and rejects overflow; dashboard requests remain capped at 2 MiB');
  const result=await call('items?kind=scene',{headers:{Authorization:`Bearer ${b.token}`}});assert.equal(result.status,200);assert.equal((await result.json()).length,2);
  const httpCategoryRequest={...request,itemId:first.id,expectedVersion:3,key:crypto.randomUUID(),categoryPath:['  场景目录  ','装配车间']};
  const httpCategory=await call('publish',{method:'POST',headers:{Authorization:`Bearer ${a.token}`,'Content-Type':'application/json'},body:JSON.stringify(httpCategoryRequest)});assert.equal(httpCategory.status,200);assert.deepEqual(await httpCategory.json(),{id:first.id,version:4});
@@ -144,8 +144,8 @@ try{
  const deniedOrigin=await uploadPost('start',{key:crypto.randomUUID(),total:10,digest:'0'.repeat(64)},a.token,{Origin:'https://evil.invalid'});assert.equal(deniedOrigin.status,403);assert.match((await deniedOrigin.json()).error,/来源/);
  const allowedOrigin=await uploadPost('start',{key:'bad',total:0,digest:'bad'},a.token,{Origin:'http://tauri.localhost'});assert.equal(allowedOrigin.status,400);assert.equal(allowedOrigin.headers.get('access-control-allow-origin'),'http://tauri.localhost');
  const uploadPreflight=await call('publish-uploads/start',{method:'OPTIONS',headers:{Origin:'http://tauri.localhost'}});assert.equal(uploadPreflight.status,204);
- for(const value of [{key:'bad',total:10,digest:'0'.repeat(64)},{key:crypto.randomUUID(),total:416*1024*1024+1,digest:'0'.repeat(64)},{key:crypto.randomUUID(),total:10,digest:'bad'},{key:crypto.randomUUID(),total:-1,digest:'0'.repeat(64)}])assert.equal((await uploadPost('start',value)).status,400);
- const maxUpload=await uploadPost('start',{key:crypto.randomUUID(),total:416*1024*1024,digest:'0'.repeat(64)});assert.equal(maxUpload.status,200,'416 MiB declared publication is accepted without allocating its bytes');
+ for(const value of [{key:'bad',total:10,digest:'0'.repeat(64)},{key:crypto.randomUUID(),total:500*1024*1024+1,digest:'0'.repeat(64)},{key:crypto.randomUUID(),total:10,digest:'bad'},{key:crypto.randomUUID(),total:-1,digest:'0'.repeat(64)}])assert.equal((await uploadPost('start',value)).status,400);
+ const maxUpload=await uploadPost('start',{key:crypto.randomUUID(),total:500*1024*1024,digest:'0'.repeat(64)});assert.equal(maxUpload.status,200,'declared publication boundary accepted without allocating its bytes');
  const oversizedUploadRequest=await paddedCall('publish-uploads/start',2*1024*1024+1);assert.equal(oversizedUploadRequest.status,413);await oversizedUploadRequest.text();
  const smallUpload=await uploadStart({...request,key:crypto.randomUUID(),name:'小分块发布'});await uploadRest(smallUpload);const smallUploaded=await uploadPost(smallUpload.state.uploadId+'/complete',{});assert.equal(smallUploaded.status,200);const smallResult=await smallUploaded.json();assert.deepEqual(team.read(smallResult.id,1).payload,scene);
  assert.deepEqual(await (await uploadPost(smallUpload.state.uploadId+'/complete',{})).json(),smallResult,'lost complete response returns identical version');

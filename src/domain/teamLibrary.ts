@@ -1,6 +1,6 @@
 import {buildTeamCopyExport} from './teamCopyExport';
 import {teamFetch} from './teamTransport';
-import {sendTeamPublication,type TeamUploadProgress} from './teamPublish';
+import {compressTeamPublication,sendTeamPublication,type TeamPublicationPackage,type TeamUploadProgress} from './teamPublish';
 import {localPublishedCategoryPath,publishedCategoryPath,acquirePublishedCategory} from './teamCategories';
 import {parseModelAsset} from './modelAssets';
 import {parseProject} from './project';
@@ -23,6 +23,15 @@ export interface TeamPublish {kind:'asset'|'scene';name:string;description:strin
 export class TeamServiceError extends Error {
  constructor(readonly status:number,message:string){super(message);this.name='TeamServiceError';}
 }
+/** Truncated, redacted body preview for non-JSON team responses (empty / HTML 502 / CF pages). */
+export function teamResponseBodyPreview(text:string,maxChars=200){
+ const collapsed=String(text??'').replace(/[\u0000-\u001f\u007f]+/g,' ').replace(/\s+/g,' ').trim();
+ const redacted=collapsed
+  .replace(/Bearer\s+[A-Za-z0-9._\-+=\/]+/gi,'Bearer [已隐藏]')
+  .replace(/"(access_?token|refresh_?token|token|password)"\s*:\s*"[^"]*"/gi,'"$1":"[已隐藏]"');
+ if(!redacted)return '空响应';
+ return redacted.length>maxChars?redacted.slice(0,maxChars)+'…':redacted;
+}
 const TEAM_ADDRESS_KEY='chat3d.team.address';
 export function teamAddress(value:string){const url=new URL(value);if(url.username||url.password||url.search||url.hash||url.pathname!=='/'||(url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(url.hostname))))throw Error('请输入 HTTPS 服务根地址（本机测试可用 HTTP localhost）');return url.origin;}
 export function defaultTeamServiceBase(){return configuredTeamServiceBase();}
@@ -35,16 +44,17 @@ export class TeamClient {
   if(!response.ok){let message='团队服务请求失败（HTTP '+response.status+'）';try{const data=await response.json();if(typeof data?.error==='string')message=data.error;}catch{/* Proxy errors need not be JSON. */}if(response.status===401&&this.token&&sharedClient===this){expireTeamSession(this);message='团队登录已失效，请重新登录。';}throw new TeamServiceError(response.status,message);}
   return response;
  }
- async request<T>(path:string,body?:unknown,onProgress?:(progress:TeamUploadProgress)=>void,serializedBody?:string):Promise<T>{
-  const serialized=serializedBody??(body===undefined?undefined:JSON.stringify(body));
-  const response=path==='publish'&&serialized!==undefined
-   ?await sendTeamPublication(this.base,this.token,serialized,onProgress,(body as TeamPublish).key)
-   :await teamFetch(this.base+'/api/team/'+path,{method:body===undefined?'GET':'POST',headers:{...(body===undefined?{}:{'Content-Type':'application/json'}),...(this.token?{Authorization:'Bearer '+this.token}:{})},body:serialized,signal:AbortSignal.timeout(60000),redirect:'error',credentials:'omit'});
+ async request<T>(path:string,body?:unknown,onProgress?:(progress:TeamUploadProgress)=>void,publication?:TeamPublicationPackage):Promise<T>{
+  const response=path==='publish'&&body!==undefined
+   ?await sendTeamPublication(this.base,this.token,publication??await compressTeamPublication(JSON.stringify(body)),onProgress,(body as TeamPublish).key)
+   :await teamFetch(this.base+'/api/team/'+path,{method:body===undefined?'GET':'POST',headers:{...(body===undefined?{}:{'Content-Type':'application/json'}),...(this.token?{Authorization:'Bearer '+this.token}:{})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(60000),redirect:'error',credentials:'omit'});
   const authentication=path==='login'||path.startsWith('login/');
+  const raw=await response.text();
   let data:unknown;
-  try{data=await response.json();}catch{
-   if(authentication)throw new TeamServiceError(response.status,`团队授权服务未返回 JSON（HTTP ${response.status}），请检查团队服务地址与 /api/team 路由；本地开发需配置 CHAT3D_TEAM_DEV_BASE。`);
-   throw Error('团队服务响应未完整返回，尚未确认操作结果；可重试同一项。');
+  try{if(!raw.length)throw new SyntaxError('empty');data=JSON.parse(raw);}catch{
+   const preview=teamResponseBodyPreview(raw);
+   if(authentication)throw new TeamServiceError(response.status,`团队授权服务未返回 JSON（HTTP ${response.status}，${preview}），请检查团队服务地址与 /api/team 路由；本地开发需配置 CHAT3D_TEAM_DEV_BASE。`);
+   throw Error(`团队服务响应未完整返回（HTTP ${response.status}，${preview}），尚未确认操作结果；可重试同一项。`);
   }
   if(!response.ok){
    if(response.status===401&&this.token&&sharedClient===this){expireTeamSession(this);throw new TeamServiceError(401,'团队登录已失效，请重新登录。');}
@@ -59,7 +69,7 @@ async loginWithPlatform(auth:{accessToken:string;tenantId:string}){const result=
  async logout(){const pending=this.request('logout',{});this.token='';this.user=undefined;await pending;}
  list(kind:'asset'|'scene',q=''){return this.request<TeamItem[]>('items?kind='+kind+'&q='+encodeURIComponent(q));}
  async read(item:TeamItem){const value=await this.request<TeamVersion>(`items/${encodeURIComponent(item.id)}/${item.version}`);if(value.id!==item.id||value.kind!==item.kind||value.version!==item.version)throw Error('团队服务返回的固定版本不匹配');return value;}
- publish(body:TeamPublish,onProgress?:(progress:TeamUploadProgress)=>void,serializedBody?:string){return this.request<{id:string;version:number}>('publish',body,onProgress,serializedBody);}
+ publish(body:TeamPublish,onProgress?:(progress:TeamUploadProgress)=>void,publication?:TeamPublicationPackage){return this.request<{id:string;version:number}>('publish',body,onProgress,publication);}
 }
 const sessionListeners=new Set<()=>void>();
 let sharedClient:TeamClient|undefined;
@@ -249,7 +259,7 @@ export function resolveTeamPublishTarget(client:TeamClient,source:TeamPublishSou
 export interface PreparedTeamPublication {
  source:TeamLocalSource;request:TeamPublish;serviceOrigin:string;userId:string;baselineFingerprint:string;sceneRevision?:number;
  status:'ready'|'running'|'success'|'error';error?:string;serverResult?:{id:string;version:number};
- upload?:TeamUploadProgress;bytes?:number;serializedBody?:string;startedAt?:number;endedAt?:number;
+ upload?:TeamUploadProgress;bytes?:number;publication?:TeamPublicationPackage;startedAt?:number;endedAt?:number;
 }
 export async function listTeamPublishSources(kind:'asset'|'scene'):Promise<TeamPublishSource[]>{
  assertLibraryReady();await flushWorkspace();if(useWorkspaceStore.getState().error)throw Error('请先修复本地保存错误');
@@ -292,7 +302,7 @@ export async function publishPreparedTeamBatch(client:TeamClient,entries:Prepare
  if(entries.some(e=>e.serviceOrigin!==client.base||e.userId!==client.user!.id))throw Error('团队登录已变化，请重新准备发布');
  for(const entry of entries){if(entry.status==='success')continue;entry.status='running';entry.error=undefined;entry.startedAt=Date.now();entry.endedAt=undefined;entry.upload={phase:'preparing',loaded:0,total:entry.bytes??0};onChange?.();
   try{
-   entry.serverResult??=await client.publish(entry.request,progress=>{entry.upload=progress;entry.bytes=progress.total;onChange?.();},entry.serializedBody);
+   entry.serverResult??=await client.publish(entry.request,progress=>{entry.upload=progress;entry.bytes=progress.total;onChange?.();},entry.publication);
    await saveTeamResourceLink({serviceOrigin:client.base,kind:entry.request.kind,teamItemId:entry.serverResult.id,teamVersion:entry.serverResult.version,teamName:entry.request.name,localId:entry.source.id,localVersion:entry.source.version,sceneRevision:entry.sceneRevision,baselineFingerprint:entry.baselineFingerprint,direction:'publish',active:true,status:'ready',createdAt:new Date().toISOString(),latestVersion:entry.serverResult.version});
    entry.status='success';
   }catch(error){entry.status='error';entry.error=error instanceof Error?error.message:'发布失败，可重试同一项';}entry.endedAt=Date.now();onChange?.();

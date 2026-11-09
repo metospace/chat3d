@@ -7,7 +7,7 @@ export type TeamPreparationWorkerRequest=
  |{type:'prepare';input:TeamPreparationInput;root?:PreparationWireValue}
  |{type:'fingerprint';root:PreparationWireValue}
  |{type:'savedFingerprint';input:Pick<TeamPreparationInput,'kind'|'name'|'description'|'category'|'asset'>;root?:PreparationWireValue};
-const scope=globalThis as unknown as {onmessage:((event:MessageEvent<TeamPreparationWorkerRequest>)=>void)|null;postMessage:(value:unknown)=>void};
+const scope=globalThis as unknown as {onmessage:((event:MessageEvent<TeamPreparationWorkerRequest>)=>void)|null;postMessage:(value:unknown,transfer?:Transferable[])=>void};
 const receiver=preparationReceiver();
 scope.onmessage=async event=>{
  try{
@@ -20,9 +20,9 @@ scope.onmessage=async event=>{
   const localPayload=input.asset?await readModelAsset(input.asset.id,input.asset.version):receiver.get(message.root);
   receiver.clear();
   const result=await constructTeamPreparation(input,localPayload,stage=>scope.postMessage({type:'progress',stage}));
-  // The body owns the frozen geometry. Returning it again as a cloned object
-  // would double memory and make the receiving UI thread deserialize the mesh.
-  const {payload:_,...metadata}=result.request;
-  scope.postMessage({type:'result',...result,request:metadata});
+  // Transfer the compressed bytes, not a cloned expanded JSON string or geometry.
+  const request=result.request;
+  const metadata={kind:request.kind,name:request.name,description:request.description,categoryPath:request.categoryPath,key:request.key,expectedVersion:request.expectedVersion,...(request.itemId?{itemId:request.itemId}:{})};
+  scope.postMessage({type:'result',...result,request:metadata},[result.publication.data.buffer as ArrayBuffer]);
  }catch(error){receiver.clear();scope.postMessage({type:'error',message:error instanceof Error?error.message:String(error)});}
 };

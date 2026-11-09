@@ -29,7 +29,29 @@ try{
  await a.publish({...request,name:'新版托盘',key:crypto.randomUUID(),itemId:first.id,expectedVersion:1});assert.deepEqual((await b.read(rows[0])).payload,payload);
  const copied=await api.copyTeamVersion(saved);const local=w.useWorkspaceStore.getState().sessions.find(s=>s.snapshot.doc.projectId===copied);assert.ok(local);assert.equal(local.snapshot.doc.nodes[0].modelAsset.version,1);assert.equal(local.snapshot.doc.nodes[0].modelAsset.id,asset.id);assert.deepEqual(local.snapshot.doc.nodes,scene.nodes);assert.notEqual(copied,scene.projectId);console.log('PASS scene reuse embeds geometry and pins prior asset version after team update');
  const backup=w.exportWorkspaceBackup(),before=w.useWorkspaceStore.getState().sessions.length;w.importWorkspaceBackup(backup);await w.flushWorkspace();assert.ok(w.useWorkspaceStore.getState().sessions.length>before);const library=await storage.exportAssetLibrary();await storage.importAssetLibrary(JSON.stringify(library));assert.deepEqual(await storage.readModelAsset(asset.id,1),asset);console.log('PASS existing local workspace and asset backups remain compatible');
- const originalFetch=globalThis.fetch;let lost=true;globalThis.fetch=async(...args)=>{const response=await originalFetch(...args);if(lost&&String(args[0]).endsWith('/publish')){lost=false;throw Error('simulated response loss');}return response;};
- try{const retry={...request,key:crypto.randomUUID(),name:'重试测试'};await assert.rejects(a.publish(retry),/response loss/);await a.publish(retry);assert.equal((await b.list('asset','重试测试')).length,1);}finally{globalThis.fetch=originalFetch;}console.log('PASS lost response retry creates exactly one publication');
+ const originalFetch=globalThis.fetch;let lost=true;globalThis.fetch=async(...args)=>{const response=await originalFetch(...args);if(lost&&String(args[0]).endsWith('/complete')){lost=false;throw Error('simulated response loss');}return response;};
+ try{const retry={...request,key:crypto.randomUUID(),name:'重试测试'};await assert.rejects(a.publish(retry),/尚未确认服务器是否保存/);await a.publish(retry);assert.equal((await b.list('asset','重试测试')).length,1);}finally{globalThis.fetch=originalFetch;}console.log('PASS lost response retry creates exactly one publication');
+ const preview=api.teamResponseBodyPreview(' <html>\nError 502 Bad Gateway Bearer secret-token-value </html> ');
+ assert.match(preview,/502 Bad Gateway/);assert.match(preview,/Bearer \[已隐藏\]/);assert.doesNotMatch(preview,/secret-token-value/);
+ assert.equal(api.teamResponseBodyPreview(''),'空响应');assert.equal(api.teamResponseBodyPreview('x'.repeat(250)).length,201);
+ const originalPublishFetch=globalThis.fetch;
+ globalThis.fetch=async(input,...rest)=>{
+  if(String(input).includes('/api/team/publish'))return new Response('<html><title>cf</title><body>error code: 502</body></html>',{status:502,headers:{'Content-Type':'text/html'}});
+  return originalPublishFetch(input,...rest);
+ };
+ try{
+  await a.login('alice','isolated-test-password-a');
+  await assert.rejects(a.publish({...request,key:crypto.randomUUID(),name:'断流诊断'}),error=>{
+   assert.match(error.message,/HTTP 502/);assert.match(error.message,/error code: 502|cf/);assert.match(error.message,/可重试同一项/);
+   return true;
+  });
+ }finally{globalThis.fetch=originalPublishFetch;}
+ globalThis.fetch=async(input,...rest)=>{
+  if(String(input).includes('/api/team/publish'))return new Response('',{status:200,headers:{'Content-Type':'application/json'}});
+  return originalPublishFetch(input,...rest);
+ };
+ try{await assert.rejects(a.publish({...request,key:crypto.randomUUID(),name:'空包诊断'}),/HTTP 200.*空响应/);}
+ finally{globalThis.fetch=originalPublishFetch;}
+ console.log('PASS incomplete team responses include HTTP status and redacted body preview');
  await a.logout();await assert.rejects(a.list('asset'),/登录/);
 }finally{if(server)await new Promise(resolve=>server.close(resolve));team.close();await vite.close();dom.window.close();await rm(dir,{recursive:true,force:true});}

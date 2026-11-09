@@ -5,7 +5,7 @@ use tauri::ipc::{Channel, InvokeBody, JavaScriptChannelId, Request};
 use tauri_plugin_http::reqwest::{self, header, redirect, Body, Client};
 use url::{Host, Url};
 
-const REQUEST_LIMIT: usize = 416 * 1024 * 1024;
+const REQUEST_LIMIT: usize = 500 * 1024 * 1024;
 const RESPONSE_LIMIT: usize = 1024 * 1024;
 const UPLOAD_CHUNK_SIZE: usize = 64 * 1024;
 const ORIGIN_ERROR: &str = "请输入 HTTPS 服务根地址（本机测试可用 HTTP localhost）";
@@ -75,8 +75,15 @@ fn authorization(token: &str) -> Result<header::HeaderValue, String> {
 }
 
 fn validate_body(body: &[u8]) -> Result<(), String> {
-    if body.len() > REQUEST_LIMIT {
-        return Err("团队发布内容超过 416 MiB 限制".into());
+    validate_body_with_limit(body, REQUEST_LIMIT)
+}
+
+fn validate_body_with_limit(body: &[u8], max_bytes: usize) -> Result<(), String> {
+    if body.len() > max_bytes {
+        return Err(format!(
+            "团队发布内容超过 {} MiB 限制",
+            max_bytes / (1024 * 1024)
+        ));
     }
     let json_space = |byte: &u8| matches!(*byte, b' ' | b'\t' | b'\n' | b'\r');
     let start = body.iter().position(|byte| !json_space(byte));
@@ -86,7 +93,7 @@ fn validate_body(body: &[u8]) -> Result<(), String> {
     };
     // The caller already serialized TeamPublish. Check the object envelope only;
     // semantic JSON validation belongs to the publish service, without building
-    // another potentially 416 MiB object tree in the desktop process.
+    // another potentially 500 MiB object tree in the desktop process.
     if body[start] != b'{' || body[end] != b'}' || start >= end {
         return Err("团队发布内容必须是非空 JSON 对象".into());
     }
@@ -247,13 +254,13 @@ mod tests {
             assert!(validate_body(body).is_err());
         }
         assert!(validate_body(b" \n{\"key\":\"test\",\"payload\":{}}\t").is_ok());
-        assert_eq!(REQUEST_LIMIT, 416 * 1024 * 1024);
-        // Allocate the overflow byte up front instead of doubling a full buffer on push.
-        let mut body = vec![b' '; REQUEST_LIMIT + 1];
+        assert_eq!(REQUEST_LIMIT, 500 * 1024 * 1024);
+        let limit = 2 * 1024 * 1024;
+        let mut body = vec![b' '; limit + 1];
         body[..6].copy_from_slice(b"{\"x\":1");
-        body[REQUEST_LIMIT - 1] = b'}';
-        assert!(validate_body(&body[..REQUEST_LIMIT]).is_ok());
-        assert!(validate_body(&body).unwrap_err().contains("416 MiB"));
+        body[limit - 1] = b'}';
+        assert!(validate_body_with_limit(&body[..limit], limit).is_ok());
+        assert!(validate_body_with_limit(&body, limit).unwrap_err().contains("2 MiB"));
     }
 
     #[test]

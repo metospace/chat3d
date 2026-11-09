@@ -3,7 +3,7 @@ import { SceneDocument, SCHEMA_VERSION, validateDocument } from './types';
 import {validPublishedCategoryPath} from './teamCategories';
 
 export const MAX_PROJECT_BYTES = 400 * 1024 * 1024;
-export const MAX_TEAM_SCENE_BYTES = MAX_PROJECT_BYTES;
+export const MAX_TEAM_SCENE_BYTES = 500 * 1024 * 1024;
 export const PROJECT_SIZE_LIMIT = `${MAX_PROJECT_BYTES / (1024 * 1024)} MiB`;
 export const TEAM_SCENE_SIZE_LIMIT = `${MAX_TEAM_SCENE_BYTES / (1024 * 1024)} MiB`;
 const projectSizeError = (bytes: number) => `项目文件超过 ${bytes / (1024 * 1024)} MiB`;

@@ -10,7 +10,8 @@ import {PHYSICAL_MATERIAL_KEYS} from '../domain/physicalMaterial';
 export const MAX_GLB_BYTES=512*1024*1024;
 export const GLB_SIZE_ERROR=`GLB文件不能超过${MAX_GLB_BYTES/1024/1024} MiB`;
 export function assertGlbSize(size:number):void{if(size>MAX_GLB_BYTES)throw Error(GLB_SIZE_ERROR);}
-export function inspectGlbBytes(data:ArrayBuffer){
+export interface GlbImportOptions {fitTextures?:boolean}
+export async function inspectGlbBytes(data:ArrayBuffer,options:GlbImportOptions={}){
  assertGlbSize(data.byteLength);if(data.byteLength<20)throw Error('GLB文件头不完整');const view=new DataView(data);
  if(view.getUint32(0,true)!==0x46546c67||view.getUint32(4,true)!==2||view.getUint32(8,true)!==data.byteLength)throw Error('仅支持完整的GLB 2.0文件');
  let offset=12,json:any=null,bin:Uint8Array|undefined;
@@ -20,11 +21,11 @@ export function inspectGlbBytes(data:ArrayBuffer){
 
  if(json.skins?.length)throw Error('当前不导入骨骼角色，请先烘焙为静态可分部件模型');
  if((json.extensionsRequired??[]).some((n:string)=>!['KHR_materials_unlit','KHR_materials_ior','KHR_materials_specular','KHR_materials_emissive_strength','KHR_texture_transform','KHR_materials_clearcoat','KHR_materials_transmission','KHR_materials_volume'].includes(n)))throw Error('模型包含当前不支持的必需扩展或压缩，请导出普通GLB');
- const prepared=prepareGlbTextures(json,bin);return {hasAnimation:!!json.animations?.length,hasTextures:!!json.images?.length,json:prepared.clean,materialMaps:prepared.materials,bin};
+ const prepared=await prepareGlbTextures(json,bin,options);return {hasAnimation:!!json.animations?.length,hasTextures:!!json.images?.length,json:prepared.clean,materialMaps:prepared.materials,bin};
 }
 export type GlbImportStage='checking'|'parsing'|'converting'|'validating';
-export async function importGlb(data:ArrayBuffer,name:string,onStage?:(stage:GlbImportStage)=>void|Promise<void>):Promise<{doc:SceneDocument;warnings:string[]}>{
- await onStage?.('checking');const info=inspectGlbBytes(data);const manager=new LoadingManager();manager.setURLModifier(()=>{throw Error('导入不允许请求外部资源');});const loader=new GLTFLoader(manager);await onStage?.('parsing');const gltf=await loader.parseAsync(info.hasTextures?packGlb(info.json,info.bin):data,'');
+export async function importGlb(data:ArrayBuffer,name:string,onStage?:(stage:GlbImportStage)=>void|Promise<void>,options:GlbImportOptions={}):Promise<{doc:SceneDocument;warnings:string[]}>{
+ await onStage?.('checking');const info=await inspectGlbBytes(data,options);const manager=new LoadingManager();manager.setURLModifier(()=>{throw Error('导入不允许请求外部资源');});const loader=new GLTFLoader(manager);await onStage?.('parsing');const gltf=await loader.parseAsync(info.hasTextures?packGlb(info.json,info.bin):data,'');
  const doc:SceneDocument={schemaVersion:1,projectId:makeId(),revision:0,unit:'m',upAxis:'Y',nodes:[],materials:[],assets:[]};const materials=new Map<string,string>(),assemblies=new Map<string,string>();
  let singularMeshes=0;
  const materialId=(m:MeshStandardMaterial)=>{if(materials.has(m.uuid))return materials.get(m.uuid)!;const id=makeId();const material:Material={id,baseColor:'#'+(m.color??new Color('#a5abb4')).getHexString(),roughness:m.roughness??.55,metalness:m.metalness??0,opacity:m.opacity??1,transparent:m.transparent,doubleSided:m.side===2,alphaTest:m.alphaTest,vertexColors:m.vertexColors};if(m instanceof MeshPhysicalMaterial){for(const key of PHYSICAL_MATERIAL_KEYS)material[key]=m[key];material.specularColor='#'+m.specularColor.getHexString();}const association=gltf.parser.associations.get(m) as {materials?:number}|undefined;const imported=association?.materials!==undefined?info.materialMaps[association.materials]:undefined;if(imported&&Object.keys(imported.maps).length){material.maps=imported.maps;material.normalScale=imported.normalScale;}if(m.emissive){material.emissive='#'+m.emissive.getHexString();material.emissiveIntensity=m.emissiveIntensity??1;}doc.materials.push(material);materials.set(m.uuid,id);return id;};

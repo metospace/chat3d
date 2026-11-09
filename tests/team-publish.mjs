@@ -1,50 +1,68 @@
 import assert from 'node:assert/strict';
+import {createHash,randomBytes} from 'node:crypto';
+import {gunzipSync,gzipSync} from 'node:zlib';
+import {DatabaseSync} from 'node:sqlite';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {createServer} from 'vite';
-import {mockIPC,clearMocks} from '@tauri-apps/api/mocks';
-const vite=await createServer({configFile:false,cacheDir:`node_modules/.vite-team-publish-${process.pid}`,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true,ws:false,watch:null},appType:'custom'}),originalFetch=globalThis.fetch,originalWindow=globalThis.window,originalTauri=globalThis.isTauri,originalSetTimeout=globalThis.setTimeout,originalClearTimeout=globalThis.clearTimeout;
+import {openPublicationUploads,TEAM_UPLOAD_MAX_BYTES} from '../server/team/publishUploads.mjs';
+const vite=await createServer({configFile:false,cacheDir:`node_modules/.vite-team-publish-${process.pid}`,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true,ws:false,watch:null},appType:'custom'}),originalFetch=globalThis.fetch,originalSetTimeout=globalThis.setTimeout,originalClearTimeout=globalThis.clearTimeout;
+const dir=await mkdtemp(join(tmpdir(),'team-gzip-')),db=new DatabaseSync(':memory:');
 try{
- const {sendTeamPublication,TEAM_PUBLISH_TIMEOUT_MS}=await vite.ssrLoadModule('/src/domain/teamPublish.ts');
- const body=JSON.stringify({key:'same-publication-key',payload:'中文模型'.repeat(100000)}),expected=new TextEncoder().encode(body),stages=[];let calls=0,channel;
- globalThis.isTauri=true;globalThis.window={crypto:globalThis.crypto};globalThis.fetch=()=>{throw Error('No browser fallback allowed');};
- mockIPC((command,args,options)=>{assert.equal(command,'desktop_team_publish');assert.ok(args instanceof Uint8Array);assert.deepEqual(args,expected);calls++;return {status:200,body:JSON.stringify({id:'remote-fixed',version:1})};});
- const response=await sendTeamPublication('https://team.example','session-token',body,p=>stages.push(p));
- assert.deepEqual(await response.json(),{id:'remote-fixed',version:1});assert.equal(calls,1);assert.equal(stages[0].total,expected.byteLength);
- console.log('PASS desktop publication sends exact UTF-8 bytes without JSON number-array expansion or browser fallback');
- mockIPC(()=>{throw Error('尚未确认是否发布成功。');});await assert.rejects(sendTeamPublication('https://team.example','token',body),/尚未确认/);
- mockIPC(()=>({status:401,body:'{"error":"团队登录已失效"}'}));assert.equal((await sendTeamPublication('https://team.example','token',body)).status,401);
- console.log('PASS native failures do not automatically retry and HTTP session failures remain visible');
- clearMocks();globalThis.isTauri=false;
- let expire,sentSignal;const deadlineTimer=Symbol('publication-deadline');globalThis.setTimeout=(fn,ms,...args)=>{if(ms!==TEAM_PUBLISH_TIMEOUT_MS)return originalSetTimeout(fn,ms,...args);expire=fn;return deadlineTimer;};globalThis.clearTimeout=timer=>{if(timer!==deadlineTimer)originalClearTimeout(timer);};
- globalThis.fetch=async(_url,init)=>{sentSignal=init.signal;assert.equal(init.redirect,'error');assert.equal(init.body,body);assert.equal(sentSignal.aborted,false);return Response.json({id:'remote-fixed',version:1});};
- assert.deepEqual(await (await sendTeamPublication('https://team.example','token',body)).json(),{id:'remote-fixed',version:1});assert.equal(sentSignal.aborted,false);
- globalThis.fetch=(_url,init)=>new Promise((resolve,reject)=>init.signal.addEventListener('abort',()=>reject(Error('Request canceled')),{once:true}));
- const timed=sendTeamPublication('https://team.example','token',body);expire();await assert.rejects(timed,/尚未确认/);
- console.log('PASS publication deadline is distinct from query timeout and explains ambiguous commit without auto retry');
- // Large publications must never cross the raw native IPC boundary.
- globalThis.setTimeout=originalSetTimeout;globalThis.clearTimeout=originalClearTimeout;
- const {createHash}=await import('node:crypto');
- const largeKey='large-publication-key-0001',largeBody=JSON.stringify({payload:'中😀文'.repeat(950000),key:largeKey}),largeBytes=Buffer.from(largeBody),chunkBytes=1024*1024;
- const hash=value=>createHash('sha256').update(value).digest('hex');
- const fingerprint=hash(Array.from({length:Math.ceil(largeBytes.length/chunkBytes)},(_,index)=>hash(largeBytes.subarray(index*chunkBytes,(index+1)*chunkBytes))).join(''));
- let offset=0,failOnce=true,completed=false,largeCalls=0;const largeStages=[],uploads=[];
- globalThis.isTauri=true;mockIPC(()=>{throw Error('Large upload must not use raw native IPC');});
+ const {sendTeamPublication,compressTeamPublication,readTeamPublication,TEAM_PUBLISH_TIMEOUT_MS,TEAM_PUBLISH_MAX_BYTES}=await vite.ssrLoadModule('/src/domain/teamPublish.ts');
+ const chunkBytes=1024*1024,hash=value=>createHash('sha256').update(value).digest('hex');
+ const fingerprint=bytes=>hash(Array.from({length:Math.ceil(bytes.length/chunkBytes)},(_,index)=>hash(bytes.subarray(index*chunkBytes,(index+1)*chunkBytes))).join(''));
+ const key='gzip-publication-key-0001',body=JSON.stringify({key,payload:'x'.repeat(256*1024-23)+'😀中é文'.repeat(100000),noise:randomBytes(3*1024*1024).toString('base64')}),publication=await compressTeamPublication(body);
+ assert.equal(publication.encoding,'gzip');assert.deepEqual(publication,await compressTeamPublication(body));assert.equal(gunzipSync(publication.data).toString('utf8'),body);assert.deepEqual(readTeamPublication(publication),JSON.parse(body));assert.equal(publication.digest,fingerprint(publication.data));assert.ok(publication.data.length>2*chunkBytes);assert.ok(publication.data.length<Buffer.byteLength(body));
+ for(const value of ['', 'x'.repeat(256*1024-1)+'😀', '中😀文', '\ud800'])assert.equal(gunzipSync((await compressTeamPublication(value)).data).toString('utf8'),Buffer.from(value).toString('utf8'));
+ assert.equal(TEAM_PUBLISH_MAX_BYTES,500*1024*1024);assert.equal(TEAM_UPLOAD_MAX_BYTES,TEAM_PUBLISH_MAX_BYTES);
+ await assert.rejects(compressTeamPublication('x'.repeat(TEAM_PUBLISH_MAX_BYTES+1)),/500 MiB/);
+ await assert.rejects(sendTeamPublication('https://team.example','token',{encoding:'gzip',data:{byteLength:TEAM_PUBLISH_MAX_BYTES+1},digest:'0'.repeat(64)},undefined,key),/500 MiB/);
+ console.log('PASS deterministic gzip, SHA-256 chunk fingerprint, surrogate-safe exact UTF-8 and 500 MiB package bounds');
+ let offset=0,failOnce=true,completed=false,calls=0;const stages=[],uploaded=[];
  globalThis.fetch=async(url,init)=>{
-  largeCalls++;assert.equal(init.redirect,'error');assert.equal(init.credentials,'omit');assert.equal(init.headers.Authorization,'Bearer session-token');assert.ok(Buffer.byteLength(init.body)<2*1024*1024);assert.equal(init.signal.aborted,false);
-  const data=JSON.parse(init.body);
-  if(url.endsWith('/start')){assert.deepEqual(data,{key:largeKey,total:largeBytes.length,digest:fingerprint});return Response.json({uploadId:'upload-large-1',offset,total:largeBytes.length,...(completed?{result:{id:'large-fixed',version:1}}:{})});}
-  if(url.endsWith('/chunk')){const chunk=Buffer.from(data.data,'base64');assert.equal(data.offset,offset);assert.deepEqual(chunk,largeBytes.subarray(offset,offset+chunk.length));offset+=chunk.length;uploads.push(data.offset);if(failOnce){failOnce=false;throw Error('Failed to fetch at https://secret.invalid/?token=hidden');}return Response.json({uploadId:'upload-large-1',offset,total:largeBytes.length});}
-  assert.ok(url.endsWith('/complete'));assert.equal(offset,largeBytes.length);completed=true;return Response.json({id:'large-fixed',version:1});
+  calls++;assert.equal(init.redirect,'error');assert.equal(init.credentials,'omit');assert.equal(init.headers.Authorization,'Bearer session-token');assert.ok(Buffer.byteLength(init.body)<2*1024*1024);assert.equal(init.signal.aborted,false);
+  const data=JSON.parse(init.body),state=()=>({uploadId:'upload-gzip-1',offset,total:publication.data.length,encoding:'gzip',...(completed?{result:{id:'fixed-result',version:1}}:{})});
+  if(url.endsWith('/start')){assert.deepEqual(data,{key,total:publication.data.length,digest:publication.digest,encoding:'gzip'});return Response.json(state());}
+  if(url.endsWith('/chunk')){const chunk=Buffer.from(data.data,'base64');assert.equal(data.offset,offset);assert.deepEqual(chunk,Buffer.from(publication.data.subarray(offset,offset+chunk.length)));uploaded.push(offset);offset+=chunk.length;if(failOnce){failOnce=false;throw Error('Failed at https://secret.invalid/?token=hidden');}return Response.json(state());}
+  assert.ok(url.endsWith('/complete'));assert.equal(offset,publication.data.length);completed=true;return Response.json({id:'fixed-result',version:1});
  };
- await assert.rejects(sendTeamPublication('https://team.example/private?token=hidden','session-token',largeBody,p=>largeStages.push(p),largeKey),error=>{assert.match(error.message,/https:\/\/team.example/);assert.match(error.message,/代理/);assert.doesNotMatch(error.message,/hidden|secret\.invalid|private/);return true;});
- assert.equal(largeCalls,2,'failed request is not automatically retried');assert.equal(offset,chunkBytes);assert.equal(largeStages.filter(p=>p.phase==='uploading').at(-1).loaded,0,'only server-confirmed progress advances');
- assert.deepEqual(await (await sendTeamPublication('https://team.example','session-token',largeBody,p=>largeStages.push(p))).json(),{id:'large-fixed',version:1});assert.deepEqual(uploads,[0,...Array.from({length:Math.ceil(largeBytes.length/chunkBytes)-1},(_,index)=>(index+1)*chunkBytes)]);
- assert.equal(largeStages.at(-1).phase,'processing');assert.equal(largeStages.at(-1).loaded,largeBytes.length);
- const callsBefore=largeCalls;assert.deepEqual(await (await sendTeamPublication('https://team.example','session-token',largeBody,undefined,largeKey)).json(),{id:'large-fixed',version:1});assert.equal(largeCalls,callsBefore+1,'completed response-loss retry only queries the original upload');
- console.log('PASS large UTF-8 publications chunk, report confirmed bytes, resume after partial failure and skip completed uploads without native number arrays');
- globalThis.fetch=async()=>new Response('not deployed',{status:404});await assert.rejects(sendTeamPublication('https://team.example','session-token',largeBody,undefined,largeKey),/升级.*publish-uploads/);
- globalThis.fetch=async()=>Response.json({error:'团队登录已失效'},{status:401});assert.equal((await sendTeamPublication('https://team.example','bad',largeBody,undefined,largeKey)).status,401);
- globalThis.setTimeout=(fn,ms,...args)=>{if(ms!==TEAM_PUBLISH_TIMEOUT_MS)return originalSetTimeout(fn,ms,...args);expire=fn;return deadlineTimer;};globalThis.clearTimeout=timer=>{if(timer!==deadlineTimer)originalClearTimeout(timer);};
- globalThis.fetch=(_url,init)=>new Promise((resolve,reject)=>{expire();init.signal.addEventListener('abort',()=>reject(Error('Request canceled')),{once:true});if(init.signal.aborted)reject(Error('Request canceled'));});
- await assert.rejects(sendTeamPublication('https://team.example','token',largeBody,undefined,largeKey),/15 分钟.*https:\/\/team.example/);
- console.log('PASS chunk authentication, explicit deployment requirement and overall cancellation deadline without fallback');
-}finally{clearMocks();globalThis.fetch=originalFetch;globalThis.setTimeout=originalSetTimeout;globalThis.clearTimeout=originalClearTimeout;if(originalWindow===undefined)delete globalThis.window;else globalThis.window=originalWindow;if(originalTauri===undefined)delete globalThis.isTauri;else globalThis.isTauri=originalTauri;await vite.close();}
+ await assert.rejects(sendTeamPublication('https://team.example/private?token=hidden','session-token',publication,p=>stages.push(p),key),error=>{assert.match(error.message,/https:\/\/team.example/);assert.match(error.message,/代理/);assert.doesNotMatch(error.message,/hidden|secret\.invalid|private/);return true;});
+ assert.equal(calls,2);assert.equal(offset,chunkBytes);assert.equal(stages.filter(p=>p.phase==='uploading').at(-1).loaded,0);
+ assert.deepEqual(await (await sendTeamPublication('https://team.example','session-token',publication,p=>stages.push(p),key)).json(),{id:'fixed-result',version:1});assert.deepEqual(uploaded,Array.from({length:Math.ceil(publication.data.length/chunkBytes)},(_,index)=>index*chunkBytes));assert.equal(stages.at(-1).loaded,publication.data.length);
+ const before=calls;await sendTeamPublication('https://team.example','session-token',publication,undefined,key);assert.equal(calls,before+1);
+ const tiny=await compressTeamPublication(JSON.stringify({key,payload:'小模型'}));let tinyCalls=0;
+ globalThis.fetch=async(url,init)=>{tinyCalls++;const data=JSON.parse(init.body);if(url.endsWith('/complete'))return Response.json({id:'tiny-result',version:1});return Response.json({uploadId:'tiny-upload',offset:url.endsWith('/start')?0:tiny.data.length,total:tiny.data.length,encoding:'gzip'});};
+ await sendTeamPublication('https://team.example','token',tiny,undefined,key);assert.equal(tinyCalls,3,'small packages use start/chunk/complete too');
+ globalThis.fetch=async()=>new Response('not deployed',{status:404});await assert.rejects(sendTeamPublication('https://team.example','token',tiny,undefined,key),/升级.*publish-uploads/);
+ globalThis.fetch=async()=>Response.json({error:'团队登录已失效'},{status:401});assert.equal((await sendTeamPublication('https://team.example','bad',tiny,undefined,key)).status,401);
+ for(const encoding of [undefined,'json']){globalThis.fetch=async()=>Response.json({uploadId:'wrong-encoding',offset:0,total:tiny.data.length,encoding});await assert.rejects(sendTeamPublication('https://team.example','token',tiny,undefined,key),/状态无效/);}
+ globalThis.fetch=async()=>Response.json({uploadId:'invalid-confirmation',offset:0,total:tiny.data.length,encoding:'gzip'});await assert.rejects(sendTeamPublication('https://team.example','token',tiny,undefined,key),/未确认/);
+ let expire;const deadlineTimer=Symbol('publication-deadline');globalThis.setTimeout=(fn,ms,...args)=>{if(ms!==TEAM_PUBLISH_TIMEOUT_MS)return originalSetTimeout(fn,ms,...args);expire=fn;return deadlineTimer;};globalThis.clearTimeout=timer=>{if(timer!==deadlineTimer)originalClearTimeout(timer);};
+ globalThis.fetch=(_url,init)=>new Promise((_resolve,reject)=>{init.signal.addEventListener('abort',()=>reject(Error('Request canceled')),{once:true});expire();});
+ await assert.rejects(sendTeamPublication('https://team.example','token',tiny,undefined,key),/15 分钟.*https:\/\/team.example/);
+ console.log('PASS every-size chunks, confirmed compressed-byte progress, failed-only resume, completed retry, encoding checks, missing deployment and timeout without fallback');
+ // Migrate a database containing an unfinished legacy JSON upload, retaining its key binding.
+ db.exec('CREATE TABLE publish_uploads(id TEXT PRIMARY KEY,user TEXT NOT NULL,key TEXT NOT NULL,digest TEXT NOT NULL,total INTEGER NOT NULL,offset INTEGER NOT NULL DEFAULT 0,result TEXT,UNIQUE(user,key))');
+ const legacyKey='legacy-publication-key',legacyBytes=Buffer.from(JSON.stringify({key:legacyKey,payload:'旧上传'}));
+ db.prepare('INSERT INTO publish_uploads(id,user,key,digest,total) VALUES(?,?,?,?,?)').run('legacy-upload','alice',legacyKey,fingerprint(legacyBytes),legacyBytes.length);
+ const uploads=openPublicationUploads(db,dir),user={id:'alice',role:'member'};
+ const upload=async(bytes,encoding='gzip',uploadKey=crypto.randomUUID())=>{
+  const start=uploads.start(user,{key:uploadKey,total:bytes.length,digest:fingerprint(bytes),encoding});
+  for(let cursor=start.offset;cursor<bytes.length;cursor+=chunkBytes){const part=bytes.subarray(cursor,cursor+chunkBytes);const confirmed=uploads.chunk(user,start.uploadId,{offset:cursor,data:Buffer.from(part).toString('base64')});assert.equal(confirmed.offset,cursor+part.length);assert.equal(confirmed.encoding,encoding);}
+  return start;
+ };
+ const legacy=await upload(legacyBytes,'json',legacyKey);assert.equal(legacy.uploadId,'legacy-upload');assert.deepEqual(await uploads.complete(user,legacy.uploadId,async value=>({id:value.payload,version:1})),{id:'旧上传',version:1});
+ const valid=await upload(Buffer.from(tiny.data),'gzip',key);let publishCount=0;const publish=async value=>{publishCount++;assert.equal(value.payload,'小模型');return {id:'server-fixed',version:1};};
+ assert.deepEqual(await uploads.complete(user,valid.uploadId,publish),{id:'server-fixed',version:1});await uploads.complete(user,valid.uploadId,publish);assert.equal(publishCount,1);
+ assert.throws(()=>uploads.start(user,{key,total:tiny.data.length,digest:tiny.digest,encoding:'json'}),error=>error.status===409);
+ assert.throws(()=>uploads.start({id:'alice',role:'viewer'},{key,total:1,digest:'0'.repeat(64),encoding:'gzip'}),error=>error.status===403);
+ assert.throws(()=>uploads.start(user,{key:crypto.randomUUID(),total:TEAM_UPLOAD_MAX_BYTES+1,digest:'0'.repeat(64),encoding:'gzip'}),error=>error.status===400);
+ assert.equal(uploads.start(user,{key:crypto.randomUUID(),total:TEAM_UPLOAD_MAX_BYTES,digest:'0'.repeat(64),encoding:'gzip'}).total,TEAM_UPLOAD_MAX_BYTES);
+ for(const bytes of [Buffer.from('not gzip'),Buffer.from(tiny.data).subarray(0,tiny.data.length-4),gzipSync(Buffer.from('{broken'))]){const invalid=await upload(bytes);await assert.rejects(uploads.complete(user,invalid.uploadId,publish),error=>error.status===400);}
+ // Concatenated gzip members expand beyond the cap without allocating an enormous input.
+ const member=gzipSync(Buffer.alloc(chunkBytes)),bomb=await upload(Buffer.concat(Array(501).fill(member)));
+ await assert.rejects(uploads.complete(user,bomb.uploadId,publish),error=>error.status===400&&/500 MiB/.test(error.message));
+ console.log('PASS persisted JSON migration, gzip completion/idempotency, immutable encoding, permissions, declared bounds and corrupt/bomb rejection');
+}finally{globalThis.fetch=originalFetch;globalThis.setTimeout=originalSetTimeout;globalThis.clearTimeout=originalClearTimeout;db.close();await rm(dir,{recursive:true,force:true});await vite.close();}

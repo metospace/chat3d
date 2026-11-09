@@ -5,7 +5,7 @@ import {dirname} from 'node:path';
 import {pipeline} from 'node:stream/promises';
 import {openDashboardStore} from './dashboard.mjs';
 import {openPublicationUploads} from './publishUploads.mjs';
-const MAX_HTTP_BODY_BYTES=416*1024*1024;
+const MAX_HTTP_BODY_BYTES=500*1024*1024;
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const fail=(status,message)=>{throw Object.assign(Error(message),{status});};
 const categoryId=/^category-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
