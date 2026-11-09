@@ -30,12 +30,12 @@ try{
  ui.unmount();const publishClient=api.getTeamSession(),originalPublish=publishClient.publish;let uploadProgress,finishUpload;
  publishClient.publish=(request,onProgress)=>{uploadProgress=onProgress;return new Promise(resolve=>finishUpload=()=>resolve({id:'progress-test',version:1}));};
  ui=render(React.createElement(TeamTransferDialog,{kind:'asset',mode:'publish',sources:[{id:asset.id,version:1}],onClose:()=>{}}));dialog=ui.getByRole('dialog');
- await waitFor(()=>assert.ok(within(dialog).getByRole('checkbox',{name:'发布 隔离测试资产'})));
- fireEvent.click(within(dialog).getByRole('button',{name:'准备发布'}));await waitFor(()=>assert.ok(within(dialog).getByRole('button',{name:'确认发布'})));fireEvent.click(within(dialog).getByRole('button',{name:'确认发布'}));await waitFor(()=>assert.ok(uploadProgress));
+ await waitFor(()=>assert.ok(within(dialog).getByRole('checkbox',{name:'发布 隔离测试资产'})));await waitFor(()=>assert.equal(within(dialog).getByRole('combobox',{name:'隔离测试资产 发布位置'}).value,'__choose__'));
+ fireEvent.change(within(dialog).getByRole('combobox',{name:'隔离测试资产 发布位置'}),{target:{value:''}});fireEvent.click(within(dialog).getByRole('button',{name:'准备发布'}));assert.equal(within(dialog).getByRole('checkbox',{name:'发布 隔离测试资产'}).disabled,true);assert.equal(within(dialog).getByRole('combobox',{name:'隔离测试资产 发布位置'}).disabled,true);assert.equal(within(dialog).getByRole('button',{name:'关闭团队传输'}).disabled,true);assert.equal(within(dialog).getByRole('progressbar',{name:/准备发布资产/}).hasAttribute('value'),false);await waitFor(()=>assert.ok(within(dialog).getByRole('button',{name:'确认发布'})));fireEvent.click(within(dialog).getByRole('button',{name:'确认发布'}));await waitFor(()=>assert.ok(uploadProgress));
  await act(async()=>uploadProgress({phase:'uploading',loaded:45,total:100}));
- assert.equal(within(dialog).getByRole('progressbar').getAttribute('value'),'45');assert.equal(within(dialog).queryByText('已发布 v1'),null);
+ assert.equal(within(dialog).getByRole('progressbar',{name:/上传进度$/}).getAttribute('value'),'45');assert.equal(within(dialog).queryByText('已发布 v1'),null);
  await act(async()=>uploadProgress({phase:'processing',loaded:100,total:100}));
- assert.equal(within(dialog).getByRole('progressbar').hasAttribute('value'),false);assert.equal(within(dialog).queryByText('已发布 v1'),null);
+ assert.equal(within(dialog).getByRole('progressbar',{name:/服务器处理中$/}).hasAttribute('value'),false);assert.equal(within(dialog).queryByText('已发布 v1'),null);
  await act(async()=>finishUpload());await waitFor(()=>assert.ok(within(dialog).getByText('已发布 v1')));assert.equal(within(dialog).queryByRole('progressbar'),null);
  publishClient.publish=originalPublish;ui.unmount();ui=render(React.createElement(TeamStudioPage));await waitFor(()=>assert.ok(ui.getByRole('checkbox',{name:'选择 团队资产甲'})));
  console.log('PASS upload byte progress is distinct from server processing and only confirmed publication becomes success');

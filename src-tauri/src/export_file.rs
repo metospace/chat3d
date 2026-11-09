@@ -64,6 +64,7 @@ fn export_filter(kind: &str, filename: &str) -> Result<(&'static str, &'static s
         "html" => ("HTML", "html"),
         "glb" => ("GLB", "glb"),
         "json" => ("JSON", "json"),
+        "zip" => ("ZIP", "zip"),
         _ => return Err("不支持的导出类型".into()),
     };
     if filename.trim().is_empty()

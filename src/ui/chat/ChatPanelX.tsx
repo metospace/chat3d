@@ -1,11 +1,15 @@
+import {handleDashboardCommand} from '../../runtime/dashboardCommands';
 import {useEffect,useLayoutEffect,useMemo,useRef,useState,type ComponentRef} from 'react';
 import {createPortal} from 'react-dom';
 import {PreviewDecision} from './PreviewDecision';
+import {DashboardCommandPicker,dashboardPickerCommand,type DashboardCommandPickerRef} from './DashboardCommandPicker';
 import {BlenderResult} from './BlenderResult';
 import {FailureReason} from './FailureReason';
 import {blenderPythonStatus,connectBlenderPython} from '../../scene/blenderModeling';
 import {focusSceneObjects} from '../../scene/focus';
 import {prepareReference,MAX_ATTACHMENT_BYTES,isReferenceImage} from '../../domain/referenceAttachments';
+import {OperationProgress,nextProgressPaint} from '../OperationProgress';
+import type {DashboardItem} from '../../domain/dashboard';
 import {REFERENCE_IMAGE_JPEG_QUALITY,REFERENCE_IMAGE_MAX_SIDE} from '../../domain/referenceImageLimits';
 import {PlusIcon,DotsHorizontalIcon,Pencil1Icon,TrashIcon,EnterIcon,ListBulletIcon} from '@radix-ui/react-icons';
 import {Button,Dropdown,Select,Checkbox} from 'antd';
@@ -65,13 +69,13 @@ const MESSAGE_ROLES={
   notice:{placement:'start',variant:'borderless',style:{width:'100%'},styles:{content:{padding:0,width:'100%'}}}
 } as const;
 
-export type ChatPanelProps={autoStartRequest?:{id:string;projectId:string;blenderModeling?:boolean}|null;onAutoStartConsumed?:(id:string)=>void;executionDetails?:boolean;onConfigure?:()=>void;canvasMode?:boolean;expanded?:boolean;onExpand?:()=>void};
+export type ChatPanelProps={autoStartRequest?:{id:string;projectId:string;blenderModeling?:boolean}|null;onAutoStartConsumed?:(id:string)=>void;executionDetails?:boolean;onConfigure?:()=>void;onDashboardOpen?:()=>void;canvasMode?:boolean;expanded?:boolean;onExpand?:()=>void};
 
 export function ChatPanelX(props:ChatPanelProps){
   return <AppTheme><ChatSurface {...props}/></AppTheme>;
 }
 
-function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoStartRequest,onAutoStartConsumed}:ChatPanelProps){
+function ChatSurface({onConfigure,onDashboardOpen,canvasMode=false,expanded=true,onExpand,autoStartRequest,onAutoStartConsumed}:ChatPanelProps){
   const {resolved}=useAppearance();
   const { messages, aiStatus, aiError, pendingBatch, pendingResult, aiConfig, selection, doc } = useEditorStore();
   const editor=activeConversationStore();
@@ -85,6 +89,14 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
   const attachments=useEditorStore(s=>s.composerImages);
   const setAttachments=(value:string[]|((previous:string[])=>string[]))=>store().setComposerImages(typeof value==='function'?value(store().composerImages):value);
   const [lockPlacement,setLockPlacement]=useState(false);
+  const [dashboardDismissed,setDashboardDismissed]=useState<{editor:typeof editor;text:string}|null>(null);
+  const [dashboardWorking,setDashboardWorking]=useState<typeof editor|null>(null);
+  const dashboardFlight=useRef(false);
+  const dashboardPickerRef=useRef<DashboardCommandPickerRef>(null);
+  const dashboardCommand=dashboardPickerCommand(input);
+  const dashboardPickerOpen=!!dashboardCommand&&!(dashboardDismissed?.editor===editor&&dashboardDismissed.text===input);
+  const dashboardBusy=dashboardWorking===editor;
+  useEffect(()=>{setDashboardDismissed(null);},[editor,input]);
   const [blenderModeling,setBlenderModeling]=useState(autoStartRequest?.projectId===doc.projectId&&autoStartRequest.blenderModeling===true);
   const [blenderStatus,setBlenderStatus]=useState<'checking'|'online'|'offline'>('checking');
   const [blenderConnecting,setBlenderConnecting]=useState(false);
@@ -109,6 +121,7 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
   useEffect(()=>{setScopeMode('scene');setLockPlacement(false);},[doc.projectId]);
   const [compareBefore,setCompareBefore]=useState(false);
   const [imageBusy, setImageBusy] = useState(false);
+  const [attachmentProgress,setAttachmentProgress]=useState({completed:0,total:0,name:''});
   const [now, setNow] = useState(Date.now());
   const [newMessages, setNewMessages] = useState(false);
   const imageBusyRef = useRef(false);
@@ -143,11 +156,12 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
   }, [messages, aiStatus, agentActivity, blenderResult]);
 
   const addImages = async (files: (File | Blob)[]) => {
-    if (imageBusyRef.current) return;
-    imageBusyRef.current = true; setImageBusy(true); setNotice('');
+    if (imageBusyRef.current||!files.length) return;
+    imageBusyRef.current = true; setImageBusy(true);setAttachmentProgress({completed:0,total:files.length,name:''});setNotice('');
     const imgs: string[] = [];
     try {
-      for (const f of files) {
+      for (const [index,f] of files.entries()) {
+        setAttachmentProgress({completed:index,total:files.length,name:f instanceof File?f.name:'粘贴附件'});await nextProgressPaint();
         if (f.size > MAX_ATTACHMENT_BYTES) { setNotice('单个附件不能超过 100 MB'); continue; }
         try { imgs.push(await prepareReference(f,compressImage)); } catch { setNotice('附件处理失败，请重新选择'); }
       }
@@ -155,8 +169,37 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
     } catch { if(aliveRef.current) setNotice('附件处理失败，请重新选择'); }
     finally { imageBusyRef.current = false; if(aliveRef.current) setImageBusy(false); }
   };
+  const applyDashboardCommand=async(openResult=false,selection?:{templateId:string;version:number})=>{
+    if(dashboardFlight.current||imageBusyRef.current)return;
+    const capturedEditor=editor,capturedRuntime=runtime;
+    dashboardFlight.current=true;setDashboardWorking(()=>capturedEditor);capturedRuntime.setNotice('');
+    try{
+      const handled=await handleDashboardCommand(capturedEditor,selection);
+      if(!handled)capturedRuntime.setNotice('看板指令未识别，请在 /看板 后加空格选择模板，或输入 /看板 移除。输入已保留。');
+      if(aliveRef.current&&activeConversationStore()===capturedEditor){
+        focusComposer();
+        if(handled&&openResult&&capturedEditor.getState().doc.dashboard)onDashboardOpen?.();
+      }
+    }catch(error){capturedRuntime.setNotice(error instanceof Error?error.message:String(error));}
+    finally{dashboardFlight.current=false;if(aliveRef.current)setDashboardWorking(null);}
+  };
+  const selectDashboardSkill=()=>{
+    if(dashboardFlight.current||imageBusyRef.current||activeConversationStore()!==editor||!['idle','error','cancelled'].includes(store().aiStatus))return;
+    store().setComposerText('/看板 ');
+    setDashboardDismissed(null);
+    focusComposer();
+  };
+  const selectDashboard=(item:DashboardItem)=>{
+    if(dashboardFlight.current||imageBusyRef.current||activeConversationStore()!==editor||!['idle','error','cancelled'].includes(store().aiStatus))return;
+    const mode=dashboardCommand?.mode??'嵌入';
+    store().setComposerText(`/看板 ${mode} ${item.name}`);
+    setDashboardDismissed(null);
+    void applyDashboardCommand(true,{templateId:item.id,version:item.version});
+  };
   const send=async(mode:'guide'|'question'|'later'='guide')=>{
-    if(imageBusyRef.current)return;
+    if(imageBusyRef.current||dashboardFlight.current)return;
+    if(dashboardPickerCommand(store().composerText)){setDashboardDismissed(null);focusComposer();return;}
+    if(/^\s*\/看板/.test(store().composerText)){await applyDashboardCommand();return;}
     const previousMessages=store().messages;
     if(!busy&&blenderModeling&&blenderStatus!=='online'){setNotice('本机 Blender 尚未就绪，请点击“连接 Blender”，或在生成方式菜单中选择“直接生成”。输入已保留。');return;}
     stickRef.current=true;scrollAfterSend.current=true;setNewMessages(false);await runtime.send(mode,{scopeMode:blenderModeling?'scene':scopeMode,lockPlacement:!blenderModeling&&lockPlacement,reuseReference:true,blenderModeling});
@@ -265,6 +308,8 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
       {removedQueueId&&<div className="adx-queue-undo">已移出队列 <button type="button" className="adx-link" onClick={restoreQueued}>撤销移除</button></div>}
       <div className={`adx-composer-surface${pendingMessages.length?' has-queue':''}`}>
       {!!pendingMessages.length&&<section className="adx-queue" role="region" aria-label="排队消息"><div className="adx-queue-list">{pendingMessages.map(m=><div className="adx-queue-row" key={m.id}><ListBulletIcon className="adx-queue-marker" aria-hidden="true"/><span className="adx-queue-text" title={m.text}>{m.text||'参考附件'}{m.images?.length?` · ${m.images.length} 个附件`:''}</span><div className="adx-queue-actions"><Button type="text" size="small" className="adx-queue-guide" icon={<EnterIcon/>} disabled={busy&&!canSteer} title={busy&&!canSteer?'当前模型暂不能接收引导，消息会保留在队列中':busy?'将这条消息送入当前任务':'将这条消息放回输入框，确认后发送'} onClick={()=>busy?promoteQueued(m.id,'guide'):prepareQueued(m.id)}>{busy?'引导':'准备发送'}</Button><Button type="text" size="small" aria-label={`移出队列 ${m.text}`} title="移出队列" icon={<TrashIcon/>} onClick={()=>removeQueued(m.id)}/><QueueRowMenu text={m.text} busy={busy} canSteer={canSteer} onQuestion={()=>promoteQueued(m.id,'question')} onEdit={()=>prepareQueued(m.id)} onRemove={()=>removeQueued(m.id)}/></div></div>)}</div></section>}
+      {dashboardPickerOpen&&dashboardCommand&&<DashboardCommandPicker ref={dashboardPickerRef} query={dashboardCommand.query} skills={dashboardCommand.skills} busy={dashboardBusy} locked={busy||previewing} senderRef={senderRef} onSelect={selectDashboard} onSelectSkill={selectDashboardSkill} onDismiss={()=>setDashboardDismissed({editor,text:input})}/>}
+      {imageBusy&&<OperationProgress title="处理参考附件" stage="读取并准备附件" completed={attachmentProgress.completed} total={attachmentProgress.total} detail={attachmentProgress.name}/>}
       <Sender
         ref={senderRef}
         className="adx-sender"
@@ -273,10 +318,14 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
         onPasteFile={(files)=>void addImages(Array.from(files))}
         onSubmit={()=>void send(busy?'later':'guide')}
         onCancel={cancel}
-        loading={busy&&!input.trim()&&!attachments.length}
-        onKeyDown={event=>{if(event.nativeEvent.isComposing||event.keyCode===229)return false;}}
+        loading={dashboardBusy||busy&&!input.trim()&&!attachments.length}
+        onKeyDown={event=>{
+          if(event.nativeEvent.isComposing||event.keyCode===229)return false;
+          if(dashboardPickerOpen)return dashboardPickerRef.current?.onKeyDown(event);
+          if(dashboardBusy&&event.key==='Enter'){event.preventDefault();return false;}
+        }}
         autoSize={{minRows:3,maxRows:8}}
-        readOnly={imageBusy}
+        readOnly={imageBusy||dashboardBusy}
         placeholder={busy?'补充要求…':previewing?'描述需要继续调整的地方…':'描述你想创建或修改的内容…'}
         header={<Sender.Header title={`参考附件 · ${attachments.length}`} open={attachments.length>0} forceRender closable={false}>
           <ReferenceAttachments ref={attachmentsRef} values={attachments} disabled={imageBusy}
@@ -294,13 +343,13 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
           <span className="adx-send-cluster">
             {busy&&<Button className="adx-stop-generation" size="small" onClick={cancel}>停止生成</Button>}
             {(!busy||!!input.trim()||!!attachments.length)&&<SendButton shape="circle" style={{width:34,height:34,borderRadius:'50%'}}
-              aria-label={busy?'加入消息队列':'发送'} title={busy?'加入待处理消息，发送后可选择引导当前任务':'发送（Enter发送，Shift+Enter换行）'}
-              disabled={imageBusy||(!input.trim()&&!attachments.length)}/>}
+              aria-label={dashboardPickerOpen?dashboardCommand?.skills?'请在列表选择技能':'请在列表选择看板':busy?'加入消息队列':'发送'} title={dashboardPickerOpen?dashboardCommand?.skills?'请在列表选择技能，或按 Enter 查看模板':'请在列表选择看板，或按 Enter 接入当前选项':busy?'加入待处理消息，发送后可选择引导当前任务':'发送（Enter发送，Shift+Enter换行）'}
+              disabled={imageBusy||dashboardBusy||dashboardPickerOpen||(!input.trim()&&!attachments.length)}/>}
           </span>
         </div>}
 
       />
-      {notice?<div role="status" className="adx-composer-notice">{notice}</div>:!configured&&<p className="adx-connection-hint" role="note">连接模型后即可生成，草稿和附件会保留。</p>}
+      {notice?<div role="status" className="adx-composer-notice">{notice}</div>:!configured&&!dashboardCommand&&!dashboardBusy&&<p className="adx-connection-hint" role="note">连接模型后即可生成，草稿和附件会保留。</p>}
       </div>
     </div>
   </div>;

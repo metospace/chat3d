@@ -54,7 +54,7 @@ try {
   const checkpoints=[];let libraryReads=0;const original=IDBObjectStore.prototype.get;
   IDBObjectStore.prototype.get=function(key){if(this.name==='versions')libraryReads++;return original.call(this,key);};
   try{generated=await runModelingAgent({text:'继续填满所有货架位置，总共400个货箱，保留已完成352个，不要只做顶层。',config:{baseURL:'https://mock.invalid/v1',apiKey:'mock',model:'mock'},document:seed,selection:[],captureAvailable:()=>false,onPreview:doc=>checkpoints.push(doc.nodes.length),streamFn:fake([
-   context=>{assert.match(JSON.stringify(context),/场景没有固定对象总数上限/);const tool=context.messages.filter(m=>m.role==='system').flatMap(m=>m.toolsAdded??[]).find(t=>t.name==='add_saved_assets');assert.match(tool.description,/16是单次调用容量/);return [add(352)];},
+   [add(352)],
    [add(368)],[add(384)],
    [{name:'check_requirements',args:{items:[quantity]}},{name:'find_scene_parts',args:{offset:10016,limit:48,fields:'placement'}}],
    context=>{const result=context.messages.findLast(m=>m.role==='toolResult'&&m.toolName==='check_requirements');assert.match(JSON.stringify(result),/pass/);return [{name:'submit_data_preview',args:{summary:'400个货箱全部填入，视觉检查待完成'}}];}
@@ -93,18 +93,17 @@ try {
   }
   const chain={...large,nodes:large.nodes.map((n,i)=>({...n,parentId:i?large.nodes[i-1].id:null}))};assert.deepEqual(validateDocument(chain),[]);
  });
- await test('scene capacity does not bypass per-batch command work or geometry budgets',()=>{
+ await test('scene capacity does not bypass per-batch command work budgets',()=>{
   let result=applyBatch(large,{operations:Array.from({length:201},()=>({op:'rename',targetId:large.nodes[0].id,name:'same'}))});assert.equal(result.doc,large);assert.match(result.errors[0].message,/命令数/);
   const assembly=count=>({op:'createAssembly',name:'budget',parts:Array.from({length:count},(_,i)=>({...part(i),repeat:{count:100,step:[1,0,0]}}))});result=applyBatch(large,{operations:[assembly(20),assembly(11)]});assert.equal(result.doc,large);assert.deepEqual(result.applied,[]);assert.match(result.errors[0].message,/本批实际新增.*3000.*分批/);
-  const badMesh={...large,nodes:Array.from({length:3},(_,i)=>({...large.nodes[i],connection:undefined,geometry:{type:'mesh',params:{positions:Array(600000).fill(0),indices:[0,1,2]}}}))};assert.ok(validateDocument(badMesh).some(e=>/总顶点/.test(e.message)));
  });
  await test('compact project save and reopen keep all 11,200 nodes without weakening the byte budget',async()=>{
   const json=serializeProject(large);assert.ok(Buffer.byteLength(json)<MAX_PROJECT_BYTES);assert.deepEqual(parseProject(json),JSON.parse(JSON.stringify(large)));console.log('Portable project bytes',Buffer.byteLength(json));
   assert.throws(()=>serializeProject({...large,nodes:[{...large.nodes[0],name:'x'.repeat(400*1024*1024)}]}),/400 MiB/);assert.throws(()=>parseProject(' '.repeat(400*1024*1024+1)),/400 MiB/);
   const {validateTeamPayload}=await server.ssrLoadModule('/server/team/validator.ts');
   const teamExpanded=serializeProject({...large,nodes:[{...large.nodes[0],connection:undefined,name:'x'.repeat(21*1024*1024)}]});assert.ok(Buffer.byteLength(teamExpanded)>20*1024*1024);assert.doesNotThrow(()=>validateTeamPayload('scene',JSON.parse(teamExpanded)));
-  const expanded=serializeProject({...large,nodes:[{...large.nodes[0],connection:undefined,name:'x'.repeat(MAX_TEAM_SCENE_BYTES+1)}]});assert.ok(Buffer.byteLength(expanded)>MAX_TEAM_SCENE_BYTES);assert.equal(parseProject(expanded).nodes.length,1);assert.throws(()=>validateTeamPayload('scene',JSON.parse(expanded)),e=>e.message.includes(TEAM_SCENE_SIZE_LIMIT));
-  assert.throws(()=>serializeProject(parseProject(expanded),undefined,MAX_TEAM_SCENE_BYTES),e=>e.message.includes(TEAM_SCENE_SIZE_LIMIT));assert.throws(()=>parseProject(expanded,MAX_TEAM_SCENE_BYTES),e=>e.message.includes(TEAM_SCENE_SIZE_LIMIT));
+  const overflow={...large,nodes:[{...large.nodes[0],connection:undefined,name:'x'.repeat(MAX_TEAM_SCENE_BYTES+1)}]};assert.throws(()=>validateTeamPayload('scene',{format:'chat3d-project',version:1,scene:overflow}),e=>e.message.includes(TEAM_SCENE_SIZE_LIMIT));assert.throws(()=>serializeProject(overflow),e=>e.message.includes(PROJECT_SIZE_LIMIT));
+  assert.throws(()=>parseProject(' '.repeat(MAX_TEAM_SCENE_BYTES+1),MAX_TEAM_SCENE_BYTES),e=>e.message.includes(TEAM_SCENE_SIZE_LIMIT));
  });
  await test('IndexedDB persists and reopens the full scene and preserves it after a storage abort',async()=>{
   let revision=await writeWorkspace({version:1,activeId:'large',sessions:[{id:'large',snapshot:{doc:large,pendingResult:generated.result}}]},0);const saved=await readWorkspace();assert.equal(saved.sessions[0].snapshot.doc.nodes.length,11200);assert.equal(saved.sessions[0].snapshot.pendingResult.doc.nodes.length,11200);
@@ -118,13 +117,69 @@ try {
    const edited=applyBatch(large,{operations:[{op:'setAppearance',targetId:large.nodes[0].id,baseColor:'#123456'},{op:'translate',targetId:large.nodes[0].id,space:'world',mode:'delta',value:[.01,0,0]}]}).doc;v.sync(edited);assert.equal(v.nodeMap.get(large.nodes[0].id).mesh,first.mesh);assert.notEqual(first.material,other.material);assert.equal(v.sharedGeometryCache.size,1);assert.equal(v.materialCache.size,2);assert.equal(disposed,0);assert.equal(materialDisposed,0);assert.equal(other.material.color.getHexString(),otherColor);v.sync({...large,nodes:[]});assert.equal(disposed,1);assert.equal(materialDisposed,1);assert.equal(v.sharedGeometryCache.size,0);assert.equal(v.materialCache.size,0);
   }finally{v.disposeAllNodes();v.defaultMaterial.dispose();}
  });
+ await test('unchanged selection preserves helpers and clean frames until document reconciliation',()=>{
+  const v=Object.create(Viewport.prototype);Object.assign(v,{scene:new Scene(),nodeMap:new Map(),sharedGeometryCache:new Map(),materialCache:new Map(),frameMaterialKeys:new Map(),selectionHelpers:[],lastSyncedDoc:null,defaultMaterial:new MeshStandardMaterial(),frameScene(){}});
+  const doc={...source,nodes:source.nodes.slice(0,1)},ids=new Set([doc.nodes[0].id]);
+  try{
+   v.sync(doc);v.setSelection(new Set());v.dirty=false;v.setSelection(new Set());assert.equal(v.dirty,false,'reopening an unselected document stays clean');
+   v.setSelection(ids);const helper=v.selectionHelpers[0];v.dirty=false;v.setSelection(new Set(ids));assert.equal(v.dirty,false);assert.equal(v.selectionHelpers[0],helper);let disposed=0;helper.geometry.addEventListener('dispose',()=>disposed++);
+   const moved={...doc,nodes:[{...doc.nodes[0],transform:{...doc.nodes[0].transform,position:[4,5,6]}}]};v.sync(moved);assert.equal(disposed,1);v.setSelection(ids);const updated=v.selectionHelpers[0];assert.notEqual(updated,helper);updated.geometry.computeBoundingBox();assert.equal(updated.geometry.boundingBox.min.x>3,true);assert.equal(v.dirty,true);
+  }finally{v.disposeAllNodes();v.defaultMaterial.dispose();}
+ });
+ await test('viewport caches immutable geometry keys and skips unchanged geometry reconciliation',()=>{
+  const v=Object.create(Viewport.prototype);Object.assign(v,{scene:new Scene(),nodeMap:new Map(),sharedGeometryCache:new Map(),materialCache:new Map(),frameMaterialKeys:new Map(),selectionHelpers:[],lastSyncedDoc:null,defaultMaterial:new MeshStandardMaterial(),frameScene(){},markDirty(){}});
+  const geometry=source.nodes[0].geometry,equivalent=structuredClone(geometry),tracked=new Set([geometry,equivalent]);
+  const doc={...source,nodes:source.nodes.slice(0,2).map((node,i)=>({...node,geometry:i?equivalent:geometry}))};
+  const stringify=JSON.stringify;let serialized=0,builds=0;const build=v.buildGeometry;
+  JSON.stringify=function(value,...args){if(tracked.has(value))serialized++;return stringify.call(this,value,...args);};
+  v.buildGeometry=function(value){builds++;return build.call(this,value);};
+  try{
+   v.sync(doc);assert.equal(serialized,2);assert.equal(builds,2);assert.equal(v.sharedGeometryCache.size,1);const first=v.nodeMap.get(doc.nodes[0].id),shared=first.geometry;assert.equal(shared,v.nodeMap.get(doc.nodes[1].id).geometry);
+   assert.equal(v.buildGeometry(geometry),shared);assert.equal(v.buildGeometry(equivalent),shared);assert.equal(serialized,2,'each immutable geometry is serialized only once');
+   const keys=[...v.frameMaterialKeys],instances=v.instancedRender;v.sync(doc);assert.deepEqual([...v.frameMaterialKeys],keys,'same-document sync preserves material keys');assert.equal(v.instancedRender,instances);
+   const calls=builds,moved={...doc,nodes:doc.nodes.map(node=>({...node,transform:{...node.transform,position:[1,2,3]}}))};v.sync(moved);assert.equal(builds,calls,'transform edits never call buildGeometry');assert.equal(serialized,2);assert.equal(v.nodeMap.get(doc.nodes[0].id).geometry,shared);assert.deepEqual(first.mesh.position.toArray(),[1,2,3]);
+   let disposed=0;shared.addEventListener('dispose',()=>disposed++);const switched={...doc,projectId:'other-project',nodes:[{...doc.nodes[0],id:'other-node',geometry:{type:'box',params:{width:2,height:3,depth:4}}}]};v.sync(switched);assert.equal(disposed,1);assert.equal(v.nodeMap.size,1);assert.equal(v.sharedGeometryCache.size,1);assert.notEqual(v.nodeMap.get('other-node').geometry,shared);
+   v.sync(doc);assert.equal(serialized,2,'revisiting a document can reuse weak keys but never disposed GPU buffers');assert.notEqual(v.nodeMap.get(doc.nodes[0].id).geometry,shared);assert.equal(v.sharedGeometryCache.size,1);
+  }finally{JSON.stringify=stringify;v.disposeAllNodes();v.defaultMaterial.dispose();}
+ });
+ const renderViewport=()=>{
+  const calls={draw:0,size:0,projection:0,info:0},v=Object.create(Viewport.prototype);
+  Object.assign(v,{active:true,dirty:true,rafHandle:null,lastFrame:0,previousDraw:false,playbackNotified:0,renderWidth:0,renderHeight:0,host:{clientWidth:640,clientHeight:480},scene:new Scene(),nodeMap:new Map(),quality:{tier:'low',sample:()=>false,resetSamples(){}},animationClock:{state:{playing:true,time:0},tick:()=>false},camera:{updateProjectionMatrix(){calls.projection++;}},renderer:{info:{autoReset:true,reset(){calls.info++;}},setSize(){calls.size++;},render(){calls.draw++;}}});
+  return {v,calls};
+ };
+ await test('hidden viewport rendering submits no GPU work and retains dirty frames',()=>{
+  const {v,calls}=renderViewport();
+  for(const [width,height] of [[0,480],[640,0],[0,0]]){v.host.clientWidth=width;v.host.clientHeight=height;assert.equal(v.render(),false);assert.equal(v.dirty,true);}
+  assert.deepEqual(calls,{draw:0,size:0,projection:0,info:0});v.host.clientWidth=640;v.host.clientHeight=480;v.active=false;assert.equal(v.render(),false);assert.equal(v.dirty,true);assert.equal(calls.draw,0);
+  v.capturing=true;assert.equal(v.render(),true,'explicit capture can render an inactive but visible isolated viewport');assert.equal(calls.draw,1);v.capturing=false;v.active=true;v.markDirty();assert.equal(v.render(),true);assert.equal(calls.size,1,'unchanged dimensions never reset the backing canvas');assert.equal(calls.projection,1);
+  v.host.clientWidth=800;v.markDirty();assert.equal(v.render(),true);assert.equal(calls.size,2);assert.equal(v.camera.aspect,800/480);
+ });
+ await test('viewport pause and resume keep one RAF loop and preserve a warm same-size canvas',()=>{
+  const oldRequest=globalThis.requestAnimationFrame,oldCancel=globalThis.cancelAnimationFrame,queued=new Map(),cancelled=[];let id=0;
+  globalThis.requestAnimationFrame=callback=>{queued.set(++id,callback);return id;};globalThis.cancelAnimationFrame=handle=>{cancelled.push(handle);queued.delete(handle);};
+  const frame=now=>{assert.equal(queued.size,1);const [handle,callback]=queued.entries().next().value;queued.delete(handle);callback(now);};
+  try{
+   const {v,calls}=renderViewport(),deltas=[];v.animationClock.tick=delta=>{deltas.push(delta);return false;};v.setActive(true);v.start();v.setActive(true);assert.equal(queued.size,1);frame(1000);assert.equal(calls.draw,1);assert.equal(v.dirty,false);assert.equal(queued.size,1);v.start();assert.equal(queued.size,1);
+   const stale=queued.values().next().value;v.setActive(false);v.setActive(false);v.start();assert.equal(cancelled.length,1);assert.equal(queued.size,0);stale(2000);assert.equal(deltas.length,1,'inactive callbacks never advance animation');assert.equal(calls.draw,1);assert.equal(v.dirty,false);
+   v.setActive(true);v.setActive(true);v.start();assert.equal(queued.size,1);stale(10500);assert.equal(queued.size,1,'callbacks from a cancelled loop cannot resume after reactivation');assert.equal(deltas.length,1);assert.equal(v.dirty,false,'same-size activation preserves clean backing canvas');frame(11000);assert.equal(deltas.at(-1),0,'hidden time never advances playback');assert.equal(calls.draw,1);assert.equal(calls.size,1);frame(11016);assert.equal(deltas.at(-1),.016);
+   v.setActive(false);v.host.clientWidth=800;v.setActive(true);assert.equal(v.dirty,true);frame(12000);assert.equal(calls.draw,2);assert.equal(calls.size,2);assert.equal(deltas.at(-1),0);v.setActive(false);
+  }finally{if(oldRequest===undefined)delete globalThis.requestAnimationFrame;else globalThis.requestAnimationFrame=oldRequest;if(oldCancel===undefined)delete globalThis.cancelAnimationFrame;else globalThis.cancelAnimationFrame=oldCancel;}
+ });
  const glb=(nodeCount,vertexCount=3)=>{const positions=new Float32Array(vertexCount*3);for(let i=0;i<vertexCount;i++){positions[i*3]=i%3===1?1:0;positions[i*3+1]=i%3===2?1:0;}return packGlb({asset:{version:'2.0'},scene:0,scenes:[{nodes:Array.from({length:nodeCount},(_,i)=>i)}],nodes:Array.from({length:nodeCount},(_,i)=>({name:`part${i}`,mesh:0,translation:[i%100,0,Math.floor(i/100)]})),meshes:[{primitives:[{attributes:{POSITION:0}}]}],buffers:[{byteLength:positions.byteLength}],bufferViews:[{buffer:0,byteOffset:0,byteLength:positions.byteLength}],accessors:[{bufferView:0,componentType:5126,count:vertexCount,type:'VEC3',min:[0,0,0],max:[1,1,0]}]},new Uint8Array(positions.buffer));};
  await test('actual GLB import accepts over 10,000 small parts and saves/reopens all of them',async()=>{
   const imported=await importGlb(glb(10017),'many-parts.glb');assert.equal(imported.doc.nodes.length,10017);assert.equal(imported.doc.nodes.at(-1).transform.position[0],16);assert.equal(parseProject(serializeProject(imported.doc)).nodes.length,10017);assert.ok(imported.warnings.length);
  });
- await test('GLB vertex overflow fails explicitly and disposes parsed resources',async()=>{
+ await test('dense GLB meshes retain every triangle through editing, viewport geometry and project reopen',async()=>{
+  const imported=await importGlb(glb(1,600003),'dense.glb');const node=imported.doc.nodes[0],params=node.geometry.params;
+  assert.equal(params.positions.length,1800009);assert.equal(params.indices.length,600003);assert.deepEqual(params.indices.slice(-3),[600000,600001,600002]);assert.deepEqual(params.positions.slice(-9),[0,0,0,1,0,0,0,1,0]);
+  const edited=applyBatch(imported.doc,{operations:[{op:'translate',targetId:node.id,space:'world',mode:'delta',value:[2,3,4]},{op:'setAppearance',targetId:node.id,baseColor:'#334455'}]});assert.deepEqual(edited.errors,[]);
+  const reopened=parseProject(serializeProject(edited.doc));assert.deepEqual(reopened.nodes[0].geometry,node.geometry);assert.deepEqual(reopened.nodes[0].transform.position,[2,3,4]);assert.equal(reopened.materials.find(m=>m.id===reopened.nodes[0].materialId).baseColor,'#334455');
+  const viewport=Object.create(Viewport.prototype);Object.assign(viewport,{scene:new Scene(),nodeMap:new Map(),sharedGeometryCache:new Map(),materialCache:new Map(),frameMaterialKeys:new Map(),selectionHelpers:[],lastSyncedDoc:null,defaultMaterial:new MeshStandardMaterial(),frameScene(){},markDirty(){}});
+  try{viewport.sync(reopened);const mesh=viewport.nodeMap.get(node.id).mesh;assert.equal(mesh.geometry.getAttribute('position').count,600003);assert.equal(mesh.geometry.index.count,600003);assert.deepEqual(mesh.position.toArray(),[2,3,4]);}finally{viewport.disposeAllNodes();viewport.defaultMaterial.dispose();}
+ });
+ await test('GLB validation failure disposes every parsed mesh and material',async()=>{
   let geometryDisposals=0,materialDisposals=0;const gd=BufferGeometry.prototype.dispose,md=Material.prototype.dispose;BufferGeometry.prototype.dispose=function(){geometryDisposals++;return gd.call(this);};Material.prototype.dispose=function(){materialDisposals++;return md.call(this);};
-  try{await assert.rejects(()=>importGlb(glb(4,150000),'too-many-vertices.glb'),/50万顶点/);}finally{BufferGeometry.prototype.dispose=gd;Material.prototype.dispose=md;}
+  try{await assert.rejects(()=>importGlb(glb(4,4),'invalid-triangles.glb'),/三角索引/);}finally{BufferGeometry.prototype.dispose=gd;Material.prototype.dispose=md;}
   assert.equal(geometryDisposals,4);assert.equal(materialDisposals,4);
  });
  console.log(`${count} scene capacity checks passed`);

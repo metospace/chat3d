@@ -1,7 +1,7 @@
 /// <reference lib="es2024.promise" />
-import {listModelAssets,readModelAsset} from './modelAssetStorage';
-import {serializeProject} from './project';
+import {listModelAssets} from './modelAssetStorage';
 import {useWorkspaceStore} from '../workspace';
+import {asyncTeamLocalFingerprint,fingerprintSavedTeamResource} from './teamPreparation';
 
 export type TeamResourceKind='asset'|'scene';
 export interface TeamResourceLink {
@@ -35,19 +35,20 @@ export async function saveTeamResourceLink(input:Omit<TeamResourceLink,'id'>,res
 export async function rememberTeamResourceHeads(serviceOrigin:string,kind:TeamResourceKind,heads:Array<{id:string;version:number}>):Promise<void>{
  exactOrigin(serviceOrigin);const versions=new Map(heads.map(x=>[x.id,x.version])),db=await openLinks(),{promise,resolve,reject}=Promise.withResolvers<void>();const tx=db.transaction('links','readwrite'),store=tx.objectStore('links'),r=store.getAll();r.onsuccess=()=>{for(const old of r.result as TeamResourceLink[])if(old.serviceOrigin===serviceOrigin&&old.kind===kind&&versions.has(old.teamItemId))store.put({...old,latestVersion:Math.max(old.latestVersion,versions.get(old.teamItemId)!)});};tx.oncomplete=()=>{db.close();notify();resolve();};tx.onabort=()=>{db.close();reject(Error('新版提示保存失败，本地副本未修改'));};return promise;
 }
-function canonical(value:unknown):unknown {if(Array.isArray(value))return value.map(canonical);if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).filter(([,v])=>v!==undefined).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>[k,canonical(v)]));return value;}
 /** Content and library metadata only: never chat, account credentials or model configuration. */
-export async function teamLocalFingerprint(value:{kind:TeamResourceKind;payload:unknown;name:string;description?:string;category?:string}){const bytes=new TextEncoder().encode(JSON.stringify(canonical({...value,description:value.description??'',category:value.category??''})));return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),x=>x.toString(16).padStart(2,'0')).join('');}
+export const teamLocalFingerprint=asyncTeamLocalFingerprint;
 export async function listLocalTeamResourceStates(kind:TeamResourceKind,localIds?:string[]):Promise<LocalTeamResourceState[]>{
  const ids=localIds?new Set(localIds):undefined,links=(await listTeamResourceLinks()).filter(x=>x.kind===kind&&x.status==='ready'&&(!ids||ids.has(x.localId))),assets=kind==='asset'?await listModelAssets():[],sessions=useWorkspaceStore.getState().sessions;
- return Promise.all(links.map(async link=>{let localMissing=false,localModified=false;
+ const states:LocalTeamResourceState[]=[];
+ for(const link of links){let localMissing=false,localModified=false;
   if(kind==='asset'){
    const head=assets.find(x=>x.id===link.localId);localMissing=!head;
-   if(head){const payload=await readModelAsset(head.id,head.version);const fingerprint=await teamLocalFingerprint({kind,payload,name:head.name,description:head.description,category:head.category});localModified=head.version!==link.localVersion||fingerprint!==link.baselineFingerprint||sessions.some(s=>!s.deletedAt&&s.moduleKind==='asset'&&s.assetSource?.id===head.id&&(!!s.snapshot.pendingBatch||s.snapshot.wasRunning||s.snapshot.doc.revision!==s.savedRevision));}
+   if(head){const fingerprint=await fingerprintSavedTeamResource({kind,asset:{id:head.id,version:head.version},name:head.name,description:head.description??'',category:head.category});localModified=head.version!==link.localVersion||fingerprint!==link.baselineFingerprint||sessions.some(s=>!s.deletedAt&&s.moduleKind==='asset'&&s.assetSource?.id===head.id&&(!!s.snapshot.pendingBatch||s.snapshot.wasRunning||s.snapshot.doc.revision!==s.savedRevision));}
   }else{
    const session=sessions.find(x=>x.id===link.localId&&!x.deletedAt);localMissing=!session;
-   if(session){const fingerprint=await teamLocalFingerprint({kind,payload:JSON.parse(serializeProject(session.snapshot.doc)),name:session.title,description:session.libraryDescription,category:session.sceneCategory});localModified=fingerprint!==link.baselineFingerprint||session.snapshot.doc.revision!==link.sceneRevision||!!session.snapshot.pendingBatch||session.snapshot.wasRunning;}
+   if(session){const fingerprint=await fingerprintSavedTeamResource({kind,scene:session.snapshot.doc,name:session.title,description:session.libraryDescription??'',category:session.sceneCategory});localModified=fingerprint!==link.baselineFingerprint||session.snapshot.doc.revision!==link.sceneRevision||!!session.snapshot.pendingBatch||session.snapshot.wasRunning;}
   }
-  const latestVersion=Math.max(link.latestVersion,link.teamVersion);return {link,localMissing,localModified,latestVersion,updateAvailable:link.active&&latestVersion>link.teamVersion};
- }));
+  const latestVersion=Math.max(link.latestVersion,link.teamVersion);states.push({link,localMissing,localModified,latestVersion,updateAvailable:link.active&&latestVersion>link.teamVersion});
+ }
+ return states;
 }

@@ -20,20 +20,20 @@ import {StudioPageHeader} from './studio/StudioPageHeader';
 import {StudioEmptyState} from './studio/StudioEmptyState';
 import type {SceneDocument} from '../domain/types';
 
-export function ProjectThumb({src,name,kind='scene',document:scene}:{src?:string;name:string;kind?:'asset'|'scene';document?:SceneDocument}){
+export function ProjectThumb({src,name,kind='scene',document:scene,active=true}:{src?:string;name:string;kind?:'asset'|'scene';document?:SceneDocument;active?:boolean}){
  const [failedSrc,setFailedSrc]=useState<string>();
  const [generated,setGenerated]=useState<{doc:SceneDocument;image:string}>(),[generating,setGenerating]=useState<SceneDocument>();
  const placeholder=useRef<HTMLDivElement>(null),image=src&&src!==failedSrc?src:generated&&generated.doc===scene?generated.image:undefined;
  useEffect(()=>{
-  if(image||!scene?.nodes.some(node=>node.visible&&node.geometry)||!placeholder.current||typeof IntersectionObserver==='undefined')return;
+  if(!active||image||!scene?.nodes.some(node=>node.visible&&node.geometry)||!placeholder.current||typeof IntersectionObserver==='undefined')return;
   let request:AbortController|undefined;
   const observer=new IntersectionObserver(entries=>{
    if(!entries.some(entry=>entry.isIntersecting)){request?.abort();request=undefined;setGenerating(undefined);return;}
-   if(request)return;const controller=request=new AbortController();setGenerating(scene);
-   void import('../scene/projectThumbnail').then(({projectThumbnail})=>projectThumbnail(scene,controller.signal)).then(value=>{if(!controller.signal.aborted)setGenerated({doc:scene,image:value});}).catch(()=>{}).finally(()=>{if(!controller.signal.aborted)setGenerating(undefined);});
+   if(request)return;const controller=request=new AbortController();
+   void import('../scene/projectThumbnail').then(async({projectThumbnail})=>{const {promise,resolve}=Promise.withResolvers<void>();const schedule=()=>{if(!controller.signal.aborted&&placeholder.current?.getClientRects().length)setGenerating(scene);resolve();};if('requestIdleCallback' in window)window.requestIdleCallback(schedule,{timeout:1200});else setTimeout(schedule,100);await promise;if(controller.signal.aborted||!placeholder.current?.getClientRects().length)return;return projectThumbnail(scene,controller.signal);}).then(value=>{if(value&&!controller.signal.aborted)setGenerated({doc:scene,image:value});}).catch(()=>{}).finally(()=>{if(!controller.signal.aborted)setGenerating(undefined);});
   });observer.observe(placeholder.current);
   return()=>{observer.disconnect();request?.abort();};
- },[scene,image]);
+ },[scene,image,active]);
  return image?<img src={image} alt={`${name} 几何缩略图`} title={image===src?undefined:'本地形体预览，不代表质量验收'} loading="lazy" decoding="async" onError={()=>{if(image===src)setFailedSrc(src);}}/>:<div ref={placeholder} className="resource-no-thumb">{kind==='asset'?<CubeIcon/>:<LayersIcon/>}<span>{scene&&generating===scene?'正在生成预览…':scene&&!scene.nodes.length?'空白项目':src?'预览图暂不可用':'尚无预览图'}</span></div>;
 }
 function timestamp(value:string|number){return new Date(value).toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}

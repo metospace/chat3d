@@ -2,8 +2,8 @@ import {buildTeamCopyExport} from './teamCopyExport';
 import {teamFetch} from './teamTransport';
 import {sendTeamPublication,type TeamUploadProgress} from './teamPublish';
 import {localPublishedCategoryPath,publishedCategoryPath,acquirePublishedCategory} from './teamCategories';
-import {MAX_TEAM_ASSET_BYTES,parseModelAsset,type ModelAssetVersion} from './modelAssets';
-import {MAX_TEAM_SCENE_BYTES,parseProject,serializeProject} from './project';
+import {parseModelAsset} from './modelAssets';
+import {parseProject} from './project';
 import {saveModelAsset} from './modelAssetStorage';
 import {createSession,flushWorkspace,useWorkspaceStore} from '../workspace';
 import {assertLibraryReady} from './libraryNavigation';
@@ -11,23 +11,11 @@ import {listModelAssets,readModelAsset} from './modelAssetStorage';
 import {listTeamResourceLinks,listLocalTeamResourceStates,reserveTeamResourceLink,saveTeamResourceLink,rememberTeamResourceHeads,teamLocalFingerprint,teamResourceKey,type TeamResourceLink,type LocalTeamResourceState} from './teamResourceLinks';
 import {DEFAULT_PLATFORM_BASE,DEFAULT_PLATFORM_TENANT,loadPlatformAuth,savePlatformAuth,type PlatformAuth} from './platformAuthStorage';
 import {buildPlatformAuthorizeUrl,clearPendingPlatformOAuth,clearPlatformOAuthCallbackFromUrl,configuredTeamServiceBase,consumePendingPlatformOAuth,openPlatformAuthorizationWindow,parsePlatformOAuthCallback,platformOAuthRedirectUri,platformTenantId,publishPlatformOAuthResult,watchPlatformOAuthResult,type PlatformOAuthCallback} from './platformOAuth';
-type PublicationShape=true|{[key:string]:PublicationShape}|readonly PublicationShape[];
-const vectorShape=[true] as const,transformShape={position:vectorShape,rotationQuaternion:vectorShape,scale:vectorShape};
-const geometryShape={type:true,params:{shape:true,sections:[{center:vectorShape,width:true,depth:true,cornerRadius:true,points:[vectorShape]}],width:true,height:true,depth:true,bevelRadius:true,radius:true,widthSegments:true,heightSegments:true,radiusTop:true,radiusBottom:true,radialSegments:true,cornerRadius:true,holeRadius:true,length:true,thickness:true,outerRadius:true,innerRadius:true,widthTop:true,widthBottom:true,positions:vectorShape,indices:vectorShape,normals:vectorShape,uvs:vectorShape,points:[vectorShape],rings:[{center:vectorShape,radiusX:true,radiusZ:true}],segments:true,smooth:true,wallThickness:true,capStart:true,capEnd:true,holes:[[vectorShape]],edgeRadius:true}} satisfies PublicationShape;
-const textureShape={dataUrl:true,repeat:vectorShape,offset:vectorShape,rotation:true,wrapS:true,wrapT:true} satisfies PublicationShape;
-const materialShape={id:true,baseColor:true,roughness:true,metalness:true,emissive:true,emissiveIntensity:true,opacity:true,alphaTest:true,transparent:true,doubleSided:true,normalScale:true,surface:{preset:true,repeat:vectorShape,strength:true},maps:{baseColor:textureShape,normal:textureShape,roughness:textureShape,metalness:textureShape,emissive:textureShape,occlusion:textureShape}} satisfies PublicationShape;
-const nodeShape={id:true,parentId:true,name:true,kind:true,geometry:geometryShape,assetId:true,materialId:true,transform:transformShape,visible:true,locked:true,assemblyName:true,sceneRole:true,planKey:true,zone:true,label:true,assemblyId:true,modelAsset:{id:true,version:true,instanceId:true,sourceNodeId:true},connection:{targetId:true,sourcePoint:vectorShape,targetPoint:vectorShape,maxDistance:true,purpose:true},poseRig:{version:true,joints:[{key:true,name:true,anchorNodeId:true,pivot:vectorShape,axis:vectorShape,memberIds:vectorShape}],anchors:[{key:true,name:true,nodeId:true,point:vectorShape,kind:true}],shapes:{'*':true}},modelStructure:{blueprintKey:true,featureKeys:vectorShape,localTransform:transformShape,blueprint:{dimensions:{x:true,y:true,z:true},dimensionsSource:true,referenceProportions:[{key:true,name:true,numerator:{featureKey:true,axis:true},denominator:{featureKey:true,axis:true},expected:true,source:true,relativeTolerance:true,view:true,observation:true}],key:true,name:true,purpose:true,detailLevel:true,detailReason:true,silhouette:true,features:[{key:true,name:true,referenceObservation:true,role:true,geometryApproach:true}],negativeSpaces:vectorShape,views:vectorShape}}} satisfies PublicationShape;
-const expressionShape:{[key:string]:PublicationShape}={op:true};expressionShape.args=[expressionShape];
-const animationShape={version:true,name:true,duration:true,loop:true,tracks:[{id:true,name:true,targetIds:vectorShape,channel:true,keyframes:[{time:true,value:vectorShape}],expression:expressionShape,axis:vectorShape,pivot:vectorShape,sourceId:true,start:true,end:true}]} satisfies PublicationShape;
-/** A structural allowlist, including nested objects; unknown keys cannot smuggle private session data. */
-function publicSnapshot(value:unknown,shape:PublicationShape):unknown{
- if(value===null||typeof value==='string'||typeof value==='number'||typeof value==='boolean'||value===undefined)return value;
- if(Array.isArray(value)){const child=Array.isArray(shape)?shape[0]:shape;return value.map(item=>publicSnapshot(item,child));}
- if(shape===true||Array.isArray(shape))return undefined;
- const fields=shape as {[key:string]:PublicationShape},source=value as Record<string,unknown>,result:Record<string,unknown>={};
- for(const key of Object.keys(source)){const child=Object.prototype.hasOwnProperty.call(fields,key)?fields[key]:fields['*'];if(child!==undefined)result[key]=publicSnapshot(source[key],child);}
- return result;
-}
+import {scenePublication} from './teamPublicationSnapshot';
+export {assetPublication,scenePublication} from './teamPublicationSnapshot';
+import {prepareTeamPublicationSnapshot,yieldTeamPreparationPaint,type TeamPreparationProgress} from './teamPreparation';
+import type {SceneDocument} from './types';
+export type {TeamPreparationProgress} from './teamPreparation';
 export interface TeamUser {id:string;name:string;role:'admin'|'member'|'viewer'}
 export interface TeamItem {id:string;owner:string;kind:'asset'|'scene';version:number;name:string;description:string;created:string;categoryPath?:string[]}
 export interface TeamVersion extends TeamItem {payload:unknown}
@@ -42,10 +30,15 @@ export function rememberTeamServiceBase(base:string){localStorage.setItem(TEAM_A
 export class TeamClient {
  readonly base:string;private token='';user?:TeamUser;
  constructor(base:string){this.base=teamAddress(base);}
- async request<T>(path:string,body?:unknown,onProgress?:(progress:TeamUploadProgress)=>void):Promise<T>{
-  const serialized=body===undefined?undefined:JSON.stringify(body);
+ async raw(path:string,body?:unknown,signal?:AbortSignal):Promise<Response>{
+  const response=await teamFetch(this.base+'/api/team/'+path,{method:body===undefined?'GET':'POST',headers:{...(body===undefined?{}:{'Content-Type':'application/json'}),...(this.token?{Authorization:'Bearer '+this.token}:{})},body:body===undefined?undefined:JSON.stringify(body),signal:signal??AbortSignal.timeout(60000),redirect:'error',credentials:'omit'});
+  if(!response.ok){let message='团队服务请求失败（HTTP '+response.status+'）';try{const data=await response.json();if(typeof data?.error==='string')message=data.error;}catch{/* Proxy errors need not be JSON. */}if(response.status===401&&this.token&&sharedClient===this){expireTeamSession(this);message='团队登录已失效，请重新登录。';}throw new TeamServiceError(response.status,message);}
+  return response;
+ }
+ async request<T>(path:string,body?:unknown,onProgress?:(progress:TeamUploadProgress)=>void,serializedBody?:string):Promise<T>{
+  const serialized=serializedBody??(body===undefined?undefined:JSON.stringify(body));
   const response=path==='publish'&&serialized!==undefined
-   ?await sendTeamPublication(this.base,this.token,serialized,onProgress)
+   ?await sendTeamPublication(this.base,this.token,serialized,onProgress,(body as TeamPublish).key)
    :await teamFetch(this.base+'/api/team/'+path,{method:body===undefined?'GET':'POST',headers:{...(body===undefined?{}:{'Content-Type':'application/json'}),...(this.token?{Authorization:'Bearer '+this.token}:{})},body:serialized,signal:AbortSignal.timeout(60000),redirect:'error',credentials:'omit'});
   const authentication=path==='login'||path.startsWith('login/');
   let data:unknown;
@@ -66,7 +59,7 @@ async loginWithPlatform(auth:{accessToken:string;tenantId:string}){const result=
  async logout(){const pending=this.request('logout',{});this.token='';this.user=undefined;await pending;}
  list(kind:'asset'|'scene',q=''){return this.request<TeamItem[]>('items?kind='+kind+'&q='+encodeURIComponent(q));}
  async read(item:TeamItem){const value=await this.request<TeamVersion>(`items/${encodeURIComponent(item.id)}/${item.version}`);if(value.id!==item.id||value.kind!==item.kind||value.version!==item.version)throw Error('团队服务返回的固定版本不匹配');return value;}
- publish(body:TeamPublish,onProgress?:(progress:TeamUploadProgress)=>void){return this.request<{id:string;version:number}>('publish',body,onProgress);}
+ publish(body:TeamPublish,onProgress?:(progress:TeamUploadProgress)=>void,serializedBody?:string){return this.request<{id:string;version:number}>('publish',body,onProgress,serializedBody);}
 }
 const sessionListeners=new Set<()=>void>();
 let sharedClient:TeamClient|undefined;
@@ -227,11 +220,6 @@ export async function resumeTeamFromPlatformAuth(base:string,tenantId?:string){
 }
 export function teamItemFromLink(link:TeamResourceLink,version=link.latestVersion):TeamItem{return {id:link.teamItemId,kind:link.kind,version,name:link.teamName,owner:'',description:'',created:''};}
 export async function refreshLinkedTeamResources(kind:'asset'|'scene'):Promise<LocalTeamResourceState[]>{const client=sharedClient;if(!client?.user)throw Error('请先登录团队服务');const heads=await client.list(kind);await rememberTeamResourceHeads(client.base,kind,heads);return listLocalTeamResourceStates(kind);}
-// Explicit allowlist prevents session/chat/settings data from entering a publication.
-export function assetPublication(source:ModelAssetVersion):ModelAssetVersion {
- const safe=publicSnapshot(source,{format:true,schemaVersion:true,id:true,version:true,name:true,category:true,description:true,createdAt:true,unit:true,upAxis:true,front:true,quality:true,size:vectorShape,nodes:[nodeShape],materials:[materialShape],thumbnail:true,externalConnectionsRemoved:true,contract:{purpose:true,features:vectorShape,anchors:[{id:true,name:true,kind:true,nodeId:true,point:vectorShape,normal:vectorShape}],clearance:{min:vectorShape,max:vectorShape}}});
- return parseModelAsset(JSON.stringify(safe),MAX_TEAM_ASSET_BYTES);
-}
 export async function copyTeamVersion(item:TeamVersion){
  assertLibraryReady();
  if(item.kind==='asset'){
@@ -243,7 +231,6 @@ export async function copyTeamVersion(item:TeamVersion){
  if(!createSession(doc,{moduleKind:'scene',title:item.name+' 副本',sceneCategory:await acquirePublishedCategory('scene',publishedCategoryPath(item)),libraryDescription:item.description,librarySavedAt:Date.now(),savedRevision:doc.revision}))throw Error('无法创建本地副本');
  await flushWorkspace();if(useWorkspaceStore.getState().error)throw Error('副本已创建，但本地保存失败，请先修复存储再继续');return doc.projectId;
 }
-export function scenePublication(doc:Parameters<typeof serializeProject>[0]){const safe=publicSnapshot(doc,{schemaVersion:true,projectId:true,revision:true,unit:true,upAxis:true,nodes:[nodeShape],materials:[materialShape],assets:[],animation:animationShape,viewState:{cameraPosition:vectorShape,cameraTarget:vectorShape,projection:true,displayUnit:true}}) as Parameters<typeof serializeProject>[0];return JSON.parse(serializeProject(safe,undefined,MAX_TEAM_SCENE_BYTES));}
 
 export interface TeamLocalSource {id:string;version?:number}
 export interface TeamPublishSource extends TeamLocalSource {name:string;kind:'asset'|'scene';teamLinks:TeamResourceLink[]}
@@ -262,7 +249,7 @@ export function resolveTeamPublishTarget(client:TeamClient,source:TeamPublishSou
 export interface PreparedTeamPublication {
  source:TeamLocalSource;request:TeamPublish;serviceOrigin:string;userId:string;baselineFingerprint:string;sceneRevision?:number;
  status:'ready'|'running'|'success'|'error';error?:string;serverResult?:{id:string;version:number};
- upload?:TeamUploadProgress;bytes?:number;startedAt?:number;endedAt?:number;
+ upload?:TeamUploadProgress;bytes?:number;serializedBody?:string;startedAt?:number;endedAt?:number;
 }
 export async function listTeamPublishSources(kind:'asset'|'scene'):Promise<TeamPublishSource[]>{
  assertLibraryReady();await flushWorkspace();if(useWorkspaceStore.getState().error)throw Error('请先修复本地保存错误');
@@ -270,29 +257,34 @@ export async function listTeamPublishSources(kind:'asset'|'scene'):Promise<TeamP
  return kind==='asset'?(await listModelAssets()).map(a=>({id:a.id,name:a.name,kind,version:a.version,teamLinks:linksFor(a.id)})):useWorkspaceStore.getState().sessions.filter(s=>!s.deletedAt&&(s.moduleKind??'scene')==='scene'&&s.librarySavedAt&&s.savedRevision===s.snapshot.doc.revision&&!s.snapshot.pendingBatch&&!s.snapshot.wasRunning).map(s=>({id:s.id,name:s.title,kind,teamLinks:linksFor(s.id)}));
 }
 /** Freeze only explicitly selected, saved content; no network publication is performed here. */
-export async function prepareTeamPublications(client:TeamClient,kind:'asset'|'scene',sources:TeamLocalSource[],targets:Record<string,TeamItem|undefined>={}):Promise<PreparedTeamPublication[]>{
+export async function prepareTeamPublications(client:TeamClient,kind:'asset'|'scene',sources:TeamLocalSource[],targets:Record<string,TeamItem|undefined>={},onProgress?:(progress:TeamPreparationProgress)=>void):Promise<PreparedTeamPublication[]>{
  if(!client.user||client.user.role==='viewer')throw Error('当前账号只有浏览权限');
+ const userId=client.user.id,entries:PreparedTeamPublication[]=[];
+ onProgress?.({stage:'reading',completed:0,total:sources.length});await yieldTeamPreparationPaint();
  assertLibraryReady();await flushWorkspace();if(useWorkspaceStore.getState().error)throw Error('请先修复本地保存错误');
  if(!sources.length||new Set(sources.map(s=>s.id)).size!==sources.length)throw Error('请选择不重复的已保存资源');
  const heads=kind==='asset'?await listModelAssets():[],links=(await listTeamResourceLinks()).filter(link=>link.kind===kind&&link.status==='ready');
- return Promise.all(sources.map(async source=>{
+ for(let index=0;index<sources.length;index++){let source=sources[index];
   const target=targets[source.id];if(target&&(target.kind!==kind||(target.owner!==client.user!.id&&client.user!.role!=='admin')))throw Error('你没有追加该团队原件版本的权限');
   const sourceLinks=links.filter(link=>link.localId===source.id);
   if(sourceLinks.length&&!Object.prototype.hasOwnProperty.call(targets,source.id))throw Error('该资源已有团队关联，请选择关联原件或明确选择新增到团队库');
   const targetLinks=target?sourceLinks.filter(link=>link.serviceOrigin===client.base&&link.teamItemId===target.id):[];
   if(target&&targetLinks.length&&target.version!==Math.max(...targetLinks.map(link=>link.teamVersion)))throw Error('关联原件已有其他版本，请获取新版后编辑，或明确另存为新原件；不会覆盖或自动使用最新版本');
-  let payload:unknown,name:string,description:string,category:string|undefined,sceneRevision:number|undefined,localPayload:unknown;
+  let name:string,description:string,category:string|undefined,sceneRevision:number|undefined,scene:SceneDocument|undefined,asset:{id:string;version:number}|undefined;
   if(kind==='asset'){
    const head=heads.find(a=>a.id===source.id);if(!head)throw Error('待发布资产不存在');if(source.version!==undefined&&source.version!==head.version)throw Error('待发布资产版本已变化，请重新选择');
-   const stored=await readModelAsset(head.id,head.version);source={id:head.id,version:head.version};name=head.name;description=head.description??'';category=head.category;localPayload=stored;payload=assetPublication({...stored,name,description,category});
+   source={id:head.id,version:head.version};asset={id:head.id,version:head.version};name=head.name;description=head.description??'';category=head.category;
   }else{
    const session=useWorkspaceStore.getState().sessions.find(s=>s.id===source.id&&!s.deletedAt&&(s.moduleKind??'scene')==='scene');
    if(!session?.librarySavedAt||session.savedRevision!==session.snapshot.doc.revision||session.snapshot.pendingBatch||session.snapshot.wasRunning)throw Error('场景包含未保存修改或预览，请先保存到本地库后再发布');
-   name=session.title;description=session.libraryDescription??'';category=session.sceneCategory;sceneRevision=session.snapshot.doc.revision;payload=scenePublication(session.snapshot.doc);localPayload=JSON.parse(serializeProject(session.snapshot.doc));
+   name=session.title;description=session.libraryDescription??'';category=session.sceneCategory;sceneRevision=session.snapshot.doc.revision;scene=session.snapshot.doc;
   }
-  const request:TeamPublish={kind,name,description,payload,categoryPath:await localPublishedCategoryPath(kind,category),key:crypto.randomUUID(),expectedVersion:target?.version??0,...(target?{itemId:target.id}:{})};
-  return {source,request,bytes:new TextEncoder().encode(JSON.stringify(request)).byteLength,serviceOrigin:client.base,userId:client.user!.id,baselineFingerprint:await teamLocalFingerprint({kind,payload:localPayload,name,description,category}),sceneRevision,status:'ready' as const};
- }));
+  onProgress?.({stage:'reading',completed:index,total:sources.length,name});await yieldTeamPreparationPaint();
+  const result=await prepareTeamPublicationSnapshot({kind,name,description,category,categoryPath:await localPublishedCategoryPath(kind,category),key:crypto.randomUUID(),expectedVersion:target?.version??0,...(target?{itemId:target.id}:{}),asset,scene},stage=>onProgress?.({stage,completed:index,total:sources.length,name}));
+  entries.push({...result,source,serviceOrigin:client.base,userId,sceneRevision,status:'ready'});
+  onProgress?.({stage:'ready',completed:index+1,total:sources.length,name});
+ }
+ return entries;
 }
 /** Retrying never re-freezes local content or changes keys, and successful entries are skipped. */
 export async function publishPreparedTeamBatch(client:TeamClient,entries:PreparedTeamPublication[],onChange?:()=>void){
@@ -300,7 +292,7 @@ export async function publishPreparedTeamBatch(client:TeamClient,entries:Prepare
  if(entries.some(e=>e.serviceOrigin!==client.base||e.userId!==client.user!.id))throw Error('团队登录已变化，请重新准备发布');
  for(const entry of entries){if(entry.status==='success')continue;entry.status='running';entry.error=undefined;entry.startedAt=Date.now();entry.endedAt=undefined;entry.upload={phase:'preparing',loaded:0,total:entry.bytes??0};onChange?.();
   try{
-   entry.serverResult??=await client.publish(entry.request,progress=>{entry.upload=progress;entry.bytes=progress.total;onChange?.();});
+   entry.serverResult??=await client.publish(entry.request,progress=>{entry.upload=progress;entry.bytes=progress.total;onChange?.();},entry.serializedBody);
    await saveTeamResourceLink({serviceOrigin:client.base,kind:entry.request.kind,teamItemId:entry.serverResult.id,teamVersion:entry.serverResult.version,teamName:entry.request.name,localId:entry.source.id,localVersion:entry.source.version,sceneRevision:entry.sceneRevision,baselineFingerprint:entry.baselineFingerprint,direction:'publish',active:true,status:'ready',createdAt:new Date().toISOString(),latestVersion:entry.serverResult.version});
    entry.status='success';
   }catch(error){entry.status='error';entry.error=error instanceof Error?error.message:'发布失败，可重试同一项';}entry.endedAt=Date.now();onChange?.();

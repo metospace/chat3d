@@ -17,6 +17,7 @@ try{
  const {exportHtml}=await server.ssrLoadModule('/src/scene/exportHtml.ts');
  const {proceduralMaps}=await server.ssrLoadModule('/src/scene/surfaceTextures.ts');
  const {serializeProject,parseProject}=await server.ssrLoadModule('/src/domain/project.ts');
+ const {scenePublication}=await server.ssrLoadModule('/src/domain/teamLibrary.ts');
  const {normalizeRenderPreset,loadRenderPreset,saveRenderPreset}=await server.ssrLoadModule('/src/scene/renderPreset.ts');
  const config={baseURL:'https://example.invalid/v1',apiKey:'private-test-key',model:'test'};
  const base=createInitialDoc();
@@ -35,10 +36,10 @@ try{
   assert.equal(normalizeRenderPreset('invalid'),'studio');saveRenderPreset('classic');assert.equal(loadRenderPreset(),'classic');
   globalThis.localStorage={getItem(){throw Error('blocked')},setItem(){throw Error('blocked')}};assert.equal(loadRenderPreset(),'classic');assert.doesNotThrow(()=>saveRenderPreset('studio'));assert.equal(loadRenderPreset(),'studio');delete globalThis.localStorage;
  });
- const physical={id:'test-glass',baseColor:'#dce9eb',roughness:.1,metalness:0,opacity:1,transmission:.9,thickness:.008,ior:1.5,clearcoat:.1,clearcoatRoughness:.2};
+ const physical={id:'test-glass',baseColor:'#dce9eb',roughness:.1,metalness:0,opacity:1,transmission:.9,thickness:.008,ior:1.5,clearcoat:.1,clearcoatRoughness:.2,specularIntensity:.3,specularColor:'#80a0c0'};
  await test('physical factors are validated and partial edits preserve original project materials',()=>{
   assert.equal(validateMaterial(physical).length,0);
-  for(const patch of [{ior:NaN},{ior:.9},{transmission:1.1},{thickness:-1},{clearcoat:Infinity}])assert.ok(validateMaterial({...physical,...patch}).length);
+  for(const patch of [{ior:NaN},{ior:.9},{transmission:1.1},{thickness:-1},{clearcoat:Infinity},{specularIntensity:NaN},{specularIntensity:-.1},{specularIntensity:1.1},{specularColor:'white'},{specularColor:'#fff'}])assert.ok(validateMaterial({...physical,...patch}).length);
   const before=structuredClone(base);
   const r=applyBatch(base,{operations:[{op:'createPrimitive',name:'玻璃',tempId:'glass',geometry:{type:'box',params:{width:1,height:1,depth:.008,bevelRadius:0}},parentId:null,transform:{position:[0,.5,0],rotationQuaternion:[0,0,0,1],scale:[1,1,1]},materialId:'mat_gray'},{op:'setAppearance',targetId:'glass',transmission:.9,ior:1.5,thickness:.008,opacity:1}]});
   assert.equal(r.errors.length,0);assert.deepEqual(base,before);assert.equal(validateDocument(r.doc).length,0);
@@ -52,6 +53,10 @@ try{
   const glass=createSceneMaterial(physical),paint=createSceneMaterial({...physical,transmission:0}),plain=createSceneMaterial({id:'plain',baseColor:'#ffffff',roughness:.5,metalness:0});
   assert.equal(glass.isMeshPhysicalMaterial,true);assert.equal(materialCastsShadow(glass),false);assert.equal(materialCastsShadow(paint),true);assert.ok(!plain.isMeshPhysicalMaterial);
   assert.equal(createSceneMaterial({...physical,transmission:0,opacity:.4}).opacity,.4);
+  for(const patch of [{specularIntensity:0},{specularColor:'#80a0c0'}]){
+   const material=createSceneMaterial({id:'specular',baseColor:'#ffffff',roughness:.5,metalness:0,...patch});
+   assert.equal(material.isMeshPhysicalMaterial,true);assert.equal(material.specularIntensity,patch.specularIntensity??1);assert.equal(material.specularColor.getHexString(),(patch.specularColor??'#ffffff').slice(1));material.dispose();
+  }
   for(const m of [glass,paint,plain])m.dispose();
  });
  await test('surface maps retain authored roughness and encode normalized, repeating normal vectors',()=>{
@@ -66,13 +71,15 @@ try{
   globalThis.FileReader=class{readAsArrayBuffer(blob){blob.arrayBuffer().then(result=>{this.result=result;this.onloadend?.()})}};
   const r=applyBatch(base,{operations:[{op:'createPrimitive',name:'透射玻璃',geometry:{type:'box',params:{width:1,height:1,depth:.008,bevelRadius:0}},parentId:null,transform:{position:[0,.5,0],rotationQuaternion:[0,0,0,1],scale:[1,1,1]},materialId:'mat_gray'}]});assert.equal(r.errors.length,0);
   const doc={...r.doc,materials:[physical],nodes:r.doc.nodes.map(n=>({...n,materialId:physical.id}))};
-  assert.equal(parseProject(serializeProject(doc)).materials[0].transmission,.9);
+  const saved=parseProject(serializeProject(doc)).materials[0];assert.equal(saved.transmission,.9);assert.equal(saved.specularIntensity,.3);assert.equal(saved.specularColor,physical.specularColor);
+  const published=scenePublication(doc).scene.materials[0];for(const key of ['clearcoat','clearcoatRoughness','transmission','thickness','ior','specularIntensity','specularColor'])assert.equal(published[key],physical[key],key);
   const html=await exportHtml(doc,'glass');
   const embedded=JSON.parse(html.match(/<script id="scene-data" type="application\/json">([\s\S]*?)<\/script>/)[1]);
   assert.ok(embedded.materials.every(m=>m.attenuationDistance!==null));
-  const scene=buildExportScene(doc);assert.equal(scene.children[0].material.transmission,.9);disposeExportScene(scene);
+  const scene=buildExportScene(doc);assert.equal(scene.children[0].material.transmission,.9);assert.equal(scene.children[0].material.specularIntensity,.3);assert.equal(scene.children[0].material.specularColor.getHexString(),physical.specularColor.slice(1));disposeExportScene(scene);
   const round=await importGlb(await exportGlb(doc),'glass.glb');const m=round.doc.materials.find(m=>m.id===round.doc.nodes[0].materialId);
-  for(const key of ['clearcoat','clearcoatRoughness','transmission','thickness','ior'])assert.ok(Math.abs(m[key]-physical[key])<1e-6,key);
+  for(const key of ['clearcoat','clearcoatRoughness','transmission','thickness','ior','specularIntensity'])assert.ok(Math.abs(m[key]-physical[key])<1e-6,key);
+  assert.equal(m.specularColor.toLowerCase(),physical.specularColor);
   assert.equal(round.doc.nodes[0].geometry.type,'mesh');
  });
  console.log(`${passed} realistic modeling checks passed; no model requests`);

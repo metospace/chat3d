@@ -21,7 +21,7 @@ import { Viewport } from '../scene/Viewport';
 import { useDisplayDoc, useEditorStore } from '../store';
 // Three.js 视口宿主：React 只负责挂载/销毁，渲染逻辑全在 Viewport 类里（命令式）
 // 通过 Zustand store 双向通信：doc 变化 → sync；视口拾取 → store.select
-export function ViewportPanel() {
+export function ViewportPanel({active=true}:{active?:boolean}) {
   const box=useSelectionTool(s=>s.box),wholeModel=useSelectionTool(s=>s.wholeModel),through=useSelectionTool(s=>s.through),activeSession=useWorkspaceStore(s=>s.activeId);
   const [cameraPreset,setCameraPreset]=useState<'presentation'|'top'>('presentation');
   const [viewMenuOpen,setViewMenuOpen]=useState(false),[displayOpen,setDisplayOpen]=useState(false),[selectionMenuOpen,setSelectionMenuOpen]=useState(false);
@@ -82,7 +82,7 @@ export function ViewportPanel() {
       if(additive){if(nodeId){const ids=new Set(state.selection),remove=picked.every(id=>ids.has(id));picked.forEach(id=>remove?ids.delete(id):ids.add(id));select([...ids]);}}
       else select(picked);
     });
-    vp.setPlaybackListener(setPlayback);vp.sync(useEditorStore.getState().previewDoc??useEditorStore.getState().doc);vp.start();
+    vp.setPlaybackListener(setPlayback);if(active)vp.sync(useEditorStore.getState().previewDoc??useEditorStore.getState().doc);vp.setActive(active);
     } catch(e) {vp?.dispose();useEditorStore.setState({viewportStatus:'error'});setViewportError(e instanceof Error?e.message:'无法创建 WebGL 视图');return;}
     setViewportError('');
     useEditorStore.setState({viewportStatus:'ready'});
@@ -92,7 +92,7 @@ export function ViewportPanel() {
     const lost=()=>{useEditorStore.setState({viewportStatus:'error'});setViewportError('WebGL 上下文已丢失，请重试视图');};
     canvas?.addEventListener('webglcontextlost',lost);
     const unregisterFocus=registerSceneFocus(ids=>vp!.fitToSelection(ids));
-    const unregister = registerSceneCapture(async (document, view, targetIds,time) => {if(useEditorStore.getState().viewportStatus!=='ready')throw new Error('三维画面不可用，无法进行截图复核');return vp!.captureDocument(document, view, targetIds,time);});
+    const unregister = registerSceneCapture(async (document, view, targetIds,time) => {if(useEditorStore.getState().viewportStatus!=='ready')throw new Error('三维画面不可用，无法进行截图复核');const state=useEditorStore.getState();if(document!==(state.previewDoc??state.doc))throw Error('截图文档不是当前视口文档，改用独立检查器');return vp!.captureDocument(document, view, targetIds,time);});
     return () => {
       canvas?.removeEventListener('webglcontextlost',lost);
       unregister();unregisterFocus();
@@ -110,13 +110,13 @@ export function ViewportPanel() {
   useEffect(()=>{if(busy)viewportRef.current?.resetAnimation();},[busy]);
   // 文档变化 → 同步到视口
   useEffect(() => {
-    viewportRef.current?.sync(doc);
-  }, [doc,attempt]);
+    const vp=viewportRef.current;if(!vp)return;if(active){vp.sync(doc);vp.setActive(true);}else vp.setActive(false);
+  }, [doc,attempt,active]);
 
   // 选择变化 → 高亮
   useEffect(() => {
-    viewportRef.current?.setSelection(new Set(selection));
-  }, [selection, doc,attempt]);
+    if(active)viewportRef.current?.setSelection(new Set(selection));
+  }, [selection, doc,attempt,active]);
 
   const viewControls=(<div className="viewport-bottom-bar" role="group" aria-label="视图工具"><div className="viewport-view-tools">
        <Popover trigger={['click']} placement="topLeft" open={viewMenuOpen} onOpenChange={setViewMenuOpen} destroyOnHidden content={<div className="studio-control-menu" role="menu" aria-label="视角"><div role="menuitemradio" aria-checked={cameraPreset==='presentation'} aria-label="沙盘视角" tabIndex={0} className="studio-menu-item" onClick={()=>choosePreset('presentation')}><CubeIcon/>沙盘视角</div><div role="menuitemradio" aria-checked={cameraPreset==='top'} aria-label="俯视布局" tabIndex={0} className="studio-menu-item" onClick={()=>choosePreset('top')}><ViewVerticalIcon/>俯视布局</div><div className="studio-menu-separator"/><div role="menuitem" aria-label="适应场景" tabIndex={0} className="studio-menu-item" onClick={()=>{viewportRef.current?.fitToScene();setViewMenuOpen(false)}}><FrameIcon/>适应场景</div></div>}><Button type="text" className="viewport-tool" disabled={viewportStatus!=='ready'} aria-label="切换视角" aria-expanded={viewMenuOpen} onKeyDown={event=>openMenu(event,setViewMenuOpen)}>{cameraPreset==='presentation'?<CubeIcon/>:<ViewVerticalIcon/>}{cameraPreset==='presentation'?'沙盘视角':'俯视布局'}<ChevronDownIcon/></Button></Popover>

@@ -32,7 +32,12 @@ export function proceduralMaps(surface:SurfaceDetail){
 }
 const images=new Map<string,Promise<HTMLImageElement>>();
 export function embeddedTexture(t:TextureMap,color:boolean){validateImageDataUrl(t.dataUrl);const texture=new THREE.Texture();texture.colorSpace=color?THREE.SRGBColorSpace:THREE.NoColorSpace;const wrap={repeat:THREE.RepeatWrapping,clamp:THREE.ClampToEdgeWrapping,mirror:THREE.MirroredRepeatWrapping};texture.wrapS=wrap[t.wrapS??'repeat'];texture.wrapT=wrap[t.wrapT??'repeat'];texture.repeat.set(...(t.repeat??[1,1]));texture.offset.set(...(t.offset??[0,0]));texture.rotation=t.rotation??0;texture.flipY=false;
- let promise=images.get(t.dataUrl);if(!promise){promise=new Promise<HTMLImageElement>((resolve,reject)=>{if(typeof Image==='undefined'){reject(Error('当前环境无法解码图片贴图'));return;}const image=new Image();image.onload=()=>{if(image.width>2048||image.height>2048)reject(Error('贴图分辨率超出限制'));else resolve(image);};image.onerror=()=>reject(Error('贴图图片解码失败'));image.src=t.dataUrl;});images.set(t.dataUrl,promise);if(images.size>32)images.delete(images.keys().next().value!);}
+ let promise=images.get(t.dataUrl);
+ if(!promise){
+  if(typeof Image==='undefined')promise=Promise.reject(Error('当前环境无法解码图片贴图'));
+  else{const image=new Image();image.src=t.dataUrl;promise=image.decode().then(()=>image,()=>{throw Error('贴图图片解码失败');});}
+  images.set(t.dataUrl,promise);if(images.size>32)images.delete(images.keys().next().value!);
+ }
  const ready=promise.then(image=>{texture.image=image;texture.needsUpdate=true;});return {texture,ready};
 }
 export function disposeMaterialTextures(m:THREE.Material){const material=m as THREE.MeshStandardMaterial;for(const key of ['map','normalMap','roughnessMap','metalnessMap','emissiveMap','aoMap'] as const)material[key]?.dispose();m.dispose();}

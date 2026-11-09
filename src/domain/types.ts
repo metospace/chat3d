@@ -1,10 +1,11 @@
+import {validDashboardBinding,type DashboardBinding} from './dashboard';
 import {validateSectionLoft,type SectionLoftParams} from './sectionLoft';
 import {validateProfileSweep,type ProfileSweepParams} from './profileSweep';
 import {physicalMaterialErrors} from './physicalMaterial';
 import {poseRigSchema,type PoseRig} from './poseRig';
 import {validateBlueprints,type ObjectBlueprint} from './objectBlueprint';
 import {validateProfile,profileCornerLimit} from './profileValidation';
-import {validateTextureMaps,validateSurface,type TextureMaps,type SurfaceDetail} from './textures';
+import {MAX_MATERIAL_MAP_BYTES,validateTextureMaps,validateSurface,type TextureMaps,type SurfaceDetail} from './textures';
 import type {Connection} from './connections';
 import {validateAnimation,type AnimationProgram} from './animation';
 // Scene DSL — 可编辑场景文档是唯一可信来源（方案第 4 节）
@@ -63,7 +64,7 @@ export type Geometry =
   | {type:'profileSweep';params:ProfileSweepParams}
   | {type:'loft';params:{rings:{center:Vec3;radiusX:number;radiusZ:number}[];segments:number}}
   | {type:'sweepTube';params:{points:Vec3[];radius:number;segments:number;radialSegments:number}}
-  | {type:'mesh';params:{positions:number[];indices:number[];normals?:number[];uvs?:number[]}}
+  | {type:'mesh';params:{positions:number[];indices:number[];normals?:number[];uvs?:number[];colors?:number[];colorItemSize?:3|4}}
   | {type:'lathe';params:{points:[number,number][];segments:number;smooth?:boolean;wallThickness?:number;capStart?:boolean;capEnd?:boolean}}
   | {type:'profile';params:{points:[number,number][];depth:number;holes?:[number,number][][];cornerRadius?:number;edgeRadius?:number}}
   | {type:'capsule';params:{radius:number;length:number}}
@@ -85,11 +86,14 @@ export interface Material {
   doubleSided?:boolean;
   surface?:SurfaceDetail;
   normalScale?:number;
+  vertexColors?:boolean;
   clearcoat?:number;
   clearcoatRoughness?:number;
   transmission?:number;
   thickness?:number;
   ior?:number;
+  specularIntensity?:number;
+  specularColor?:string;
   id: string;
   baseColor: string; // hex, e.g. #9099A4
   roughness: number; // [0,1]
@@ -148,6 +152,7 @@ export interface ViewState {
 }
 
 export interface SceneDocument {
+  dashboard?:DashboardBinding;
   animation?:AnimationProgram;
   schemaVersion: number;
   projectId: string;
@@ -209,10 +214,11 @@ export function validateGeometry(g: Geometry): Error[] {
     return errors;
   }
   if(g?.type==='mesh'){
-    const p=g.params;if(!p||!Array.isArray(p.positions)||p.positions.length<9||p.positions.length>600000||p.positions.length%3||p.positions.some(v=>typeof v!=='number'||!Number.isFinite(v)||Math.abs(v)>10000))return [new Error('网格坐标无效或超过20万顶点预算')];
-    if(!Array.isArray(p.indices)||!p.indices.length||p.indices.length%3||p.indices.length>600000||p.indices.some(i=>!Number.isInteger(i)||i<0||i>=p.positions.length/3))return [new Error('网格三角索引无效或超过20万三角形预算')];
+    const p=g.params;if(!p||!Array.isArray(p.positions)||p.positions.length<9||p.positions.length%3||p.positions.some(v=>typeof v!=='number'||!Number.isFinite(v)||Math.abs(v)>10000))return [new Error('网格坐标无效')];
+    if(!Array.isArray(p.indices)||!p.indices.length||p.indices.length%3||p.indices.some(i=>!Number.isInteger(i)||i<0||i>=p.positions.length/3))return [new Error('网格三角索引无效')];
     if(p.uvs!==undefined&&(!Array.isArray(p.uvs)||p.uvs.length!==p.positions.length/3*2||p.uvs.some(v=>!Number.isFinite(v)||Math.abs(v)>10000)))return [new Error('网格UV坐标无效')];
     if(p.normals!==undefined&&(!Array.isArray(p.normals)||p.normals.length!==p.positions.length||p.normals.some(v=>typeof v!=='number'||!Number.isFinite(v)||Math.abs(v)>1.001)))return [new Error('网格法线无效')];
+    if(p.colors!==undefined){const size=p.colorItemSize??3;if(![3,4].includes(size)||!Array.isArray(p.colors)||p.colors.length!==p.positions.length/3*size||p.colors.some(v=>typeof v!=='number'||!Number.isFinite(v)||v<0||v>1))return [new Error('网格顶点色无效')];}else if(p.colorItemSize!==undefined)return [new Error('网格缺少顶点色数据')];
     return [];
   }
   if(g?.type==='lathe'||g?.type==='profile'){
@@ -284,9 +290,10 @@ export function validateMaterial(m: Material): Error[] {
   if (!isFiniteNumber(m.roughness) || m.roughness < 0 || m.roughness > 1) errs.push(new Error(`材质 ${m.id} roughness 超出 [0,1]`));
   if (!isFiniteNumber(m.metalness) || m.metalness < 0 || m.metalness > 1) errs.push(new Error(`材质 ${m.id} metalness 超出 [0,1]`));
   if(m.emissive!==undefined&&!/^#[0-9a-f]{6}$/i.test(m.emissive))errs.push(new Error('发光颜色无效'));
-  if(m.emissiveIntensity!==undefined&&(!isFiniteNumber(m.emissiveIntensity)||m.emissiveIntensity<0||m.emissiveIntensity>2))errs.push(new Error('发光强度需为0–2'));
+  if(m.emissiveIntensity!==undefined&&(!isFiniteNumber(m.emissiveIntensity)||m.emissiveIntensity<0))errs.push(new Error('发光强度需为有限非负数'));
   if(m.alphaTest!==undefined&&(!Number.isFinite(m.alphaTest)||m.alphaTest<0||m.alphaTest>1))errs.push(new Error('透明裁切阈值需为0–1'));
   if(m.transparent!==undefined&&typeof m.transparent!=='boolean'||m.doubleSided!==undefined&&typeof m.doubleSided!=='boolean')errs.push(new Error('材质透明/双面设置无效'));
+  if(m.vertexColors!==undefined&&typeof m.vertexColors!=='boolean')errs.push(new Error('材质顶点色开关无效'));
   if(m.maps)errs.push(...validateTextureMaps(m.maps).map(x=>new Error(x)));
   if(m.surface&&!validateSurface(m.surface))errs.push(new Error('程序化表面参数无效'));
   if(m.normalScale!==undefined&&(!Number.isFinite(m.normalScale)||m.normalScale<0||m.normalScale>10))errs.push(new Error('法线强度需为0–10'));
@@ -337,8 +344,8 @@ export function validateDocument(doc: SceneDocument): Error[] {
     return errs;
   }
   if (!isFiniteNumber(doc.revision) || doc.revision < 0) errs.push(new Error('revision 非法'));
-  if((doc.nodes??[]).reduce((n,x)=>n+(x.geometry?.type==='mesh'?x.geometry.params.positions.length:0),0)>1500000)errs.push(new Error('项目网格总顶点数超过50万预算'));
-  if((doc.materials??[]).reduce((sum,m)=>sum+Object.values(m.maps??{}).reduce((n,t)=>n+(t?.dataUrl?.length??0),0),0)>12*1024*1024)errs.push(new Error('项目内嵌贴图总量超过12MB'));
+  if(doc.dashboard!==undefined&&!validDashboardBinding(doc.dashboard))errs.push(new Error('看板接入配置无效'));
+  if((doc.materials??[]).reduce((sum,m)=>sum+Object.values(m.maps??{}).reduce((n,t)=>n+(t?.dataUrl?.length??0),0),0)>MAX_MATERIAL_MAP_BYTES)errs.push(new Error('项目内嵌贴图总量超过192 MiB'));
   const nodesById = new Map((doc.nodes ?? []).map(n => [n.id, n]));
   const materialsById = new Map((doc.materials ?? []).map(m => [m.id, m]));
   const nodeIds = new Set<string>();

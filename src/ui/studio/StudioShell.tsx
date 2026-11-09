@@ -9,9 +9,9 @@ import {AppearanceMenu,useAppearance} from '../Appearance';
 import {hasPendingAppUpdate,useAppUpdate} from '../../domain/appUpdateClient';
 import {TaskQueue} from '../TaskQueue';
 import './pro-v6.css';
-export type StudioNavPage='home'|'workbench'|'asset'|'scene'|'team'|'tasks'|'settings';
-const NAV=[{page:'home',name:'项目工作台',label:'首页',icon:<HomeIcon/>},{page:'asset',name:'资产库',label:'资产库',icon:<CubeIcon/>},{page:'scene',name:'场景库',label:'场景库',icon:<LayersIcon/>},{page:'tasks',name:'任务中心',label:'任务记录',icon:<ClockIcon/>},{page:'team',name:'团队资源',label:'团队库',icon:<PersonIcon/>}] as const;
-const LABELS:Record<StudioNavPage,string>={home:'项目工作台',asset:'资产库',scene:'场景库',workbench:'工作台',team:'团队资源',tasks:'任务中心',settings:'设置'};
+export type StudioNavPage='home'|'workbench'|'asset'|'scene'|'team'|'dashboards'|'tasks'|'settings';
+const NAV=[{page:'home',name:'项目工作台',label:'首页',icon:<HomeIcon/>},{page:'asset',name:'资产库',label:'资产库',icon:<CubeIcon/>},{page:'scene',name:'场景库',label:'场景库',icon:<LayersIcon/>},{page:'dashboards',name:'看板接入',label:'看板接入',icon:<LayersIcon/>},{page:'tasks',name:'任务中心',label:'任务记录',icon:<ClockIcon/>},{page:'team',name:'团队资源',label:'团队库',icon:<PersonIcon/>}] as const;
+const LABELS:Record<StudioNavPage,string>={home:'项目工作台',asset:'资产库',scene:'场景库',workbench:'工作台',team:'团队资源',dashboards:'看板接入',tasks:'任务中心',settings:'设置'};
 export function StudioShell({activePage,onNavigate,disabled,taskQueueRequest,onTaskOpen,onTaskHistory,children}:{activePage:StudioNavPage;onNavigate:(page:StudioNavPage)=>void;disabled:boolean;taskQueueRequest:number;onTaskOpen:()=>void;onTaskHistory:()=>void;children?:(workbenchUtilities:ReactNode)=>ReactNode}){
  const client=useSyncExternalStore(subscribeTeamSession,getTeamSession,getTeamSession),sessionStatus=useSyncExternalStore(subscribeTeamSession,getTeamSessionStatus,getTeamSessionStatus);
  const updatePending=useAppUpdate(hasPendingAppUpdate),{resolved}=useAppearance();
@@ -29,10 +29,10 @@ export function StudioShell({activePage,onNavigate,disabled,taskQueueRequest,onT
  const routes:MenuDataItem[]=NAV.map(item=>({path:'/'+item.page,name:item.name,icon:item.icon,page:item.page,accessibleLabel:item.label}));
  return <>
   {workbench&&<div hidden>{account}</div>}
-  <ProLayout className="pro-studio-layout" title="Scenivo" logo={<span className="pro-brand-mark"><BrandMark/></span>} layout="mix" splitMenus={false} pure={workbench}
+  <ProLayout className="pro-studio-layout" title="Scenivo" logo={<span className="pro-brand-mark"><BrandMark/></span>} layout="mix" splitMenus={false}
    navTheme={resolved==='dark'?'realDark':'light'} contentWidth="Fluid" fixedHeader fixSiderbar siderWidth={224}
    collapsed={collapsed} onCollapse={setCollapsed} breakpoint="lg" locale="zh-CN" pageTitleRender={false}
-   location={{pathname:'/'+activePage}} route={{path:'/',routes:[{path:'/workspace',name:'工作空间',type:'group',children:routes.filter(item=>['home','tasks'].includes(item.page))},{path:'/resources',name:'资源管理',type:'group',children:routes.filter(item=>['asset','scene','team'].includes(item.page))}]}}
+   location={{pathname:'/'+activePage}} route={{path:'/',routes:[{path:'/workspace',name:'工作空间',type:'group',children:routes.filter(item=>['home','tasks'].includes(item.page))},{path:'/resources',name:'资源管理',type:'group',children:routes.filter(item=>['asset','scene','team','dashboards'].includes(item.page))}]}}
    menu={{locale:false,type:"group",defaultOpenAll:true}} menuProps={{'aria-label':'主导航',theme:'light'}}
    onMenuHeaderClick={()=>onNavigate('home')}
    menuItemRender={(item,dom)=>{const page=item.page as StudioNavPage;return <Button type="text" className="pro-studio-menu-link" aria-label={item.accessibleLabel} aria-current={activePage===page?'page':undefined} disabled={disabled} title={page==='team'&&!client?.user?'登录以访问团队资源':item.name} onClick={()=>page==='team'&&!client?.user?requestLogin('team'):page==='tasks'?onTaskHistory():onNavigate(page)}>{dom}{page==='team'&&!client?.user&&<LockClosedIcon className="pro-menu-lock"/>}</Button>;}}

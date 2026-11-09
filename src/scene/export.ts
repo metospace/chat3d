@@ -28,8 +28,11 @@ export function buildExportScene(doc:SceneDocument):THREE.Scene{
 }
 /** HTML shares immutable buffers for identical shapes and yields between construction batches. */
 export async function buildHtmlExportScene(doc:SceneDocument,onProgress?:(completed:number,total:number)=>void):Promise<THREE.Scene>{
+  return buildExportSceneAsync(doc,true,onProgress);
+}
+async function buildExportSceneAsync(doc:SceneDocument,shareGeometry:boolean,onProgress?:(completed:number,total:number)=>void):Promise<THREE.Scene>{
   const scene=exportSceneRoot(doc),total=doc.nodes.filter(node=>node.visible).length;let completed=0,last=performance.now();
-  try{for(const _ of exportSceneParts(doc,scene,true)){completed++;if(performance.now()-last>=12){onProgress?.(completed,total);const {promise,resolve}=Promise.withResolvers<void>();setTimeout(resolve,0);await promise;last=performance.now();}}onProgress?.(completed,total);return scene;}catch(error){disposeExportScene(scene);throw error;}
+  try{for(const _ of exportSceneParts(doc,scene,shareGeometry)){completed++;if(performance.now()-last>=12){onProgress?.(completed,total);const {promise,resolve}=Promise.withResolvers<void>();setTimeout(resolve,0);await promise;last=performance.now();}}onProgress?.(completed,total);return scene;}catch(error){disposeExportScene(scene);throw error;}
 }
 export async function prepareExportMaterials(scene:THREE.Scene):Promise<void> {
   const pending:Promise<void>[]=[];
@@ -72,12 +75,15 @@ function prepareGlbImages(scene:THREE.Scene):void {
   });
   converted.forEach((_replacement,texture)=>texture.dispose());
 }
-export async function exportGlb(doc: SceneDocument): Promise<ArrayBuffer> {
+export interface GlbExportProgress {stage:'geometry'|'textures'|'packing';completed?:number;total?:number}
+export async function exportGlb(doc: SceneDocument,onProgress?:(progress:GlbExportProgress)=>void): Promise<ArrayBuffer> {
   if (!doc.nodes.some((n)=>n.visible)) throw new Error('没有可导出的可见对象');
-  const scene=buildExportScene(doc);
+  const scene=await buildExportSceneAsync(doc,false,(completed,total)=>onProgress?.({stage:'geometry',completed,total}));
   try {
+    onProgress?.({stage:'textures'});
     await prepareExportMaterials(scene);
     prepareGlbImages(scene);
+    onProgress?.({stage:'packing'});
     const result=await new GLTFExporter().parseAsync(scene,{binary:true,onlyVisible:true});
     if (!(result instanceof ArrayBuffer)) throw new Error('GLB 导出结果格式错误');
     return result;

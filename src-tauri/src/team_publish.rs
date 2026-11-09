@@ -5,7 +5,7 @@ use tauri::ipc::{Channel, InvokeBody, JavaScriptChannelId, Request};
 use tauri_plugin_http::reqwest::{self, header, redirect, Body, Client};
 use url::{Host, Url};
 
-const REQUEST_LIMIT: usize = 55 * 1024 * 1024;
+const REQUEST_LIMIT: usize = 416 * 1024 * 1024;
 const RESPONSE_LIMIT: usize = 1024 * 1024;
 const UPLOAD_CHUNK_SIZE: usize = 64 * 1024;
 const ORIGIN_ERROR: &str = "请输入 HTTPS 服务根地址（本机测试可用 HTTP localhost）";
@@ -76,7 +76,7 @@ fn authorization(token: &str) -> Result<header::HeaderValue, String> {
 
 fn validate_body(body: &[u8]) -> Result<(), String> {
     if body.len() > REQUEST_LIMIT {
-        return Err("团队发布内容超过 55 MiB 限制".into());
+        return Err("团队发布内容超过 416 MiB 限制".into());
     }
     let json_space = |byte: &u8| matches!(*byte, b' ' | b'\t' | b'\n' | b'\r');
     let start = body.iter().position(|byte| !json_space(byte));
@@ -86,7 +86,7 @@ fn validate_body(body: &[u8]) -> Result<(), String> {
     };
     // The caller already serialized TeamPublish. Check the object envelope only;
     // semantic JSON validation belongs to the publish service, without building
-    // another potentially 55 MiB object tree in the desktop process.
+    // another potentially 416 MiB object tree in the desktop process.
     if body[start] != b'{' || body[end] != b'}' || start >= end {
         return Err("团队发布内容必须是非空 JSON 对象".into());
     }
@@ -99,7 +99,7 @@ fn validate_body(body: &[u8]) -> Result<(), String> {
 fn transport_error(error: &reqwest::Error) -> String {
     // Never format the source error: it can include URLs or proxy credentials.
     if error.is_timeout() {
-        format!("团队发布请求超时（连接限时 15 秒，整个请求限时 300 秒）。{AMBIGUOUS_RESULT}")
+        format!("团队发布请求超时（连接限时 15 秒，整个请求限时 900 秒）。{AMBIGUOUS_RESULT}")
     } else if error.is_connect() {
         "无法连接团队服务，请检查网络、代理及服务地址后手动重试。".into()
     } else {
@@ -149,7 +149,7 @@ async fn publish_bytes(
         .redirect(redirect::Policy::none())
         .retry(reqwest::retry::never())
         .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(300))
+        .timeout(Duration::from_secs(900))
         .build()
         .map_err(|_| "无法初始化团队发布网络客户端，请检查系统网络和代理配置".to_string())?;
     let mut response = client.post(endpoint)
@@ -247,12 +247,13 @@ mod tests {
             assert!(validate_body(body).is_err());
         }
         assert!(validate_body(b" \n{\"key\":\"test\",\"payload\":{}}\t").is_ok());
-        let mut body = vec![b' '; REQUEST_LIMIT];
+        assert_eq!(REQUEST_LIMIT, 416 * 1024 * 1024);
+        // Allocate the overflow byte up front instead of doubling a full buffer on push.
+        let mut body = vec![b' '; REQUEST_LIMIT + 1];
         body[..6].copy_from_slice(b"{\"x\":1");
         body[REQUEST_LIMIT - 1] = b'}';
-        assert!(validate_body(&body).is_ok());
-        body.push(b' ');
-        assert!(validate_body(&body).unwrap_err().contains("55 MiB"));
+        assert!(validate_body(&body[..REQUEST_LIMIT]).is_ok());
+        assert!(validate_body(&body).unwrap_err().contains("416 MiB"));
     }
 
     #[test]
@@ -284,6 +285,8 @@ mod tests {
         assert!(error.is_timeout());
         let message = transport_error(&error);
         assert!(message.contains("超时"));
+        assert!(message.contains("连接限时 15 秒"));
+        assert!(message.contains("整个请求限时 900 秒"));
         assert!(message.contains("服务器可能已完成发布"));
         assert!(message.contains("手动使用同一发布标识重试"));
         assert!(!message.contains("127.0.0.1"));

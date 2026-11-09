@@ -40,4 +40,5 @@ const server=createServer((req,res)=>version(req,res,()=>sharing(req,res,()=>pyt
   res.writeHead(200,{'Content-Type':types[extname(file)]??'application/octet-stream','Cache-Control':pathname.startsWith('/assets/')?'public,max-age=31536000,immutable':'no-cache','X-Content-Type-Options':'nosniff'});res.end(req.method==='HEAD'?undefined:bytes);
  }catch{res.writeHead(404).end('Not found');}
 })))))));
+server.requestTimeout=900000; // Match the longest supported team publication upload.
 server.listen(Number(process.env.PORT??1420),bindHost,()=>console.log('chat3d server ready (model proxy enabled)'));

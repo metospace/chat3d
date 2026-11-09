@@ -7,6 +7,7 @@ export function generationFailureMessage(error:unknown,options:GenerationFailure
  const raw=error instanceof Error?error.message:String(error??'');
  if(/^(?:本次调整未成功，(?:场景未修改|已保留之前的预览)。|已停止(?:本次调整|生成)，|场景已变化，本次结果未应用。)/.test(raw)&&!technicalPayload.test(raw))return raw;
  const outcome=options.previewRetained?retained:unchanged;
+ if(/failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed|outdated optimize dep|unable to preload css/i.test(raw))return outcome+'本地程序模块加载失败，并非已确认的模型连接故障。请刷新页面后恢复输入；若仍失败，请重启或更新应用后再发送。';
  if(/未确认执行 Blender|BlenderScriptDeclined/.test(raw))return outcome+'本次 Blender 执行授权未通过，脚本没有发送。请重新选择 Blender 生成后发送。';
  if(/模型没有调用 Blender|本轮没有返回 Blender/.test(raw))return outcome+'模型未执行 Blender 建模工具，没有生成模型文件。请查看失败原因或任务记录中的模型回复。';
  if(/Blender Python 未启用|Blender Python is not enabled|执行令牌/.test(raw))return outcome+'本机 Blender Python 服务未开启或执行授权已失效，请重新连接本机 Blender。';

@@ -16,7 +16,14 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(({mode}) => ({
   define: {__APP_BUILD_COMMIT__: JSON.stringify(process.env.GITHUB_SHA ?? "local")},
+  cacheDir: 'node_modules/.vite-app',
+  optimizeDeps: {include:['@earendil-works/pi-agent-core','@earendil-works/pi-ai','@earendil-works/pi-ai/api/openai-completions']},
   plugins: [react(), tailwindcss(), {
+    name: 'scenivo-isolated-test-cache',
+    config(config) {
+      if(config.server?.middlewareMode)return {cacheDir:`node_modules/.vite-ssr/${process.pid}`,optimizeDeps:{noDiscovery:true,include:[]}};
+    },
+  }, {
     name: 'scenivo-web-entry',
     configureServer(server) {
       server.middlewares.use((request, response, next) => {

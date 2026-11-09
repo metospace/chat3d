@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {mkdtemp,rm,readdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createServer} from 'node:http';
@@ -105,18 +105,26 @@ try{
  team.db.exec('DROP TRIGGER simulated_failure');team.publish(alice,retry,validateTeamPayload);assert.equal(team.list('scene').length,count+1);console.log('PASS storage failure rolls back all writes and retry succeeds');
  team.close();team=openTeam(join(dir,'test.sqlite'));
  check('restart retains identities, sessions and immutable publications',()=>{assert.equal(team.authenticate(a.token).id,alice.id);assert.deepEqual(team.read(first.id,1).payload,scene);assert.equal(team.list('scene').find(x=>x.id===first.id).version,3);assert.deepEqual(team.publish(alice,request,validateTeamPayload),first);});
- const middleware=teamMiddleware(team,validateTeamPayload,{origins:['http://tauri.localhost']});server=createServer((req,res)=>middleware(req,res,()=>res.writeHead(404).end()));await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base=`http://127.0.0.1:${server.address().port}/api/team/`;
+ let middleware=teamMiddleware(team,validateTeamPayload,{origins:['http://tauri.localhost']});server=createServer((req,res)=>middleware(req,res,()=>res.writeHead(404).end()));await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base=`http://127.0.0.1:${server.address().port}/api/team/`;
  const call=(path,options={})=>fetch(base+path,options);
  assert.equal((await call('items?kind=scene')).status,401);
  assert.equal((await call('items?kind=scene',{headers:{Origin:'https://evil.invalid',Authorization:`Bearer ${a.token}`}})).status,403);
  const cors=await call('publish',{method:'OPTIONS',headers:{Origin:'http://tauri.localhost'}});assert.equal(cors.status,204);assert.equal(cors.headers.get('access-control-allow-origin'),'http://tauri.localhost');
  assert.equal((await call('publish',{method:'POST',headers:{Authorization:`Bearer ${a.token}`,'Content-Type':'application/json'},body:'null'})).status,400);
- const paddedRequest=bytes=>'{"padding":"'+'x'.repeat(bytes-14)+'"}';
- const withinHttpCap=await call('login',{method:'POST',headers:{'Content-Type':'application/json'},body:paddedRequest(55*1024*1024)});
- assert.equal(withinHttpCap.status,400,'55 MiB body reaches login validation');
- const beyondHttpCap=await call('login',{method:'POST',headers:{'Content-Type':'application/json'},body:paddedRequest(55*1024*1024+1)});
- assert.equal(beyondHttpCap.status,413);assert.match(await beyondHttpCap.text(),/55 MiB/);
- console.log('PASS HTTP body accepts 55 MiB and rejects overflow');
+ // Stream a tiny JSON object plus whitespace from one reusable chunk: do not
+ // construct another 416 MiB string or a large parsed padding property in the client.
+ const paddingChunk=Buffer.alloc(1024*1024,0x20);
+ const paddedRequest=async function*(bytes){yield Buffer.from('{}');for(let remaining=bytes-2;remaining>0;){const length=Math.min(remaining,paddingChunk.length);yield paddingChunk.subarray(0,length);remaining-=length;}};
+ const paddedCall=(path,bytes)=>call(path,{method:'POST',headers:{'Content-Type':'application/json','Content-Length':String(bytes)},body:paddedRequest(bytes),duplex:'half'});
+ const withinHttpCap=await paddedCall('login',416*1024*1024);
+ assert.equal(withinHttpCap.status,400,'416 MiB body reaches login validation');await withinHttpCap.text();
+ const beyondHttpCap=await paddedCall('login',416*1024*1024+1);
+ assert.equal(beyondHttpCap.status,413);assert.match(await beyondHttpCap.text(),/416 MiB/);
+ const withinDashboardCap=await paddedCall('dashboards/uploads',2*1024*1024);
+ assert.equal(withinDashboardCap.status,401,'2 MiB dashboard body reaches authentication');await withinDashboardCap.text();
+ const beyondDashboardCap=await paddedCall('dashboards/uploads',2*1024*1024+1);
+ assert.equal(beyondDashboardCap.status,413);assert.match(await beyondDashboardCap.text(),/2 MiB/);
+ console.log('PASS HTTP body accepts 416 MiB and rejects overflow; dashboard requests remain capped at 2 MiB');
  const result=await call('items?kind=scene',{headers:{Authorization:`Bearer ${b.token}`}});assert.equal(result.status,200);assert.equal((await result.json()).length,2);
  const httpCategoryRequest={...request,itemId:first.id,expectedVersion:3,key:crypto.randomUUID(),categoryPath:['  场景目录  ','装配车间']};
  const httpCategory=await call('publish',{method:'POST',headers:{Authorization:`Bearer ${a.token}`,'Content-Type':'application/json'},body:JSON.stringify(httpCategoryRequest)});assert.equal(httpCategory.status,200);assert.deepEqual(await httpCategory.json(),{id:first.id,version:4});
@@ -125,6 +133,47 @@ try{
  const httpBad=await call('publish',{method:'POST',headers:{Authorization:`Bearer ${a.token}`,'Content-Type':'application/json'},body:JSON.stringify({...httpCategoryRequest,expectedVersion:4,key:crypto.randomUUID(),categoryPath:['未分类']})});assert.equal(httpBad.status,400);assert.equal(team.list('scene').find(row=>row.id===first.id).version,4);
  console.log('PASS HTTP category snapshots roundtrip without altering fixed old versions or accepting invalid paths');
  console.log('PASS HTTP auth, origin allowlist, preflight and malformed request checks');
+ // Uploads remain private, bounded JSON requests and reuse the normal publication transaction.
+ const uploadChunkBytes=1024*1024,uploadHash=value=>createHash('sha256').update(value).digest('hex');
+ const uploadFingerprint=bytes=>uploadHash(Array.from({length:Math.ceil(bytes.length/uploadChunkBytes)},(_,index)=>uploadHash(bytes.subarray(index*uploadChunkBytes,(index+1)*uploadChunkBytes))).join(''));
+ const uploadPost=(path,body,token=a.token,extra={})=>call('publish-uploads/'+path,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',...extra},body:JSON.stringify(body)});
+ const uploadStart=async(body,token=a.token,digest)=>{const bytes=Buffer.from(JSON.stringify(body)),response=await uploadPost('start',{key:body.key,total:bytes.length,digest:digest??uploadFingerprint(bytes)},token);assert.equal(response.status,200);return {body,bytes,state:await response.json()};};
+ const uploadRest=async(upload,token=a.token)=>{for(let offset=upload.state.offset;offset<upload.bytes.length;offset+=uploadChunkBytes){const bytes=upload.bytes.subarray(offset,offset+uploadChunkBytes),response=await uploadPost(upload.state.uploadId+'/chunk',{offset,data:bytes.toString('base64')},token);assert.equal(response.status,200);const confirmed=await response.json();assert.equal(confirmed.offset,offset+bytes.length);assert.equal(confirmed.total,upload.bytes.length);}};
+ assert.equal((await uploadPost('start',{key:crypto.randomUUID(),total:10,digest:'0'.repeat(64)},'invalid')).status,401);
+ const viewerSession=team.login('viewer','isolated-test-password-v');assert.equal((await uploadPost('start',{key:crypto.randomUUID(),total:10,digest:'0'.repeat(64)},viewerSession.token)).status,403);
+ const deniedOrigin=await uploadPost('start',{key:crypto.randomUUID(),total:10,digest:'0'.repeat(64)},a.token,{Origin:'https://evil.invalid'});assert.equal(deniedOrigin.status,403);assert.match((await deniedOrigin.json()).error,/来源/);
+ const allowedOrigin=await uploadPost('start',{key:'bad',total:0,digest:'bad'},a.token,{Origin:'http://tauri.localhost'});assert.equal(allowedOrigin.status,400);assert.equal(allowedOrigin.headers.get('access-control-allow-origin'),'http://tauri.localhost');
+ const uploadPreflight=await call('publish-uploads/start',{method:'OPTIONS',headers:{Origin:'http://tauri.localhost'}});assert.equal(uploadPreflight.status,204);
+ for(const value of [{key:'bad',total:10,digest:'0'.repeat(64)},{key:crypto.randomUUID(),total:416*1024*1024+1,digest:'0'.repeat(64)},{key:crypto.randomUUID(),total:10,digest:'bad'},{key:crypto.randomUUID(),total:-1,digest:'0'.repeat(64)}])assert.equal((await uploadPost('start',value)).status,400);
+ const maxUpload=await uploadPost('start',{key:crypto.randomUUID(),total:416*1024*1024,digest:'0'.repeat(64)});assert.equal(maxUpload.status,200,'416 MiB declared publication is accepted without allocating its bytes');
+ const oversizedUploadRequest=await paddedCall('publish-uploads/start',2*1024*1024+1);assert.equal(oversizedUploadRequest.status,413);await oversizedUploadRequest.text();
+ const smallUpload=await uploadStart({...request,key:crypto.randomUUID(),name:'小分块发布'});await uploadRest(smallUpload);const smallUploaded=await uploadPost(smallUpload.state.uploadId+'/complete',{});assert.equal(smallUploaded.status,200);const smallResult=await smallUploaded.json();assert.deepEqual(team.read(smallResult.id,1).payload,scene);
+ assert.deepEqual(await (await uploadPost(smallUpload.state.uploadId+'/complete',{})).json(),smallResult,'lost complete response returns identical version');
+ const smallRestart=await uploadStart(smallUpload.body);assert.deepEqual(smallRestart.state.result,smallResult);assert.equal(smallRestart.state.offset,smallUpload.bytes.length);
+ const alternateBytes=Buffer.from(JSON.stringify({...smallUpload.body,name:'同标识变更'}));assert.equal((await uploadPost('start',{key:smallUpload.body.key,total:alternateBytes.length,digest:uploadFingerprint(alternateBytes)})).status,409);
+ assert.equal((await uploadPost(smallUpload.state.uploadId+'/complete',{},b.token)).status,404);
+ const largeUpload=await uploadStart({...request,key:crypto.randomUUID(),name:'大型分块发布',payload:{...scene,scene:{...scene.scene,projectId:'大模型-'+ 'x'.repeat(9*1024*1024)}}});assert.ok(largeUpload.bytes.length>8*1024*1024);
+ const firstChunk=largeUpload.bytes.subarray(0,uploadChunkBytes).toString('base64');
+ assert.equal((await uploadPost(largeUpload.state.uploadId+'/complete',{})).status,409);
+ for(const chunk of [{offset:0,data:'!!!!'},{offset:0,data:'Zh=='},{offset:-1,data:'YQ=='},{offset:0,data:Buffer.alloc(uploadChunkBytes+1).toString('base64')},{offset:uploadChunkBytes,data:firstChunk},{offset:0,data:'YQ=='}]){const response=await uploadPost(largeUpload.state.uploadId+'/chunk',chunk);assert.ok([400,409].includes(response.status));}
+ assert.equal((await uploadPost(largeUpload.state.uploadId+'/chunk',{offset:0,data:firstChunk},b.token)).status,404);
+ const firstConfirmation=await uploadPost(largeUpload.state.uploadId+'/chunk',{offset:0,data:firstChunk});assert.equal(firstConfirmation.status,200);assert.equal((await firstConfirmation.json()).offset,uploadChunkBytes);
+ assert.equal((await uploadPost(largeUpload.state.uploadId+'/chunk',{offset:0,data:firstChunk})).status,200,'exact duplicate is acknowledged');
+ const changedChunk=Buffer.from(largeUpload.bytes.subarray(0,uploadChunkBytes));changedChunk[100]^=1;assert.equal((await uploadPost(largeUpload.state.uploadId+'/chunk',{offset:0,data:changedChunk.toString('base64')})).status,409);
+ // A canceled/closed client sends no complete request; a reopened service resumes
+ // only the fsynced confirmed offset, without publishing the partial upload.
+ assert.equal(team.list('scene','大型分块发布').length,0);team.close();team=openTeam(join(dir,'test.sqlite'));middleware=teamMiddleware(team,validateTeamPayload,{origins:['http://tauri.localhost']});
+ const resumedUpload=await uploadStart(largeUpload.body);assert.equal(resumedUpload.state.uploadId,largeUpload.state.uploadId);assert.equal(resumedUpload.state.offset,uploadChunkBytes);await uploadRest(resumedUpload);
+ const largeCompleted=await uploadPost(resumedUpload.state.uploadId+'/complete',{});assert.equal(largeCompleted.status,200);const largeResult=await largeCompleted.json();assert.equal(team.read(largeResult.id,1).payload.scene.projectId.length,largeUpload.body.payload.scene.projectId.length);assert.equal(team.list('scene','大型分块发布').length,1);
+ assert.equal((await readdir(join(dir,'test.sqlite.publish-uploads'))).includes(resumedUpload.state.uploadId+'.part'),false,'success removes temporary model bytes');
+ const digestMismatch=await uploadStart({...request,key:crypto.randomUUID(),name:'摘要不匹配'},a.token,'0'.repeat(64));await uploadRest(digestMismatch);assert.equal((await uploadPost(digestMismatch.state.uploadId+'/complete',{})).status,409);assert.equal(team.list('scene','摘要不匹配').length,0);
+ for(const bytes of [Buffer.from('{broken'),Buffer.from([0xff,0xfe,0xfd])]){const malformedKey=crypto.randomUUID(),response=await uploadPost('start',{key:malformedKey,total:bytes.length,digest:uploadFingerprint(bytes)});assert.equal(response.status,200);const malformedUpload={bytes,state:await response.json()};await uploadRest(malformedUpload);assert.equal((await uploadPost(malformedUpload.state.uploadId+'/complete',{})).status,400);}
+ const wrongKeyBody={...request,key:crypto.randomUUID(),name:'正文标识不匹配'},wrongKeyBytes=Buffer.from(JSON.stringify(wrongKeyBody)),wrongKeyStart=await uploadPost('start',{key:crypto.randomUUID(),total:wrongKeyBytes.length,digest:uploadFingerprint(wrongKeyBytes)});const wrongKeyUpload={bytes:wrongKeyBytes,state:await wrongKeyStart.json()};await uploadRest(wrongKeyUpload);assert.equal((await uploadPost(wrongKeyUpload.state.uploadId+'/complete',{})).status,400);
+ for(const [name,target,status] of [['冲突分块',{itemId:first.id,expectedVersion:0},409],['非法分块',{payload:{}},400],['非所有者分块',{itemId:first.id,expectedVersion:4},403]]){const token=status===403?b.token:a.token,upload=await uploadStart({...request,...target,key:crypto.randomUUID(),name},token);await uploadRest(upload,token);assert.equal((await uploadPost(upload.state.uploadId+'/complete',{},token)).status,status);}
+ const storageUpload=await uploadStart({...request,key:crypto.randomUUID(),name:'分块存储失败'});await uploadRest(storageUpload);team.db.exec("CREATE TRIGGER upload_storage_failure BEFORE INSERT ON versions WHEN NEW.name='分块存储失败' BEGIN SELECT RAISE(ABORT,'simulated upload storage failure'); END;");
+ assert.equal((await uploadPost(storageUpload.state.uploadId+'/complete',{})).status,500);assert.equal(team.list('scene','分块存储失败').length,0);team.db.exec('DROP TRIGGER upload_storage_failure');const storageResult=await uploadPost(storageUpload.state.uploadId+'/complete',{});assert.equal(storageResult.status,200);const storedResult=await storageResult.json();assert.deepEqual(await (await uploadPost(storageUpload.state.uploadId+'/complete',{})).json(),storedResult);
+ const lostMetadata=await uploadStart({...request,key:crypto.randomUUID(),name:'完成回执存储失败'});await uploadRest(lostMetadata);team.db.exec("CREATE TRIGGER upload_receipt_failure BEFORE UPDATE OF result ON publish_uploads WHEN NEW.key='"+lostMetadata.body.key+"' BEGIN SELECT RAISE(ABORT,'simulated receipt storage failure'); END;");assert.equal((await uploadPost(lostMetadata.state.uploadId+'/complete',{})).status,500);assert.equal(team.list('scene','完成回执存储失败').length,1);team.db.exec('DROP TRIGGER upload_receipt_failure');assert.equal((await uploadPost(lostMetadata.state.uploadId+'/complete',{})).status,200);assert.equal(team.list('scene','完成回执存储失败').length,1);
+ console.log('PASS small/large chunk uploads, cancellation/restart/resume, duplicate verification, fixed-key binding, lost responses, storage recovery, conflicts, auth and unchanged CORS/2 MiB boundaries');
  team.logout(a.token);assert.throws(()=>team.authenticate(a.token),e=>e.status===401);team.disable('bob');assert.throws(()=>team.authenticate(b.token),e=>e.status===401);console.log('PASS logout and account disable revoke access');
 const platformUsers=new Map([['pat-new',{username:'carol',disabled:false}],['pat-admin',{username:'admin',disabled:false}],['pat-off',{username:'carol',disabled:true}],['pat-dead',null]]);
 let oauthResponse={code:0,data:{access_token:'pat-admin',refresh_token:'refresh-snake',expires_in:3600}};

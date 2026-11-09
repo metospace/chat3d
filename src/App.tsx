@@ -1,3 +1,4 @@
+import {DashboardPage,DashboardSceneView} from './ui/DashboardPage';
 import {AccessibleModal as Modal} from './ui/kit/AccessibleModal';
 import {exportHtml} from './scene/exportHtml';
 import './ui/studio/tokens.css';
@@ -7,6 +8,7 @@ import './ui/theme/product.css';
 import {usePublishUpdateContext} from './ui/appUpdateContext';
 import {AppUpdateDialog, AppUpdateNotice} from './ui/AppUpdateNotice';
 import {SaveToast,isLibrarySaveNotice} from './ui/SaveToast';
+import {OperationProgress,nextProgressPaint,type OperationProgressProps} from './ui/OperationProgress';
 import {StudioShell,StudioMain,type StudioNavPage} from './ui/studio';
 import {useCompositionTool} from './ui/manualComposition';
 import {useLibraryAssetDrag} from './ui/libraryAssetDrag';
@@ -75,63 +77,94 @@ export default function App() {
   const autosaveError = useEditorStore((s) => s.autosaveError);
   const fileRef = useRef<HTMLInputElement>(null);
   const modelFileRef=useRef<HTMLInputElement>(null);
-  const [projectNotice, setProjectNotice] = useState('');
-  const [exportNotice,setExportNotice]=useState<{message:string}|null>(null);
+  const [projectNotice,updateProjectNotice]=useState('');
+  const [projectNoticeTone,setProjectNoticeTone]=useState<'success'|'error'|'info'>('info');
+  const setProjectNotice=useCallback((message:string,tone:'success'|'error'|'info'='info')=>{updateProjectNotice(message);setProjectNoticeTone(tone);},[]);
+  const [exportNotice,setExportNotice]=useState<{message:string;tone?:'success'|'error'}|null>(null);
   const closeExportNotice=useCallback(()=>setExportNotice(null),[]);
   const [conflictDismissed,setConflictDismissed]=useState(false),[backupStatus,setBackupStatus]=useState(''),[backupBusy,setBackupBusy]=useState(false);
-  async function backupConflict(){setBackupBusy(true);setBackupStatus('');try{setBackupStatus(await downloadJson(exportWorkspaceBackup(),'workspace'));}catch(e){setBackupStatus(e instanceof Error?e.message:String(e));}finally{setBackupBusy(false);}}
+  async function backupConflict(){setBackupBusy(true);setBackupStatus('');try{await nextProgressPaint();setBackupStatus(await downloadJson(exportWorkspaceBackup(),'workspace'));}catch(e){setBackupStatus(e instanceof Error?e.message:String(e));}finally{setBackupBusy(false);}}
   const closeSaveNotice=useCallback(()=>setProjectNotice(''),[]);
   const saveNotice=isLibrarySaveNotice(projectNotice)&&!autosaveError;
   const [modulePage,setModulePage]=useState<StudioNavPage>('home');const [libraryRefresh,setLibraryRefresh]=useState(0);
   const [librarySaving,setLibrarySaving]=useState(false),[showLibrarySave,setShowLibrarySave]=useState(false);
+  const [dashboardOpen,setDashboardOpen]=useState(false);
+  const dashboard=useEditorStore(s=>s.doc.dashboard);
 
   const [exporting, setExporting] = useState(false);
-  const [exportProgress,setExportProgress]=useState('');
+  const [exportProgress,setExportProgress]=useState<OperationProgressProps|null>(null);
+  const [importProgress,setImportProgress]=useState<OperationProgressProps|null>(null);
+  const importBusy=useRef(false);
   const htmlExportBusy=useRef(false);
   const downloadGlb = async () => {
-    setExportNotice(null);
-    setExporting(true);
+    if(htmlExportBusy.current)return;
+    htmlExportBusy.current=true;setExportNotice(null);setExporting(true);setExportProgress({title:'导出 GLB',stage:'选择保存位置'});
+    const source=useEditorStore.getState().doc;
     try {
-      const data = await exportGlb(structuredClone(useEditorStore.getState().doc));
-      const message=await exportFile(data,'glb','scenivo-model.glb');
+      await nextProgressPaint();
+      const message=await exportFile(async()=>{
+        setExportProgress({title:'导出 GLB',stage:'准备模型数据'});await nextProgressPaint();
+        const data=await exportGlb(structuredClone(source),progress=>setExportProgress({title:'导出 GLB',stage:progress.stage==='geometry'?'构建导出模型':progress.stage==='textures'?'处理材质与贴图':'打包 GLB 文件',completed:progress.completed,total:progress.total}));
+        setExportProgress({title:'导出 GLB',stage:'保存文件'});await nextProgressPaint();return data;
+      },'glb','scenivo-model.glb');
       if(message)setExportNotice({message});
-    } catch (e) { setExportNotice({message:`GLB 导出失败：${e instanceof Error ? e.message : String(e)}`}); }
-    finally { setExporting(false); }
+    } catch (e) { setExportNotice({message:`GLB 导出失败：${e instanceof Error ? e.message : String(e)}`,tone:'error'}); }
+    finally { htmlExportBusy.current=false;setExporting(false);setExportProgress(null); }
   };
   const downloadHtml = async () => {
     if(htmlExportBusy.current)return;
-    htmlExportBusy.current=true;setExportNotice(null);setExporting(true);setExportProgress('请选择 HTML 保存位置…');
+    htmlExportBusy.current=true;setExportNotice(null);setExporting(true);setExportProgress({title:'导出 HTML',stage:'选择保存位置'});
     const state=useEditorStore.getState(),title=useWorkspaceStore.getState().sessions.find(s=>s.id===useWorkspaceStore.getState().activeId)?.title??'Scenivo 模型';
     const source=state.doc;
     try {
+      await nextProgressPaint();
       const message=await exportFile(async()=>{
-        setExportProgress('正在准备 HTML 导出…');
-        const html=await exportHtml(structuredClone(source),title,progress=>setExportProgress(progress.stage==='geometry'?`正在构建导出模型 ${progress.completed??0}/${progress.total??0}…`:progress.stage==='textures'?'正在处理材质与贴图…':'正在打包离线 HTML…'));
-        setExportProgress('正在保存 HTML 文件…');
-        return html;
+        setExportProgress({title:'导出 HTML',stage:'准备模型数据'});await nextProgressPaint();
+        const html=await exportHtml(structuredClone(source),title,progress=>setExportProgress({title:'导出 HTML',stage:progress.stage==='geometry'?'构建导出模型':progress.stage==='textures'?'处理材质与贴图':'打包离线 HTML',completed:progress.completed,total:progress.total}));
+        setExportProgress({title:'导出 HTML',stage:'保存文件'});await nextProgressPaint();return html;
       },'html',`scenivo-${source.projectId.slice(0,8)}.html`);
       if(message)setExportNotice({message});
-    }catch(error){setExportNotice({message:`HTML 导出失败：${error instanceof Error?error.message:String(error)}`});}
-    finally{htmlExportBusy.current=false;setExporting(false);setExportProgress('');}
+    }catch(error){setExportNotice({message:`HTML 导出失败：${error instanceof Error?error.message:String(error)}`,tone:'error'});}
+    finally{htmlExportBusy.current=false;setExporting(false);setExportProgress(null);}
   };
   const saveProject = async () => {
-    setExportNotice(null);
-    setExporting(true);
+    if(htmlExportBusy.current)return;
+    htmlExportBusy.current=true;setExportNotice(null);setExporting(true);setExportProgress({title:'下载项目 JSON',stage:'选择保存位置'});
+    const source=useEditorStore.getState().doc;
     try {
-      const doc = useEditorStore.getState().doc;
-      const message=await exportFile(serializeProject(doc),'json',`scenivo-${doc.projectId.slice(0,8)}.chat3d.json`);
-      if(message){useEditorStore.getState().markSaved();setExportNotice({message});}
-    } catch (e) { setExportNotice({message:`项目下载失败：${e instanceof Error ? e.message : String(e)}`}); }
-    finally{setExporting(false);}
+      await nextProgressPaint();
+      const message=await exportFile(async()=>{setExportProgress({title:'下载项目 JSON',stage:'序列化项目数据'});await nextProgressPaint();const json=serializeProject(source);setExportProgress({title:'下载项目 JSON',stage:'保存文件'});await nextProgressPaint();return json;},'json',`scenivo-${source.projectId.slice(0,8)}.chat3d.json`);
+      if(message){if(useEditorStore.getState().doc===source)useEditorStore.getState().markSaved();setExportNotice({message});}
+    } catch (e) { setExportNotice({message:`项目下载失败：${e instanceof Error ? e.message : String(e)}`,tone:'error'}); }
+    finally{htmlExportBusy.current=false;setExporting(false);setExportProgress(null);}
   };
   const openProject = async (file: File) => {
+    if(importBusy.current)return;
+    importBusy.current=true;setProjectNotice('');setImportProgress({title:'导入项目',stage:'读取文件',detail:file.name});
     try {
+      await nextProgressPaint();
       if (file.size > MAX_PROJECT_BYTES) throw new Error(PROJECT_SIZE_ERROR);
-      const {doc,teamCategoryPath} = parseProjectFile(await file.text());
-      const sceneCategory = teamCategoryPath === undefined ? undefined : await acquirePublishedCategory('scene',teamCategoryPath);
-      if (!createSession(doc,sceneCategory === undefined ? {} : {sceneCategory})) throw new Error('请先完成当前操作，或检查会话存储状态');
-      setProjectNotice(`已导入新会话，共 ${doc.nodes.length} 个对象`);
-    } catch (e) { setProjectNotice(`打开失败：${e instanceof Error ? e.message : String(e)}`); }
+      const text=await file.text();setImportProgress({title:'导入项目',stage:'校验项目数据',detail:file.name});await nextProgressPaint();
+      const {doc,teamCategoryPath}=parseProjectFile(text);
+      const sceneCategory=teamCategoryPath===undefined?undefined:await acquirePublishedCategory('scene',teamCategoryPath);
+      setImportProgress({title:'导入项目',stage:'创建项目会话',detail:file.name});await nextProgressPaint();
+      if (!createSession(doc,sceneCategory===undefined?{}:{sceneCategory})) throw new Error('请先完成当前操作，或检查会话存储状态');
+      setProjectNotice(`已导入新会话，共 ${doc.nodes.length} 个对象`,'success');
+    } catch (e) { setProjectNotice(`打开失败：${e instanceof Error ? e.message : String(e)}`,'error'); }
+    finally{importBusy.current=false;setImportProgress(null);}
+  };
+  const openGlb=async(file:File)=>{
+    if(importBusy.current)return;
+    importBusy.current=true;setProjectNotice('');setImportProgress({title:'导入 GLB',stage:'读取文件',detail:file.name});
+    try{
+      await nextProgressPaint();assertGlbSize(file.size);const data=await file.arrayBuffer();
+      const labels={checking:'校验文件结构',parsing:'解析网格与材质',converting:'转换模型部件',validating:'检查模型数据'};
+      const result=await importGlb(data,file.name,async stage=>{setImportProgress({title:'导入 GLB',stage:labels[stage],detail:file.name});await nextProgressPaint();});
+      setImportProgress({title:'导入 GLB',stage:'创建项目会话',detail:file.name});await nextProgressPaint();
+      if(!createSession(result.doc,{moduleKind:'asset',title:file.name.replace(/\.glb$/i,'')||'导入模型',assetCategory:'其他'}))throw Error('请结束当前生成后再导入');
+      setModulePage('workbench');useCompositionTool.setState({mode:'orbit'});setProjectNotice(`已导入 ${result.doc.nodes.length} 个网格部件到新会话。${result.warnings.join(' ')}`,'success');
+    }catch(error){setProjectNotice(`网格导入失败：${error instanceof Error?error.message:String(error)}`,'error');}
+    finally{importBusy.current=false;setImportProgress(null);}
   };
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => {
@@ -176,7 +209,6 @@ export default function App() {
   const navigateStudio=useCallback((page:StudioNavPage)=>{setModulePage(page);setFocusScene(false);},[]);
   useEffect(()=>{void probeServerRenderer();void initializeWorkspace();},[]);
   useEffect(()=>{setTaskDetailsOpen(false);},[workspace.activeId]);
-  useEffect(()=>{setProjectNotice('');},[modulePage]);
   useEffect(()=>{const key=(e:KeyboardEvent)=>{if(e.key==='Escape'){setFocusScene(false);}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[]);
   useEffect(()=>{if(locked)setAssistantOpen(true);},[locked]);
   usePublishUpdateContext();
@@ -199,15 +231,21 @@ export default function App() {
       {workbenchUtilities=><StudioMain>
 
         <AppUpdateNotice onBackup={()=>setShowTools(true)}/>
+        <aside className="feedback-rail" aria-label="操作反馈">
         {saveNotice&&!workspace.error&&<SaveToast message={projectNotice} onClose={closeSaveNotice}/>}
-        {exportNotice&&<SaveToast key={exportNotice.message} message={exportNotice.message} onClose={closeExportNotice} duration={4000} verbatim/>}
-        {exportProgress&&<div className="workspace-notice" role="status"><Spin size="small"/><span>{exportProgress}</span></div>}
+        {exportNotice&&<SaveToast key={exportNotice.message} message={exportNotice.message} tone={exportNotice.tone} onClose={closeExportNotice} duration={exportNotice.tone==='error'?0:5000} verbatim/>}
+        {exportProgress&&<OperationProgress key={exportProgress.title} {...exportProgress}/>}
+        {importProgress&&<OperationProgress key={importProgress.title} {...importProgress}/>}
+        {backupBusy&&<OperationProgress title="备份工作台" stage="打包项目并请求保存"/>}
         {workspace.error&&!conflictDismissed&&<div role="alert" className="workspace-notice is-error"><div className="workspace-conflict-copy"><span>{workspace.error}</span><small>请关闭其他标签页，下载备份后刷新本页。</small>{backupStatus&&<span role="status">{backupStatus}</span>}</div><Button disabled={backupBusy} onClick={()=>void backupConflict()}>下载工作台备份</Button><Button type="primary" onClick={()=>window.location.reload()}>我已备份，刷新本页</Button><Button type="text" aria-label="隐藏冲突提示" icon={<Cross1Icon/>} onClick={()=>setConflictDismissed(true)}/></div>}
-        {!workspace.error&&(autosaveError||(projectNotice&&!saveNotice))&&<div role="status" className={`workspace-notice ${autosaveError?'is-error':''}`}><span>{autosaveError||projectNotice}</span>{!autosaveError&&<Button type="text" aria-label="关闭通知" icon={<Cross1Icon/>} onClick={()=>setProjectNotice('')}/>}</div>}
+        {!workspace.error&&autosaveError&&<div className="workspace-notice is-error" role="alert"><div className="workspace-conflict-copy"><span>自动保存失败</span><small>{autosaveError}</small></div><Button onClick={()=>setShowTools(true)}>备份与恢复</Button></div>}
+        {!workspace.error&&projectNotice&&!saveNotice&&<SaveToast message={projectNotice} tone={projectNoticeTone} onClose={closeSaveNotice} duration={projectNoticeTone==='error'?0:5000} verbatim/>}
+        </aside>
         {!workspace.ready&&<div className="workspace-loading"><Spin size="large"/><p>正在恢复项目…</p></div>}
         {workspace.ready&&<StudioHome onImport={()=>modelFileRef.current?.click()} onTasks={()=>setTaskQueueRequest(v=>v+1)} onConfigure={()=>setShowSettings(true)} onGenerate={(projectId,blenderModeling)=>setAutoStartRequest({id:makeId(),projectId,blenderModeling})} hidden={modulePage!=='home'} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);}}/>}
         {workspace.ready&&(modulePage==='asset'||modulePage==='scene')&&<ProjectLibrary key={modulePage+libraryRefresh} kind={modulePage} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);}} onManage={()=>setShowAssets(true)}/>}
         {workspace.ready&&modulePage==='team'&&<TeamStudioPage onCopied={()=>setLibraryRefresh(v=>v+1)}/>}
+        {workspace.ready&&modulePage==='dashboards'&&<DashboardPage/>}
         {workspace.ready&&modulePage==='tasks'&&<TaskCenter locked={locked} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);}}/>}
         {workspace.ready&&modulePage==='settings'&&<StudioSettings onTeam={()=>setModulePage('team')} onModel={()=>setShowSettings(true)} onBackup={()=>setShowTools(true)} onAssets={()=>setShowAssets(true)} onHistory={()=>setShowHistory(true)}/>}
         {workspace.ready&&<div className={`editor-workspace ${assistantOpen?'assistant-expanded':''} ${structureOpen||shelfOpen||inspectorOpen?'editor-panel-open':''} ${inspectorOpen?'inspector-expanded':''}`} hidden={modulePage!=='workbench'}>
@@ -222,19 +260,21 @@ export default function App() {
           {active?.assetSource&&<Tag color={(active.assetCatalogVersion??active.assetSource.version)>active.assetSource.version?'warning':'default'}>编辑 v{active.assetSource.version}{(active.assetCatalogVersion??0)>active.assetSource.version?` · 库内最新 v${active.assetCatalogVersion}，当前草稿未替换`:''}</Tag>}
           <span className="editor-save-state">{active?.snapshot.pendingBatch?'待确认':!active?.librarySavedAt?'草稿':active.savedRevision===useEditorStore.getState().doc.revision?'已保存到库':'未保存到库'}</span></div>}><Button type="text" aria-label="项目状态" title={active?.title} icon={<LayersIcon/>}/></Popover>
           <Button type="text" className="workbench-assistant-toggle" title={assistantOpen?'收起 AI 助手':'打开 AI 助手'} aria-expanded={assistantOpen} aria-label={assistantOpen?'收起 AI 助手':'打开 AI 助手'} onClick={toggleAssistant} icon={<ChatBubbleIcon/>}/>
+          <Button type="text" onClick={()=>setModulePage('dashboards')}>看板接入</Button>
+          {dashboard&&<Button type="text" onClick={()=>setDashboardOpen(true)}>查看看板</Button>}
           <Button type="text" aria-label="模型配置" icon={<GearIcon/>} onClick={()=>setShowSettings(true)}/>
           <Dropdown trigger={['click']} menu={{items:exportItems}} disabled={locked||!workspace.ready}><Button className="workbench-export" aria-label="导出与更多" disabled={locked||!workspace.ready}>导出 <ChevronDownIcon/></Button></Dropdown>
           <Button className="workbench-save" type="primary" aria-label={librarySaving?'正在保存…':active?.moduleKind==='asset'?'保存资产':'保存场景'} disabled={locked||librarySaving||!workspace.ready} onClick={()=>{if(active?.moduleKind==='asset'&&!useEditorStore.getState().doc.nodes.length){setProjectNotice('还没有可保存的模型。请先创建或导入模型，再保存到资产库。');setAssistantOpen(true);return;}setShowLibrarySave(true);}}>{librarySaving?'保存中…':active?.moduleKind==='asset'?'保存资产':'保存场景'}</Button>
           </div>
           {workbenchUtilities}
           <input ref={fileRef} type="file" accept=".json,.chat3d.json" className="hidden" onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void openProject(file);}}/>
-          <input ref={modelFileRef} type="file" accept=".glb" className="hidden" onChange={async e=>{const file=e.target.files?.[0];e.target.value='';if(!file)return;try{assertGlbSize(file.size);setProjectNotice('正在校验并导入网格模型…');const result=await importGlb(await file.arrayBuffer(),file.name);if(!createSession(result.doc,{moduleKind:'asset',title:file.name.replace(/\.glb$/i,'')||'导入模型',assetCategory:'其他'}))throw Error('请结束当前生成后再导入');setModulePage('workbench');useCompositionTool.setState({mode:'orbit'});setProjectNotice(`已导入 ${result.doc.nodes.length} 个网格部件到新会话。${result.warnings.join(' ')}`);}catch(error){setProjectNotice(`网格导入失败：${error instanceof Error?error.message:String(error)}`);}}}/>
+          <input ref={modelFileRef} type="file" accept=".glb" className="hidden" onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void openGlb(file);}}/>
         </header>
         <nav className="canvas-tool-rail canvas-surface" aria-label="画布工具"><Button type="text" aria-pressed={shelfOpen} onClick={()=>shelfOpen?setShelfOpen(false):openEditorPanel('asset')} icon={<CubeIcon/>}><span>资产</span></Button><Button type="text" aria-pressed={structureOpen} onClick={()=>structureOpen?setStructureOpen(false):openEditorPanel('structure')} icon={<LayersIcon/>}><span>结构</span></Button><Button type="text" aria-pressed={inspectorOpen} disabled={!selection.length} onClick={()=>inspectorOpen?setInspectorOpen(false):openInspector()} icon={<MixerHorizontalIcon/>}><span>属性</span></Button></nav>
         {shelfOpen&&<CanvasAssetShelf onClose={()=>setShelfOpen(false)} onLibrary={()=>setShowAssets(true)}/>}
         <div className="editor-upper"><aside className="editor-objects canvas-surface" hidden={!structureOpen}><div className="editor-panel-heading">场景结构<Button type="text" aria-label="收起场景结构" icon={<Cross1Icon/>} onClick={()=>setStructureOpen(false)}/></div><ObjectTree/><PanelResize label="调整对象面板宽度" width={objectsWidth} min={200} max={360} side="right" onChange={setObjectsWidth}/></aside>
           <main className="scene-region">
-            <div className="scene-stage"><ViewportPanel/></div>
+            <div className="scene-stage"><ViewportPanel active={modulePage==='workbench'}/></div>
         <div className="canvas-transform-tools canvas-surface" role="group" aria-label="场景编辑工具">
           {nodeCount>0&&<>
           <ToolbarAction label="浏览场景" help="左键拖动旋转视角，右键平移，滚轮缩放；单击选择不切换编辑模式" pressed={compositionMode==='orbit'&&!selectionBox} onPress={()=>{useSelectionTool.setState({box:false});useCompositionTool.setState({mode:'orbit'});}}><span>浏览</span></ToolbarAction>
@@ -260,11 +300,12 @@ export default function App() {
           {inspectorOpen&&selection.length>0&&<CanvasInspector resize={<PanelResize label="调整属性面板宽度" width={inspectorWidth} min={260} max={400} side="right" onChange={setInspectorWidth}/>} onClose={()=>setInspectorOpen(false)} onAdvanced={()=>setAdvancedOpen(true)} tab={propertyTab} setTab={setPropertyTab}/>}
 
         </div>
-          <aside className="conversation-region" aria-label="AI 助手" hidden={!assistantOpen}><ConversationResize width={assistantWidth} onChange={setAssistantWidth}/><header className="conversation-panel-title"><strong><ChatBubbleIcon/>AI 助手</strong><div><Button className="task-record-button" type="text" size="small" aria-label="本项目任务记录" onClick={()=>setTaskDetailsOpen(true)}>任务记录</Button><Button className="close-conversation-button" type="text" aria-label="收起对话区" icon={<Cross1Icon/>} onClick={()=>setAssistantOpen(false)}/></div></header><div id="chat-content" className="assistant-content"><ChatPanel autoStartRequest={autoStartRequest} onAutoStartConsumed={id=>setAutoStartRequest(current=>current?.id===id?null:current)} key={workspace.activeId} canvasMode expanded onExpand={()=>setAssistantOpen(true)} executionDetails={false} onConfigure={()=>setShowSettings(true)}/></div></aside>
+          <aside className="conversation-region" aria-label="AI 助手" hidden={!assistantOpen}><ConversationResize width={assistantWidth} onChange={setAssistantWidth}/><header className="conversation-panel-title"><strong><ChatBubbleIcon/>AI 助手</strong><div><Button className="task-record-button" type="text" size="small" aria-label="本项目任务记录" onClick={()=>setTaskDetailsOpen(true)}>任务记录</Button><Button className="close-conversation-button" type="text" aria-label="收起对话区" icon={<Cross1Icon/>} onClick={()=>setAssistantOpen(false)}/></div></header><div id="chat-content" className="assistant-content"><ChatPanel autoStartRequest={autoStartRequest} onAutoStartConsumed={id=>setAutoStartRequest(current=>current?.id===id?null:current)} key={workspace.activeId} canvasMode expanded onExpand={()=>setAssistantOpen(true)} executionDetails={false} onConfigure={()=>setShowSettings(true)} onDashboardOpen={()=>setDashboardOpen(true)}/></div></aside>
         </div>}
       </StudioMain>}
       </StudioShell>
       <Drawer open={taskDetailsOpen} onClose={()=>setTaskDetailsOpen(false)} title="本项目任务记录" size={480}><TaskPanel onConversation={()=>setTaskDetailsOpen(false)}/></Drawer>
+      {dashboardOpen&&<DashboardSceneView onClose={()=>setDashboardOpen(false)}/>}
       {advancedOpen&&<Modal open title="对象与属性" onCancel={()=>setAdvancedOpen(false)} width={640} footer={<Button onClick={()=>setAdvancedOpen(false)}>关闭高级属性</Button>}><p>精确编辑几何参数、外观和组件关系。</p><PropertiesPanel/></Modal>}
       {showLibrarySave&&<LibraryProjectSaveDialog onClose={()=>setShowLibrarySave(false)} onBusyChange={setLibrarySaving} onSaved={notice=>{setProjectNotice(notice);setLibraryRefresh(v=>v+1);}}/>}
       {showAssets&&<AssetLibrary intent={modulePage==='workbench'?'insert':'manage'} targetName={active?.title} onClose={()=>{setShowAssets(false);setLibraryRefresh(v=>v+1);}}/>}

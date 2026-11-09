@@ -5,6 +5,7 @@
   const canvas = document.getElementById('view');
   const viewport = document.getElementById('viewport');
   const reset = document.getElementById('reset');
+  const embedded = document.body.dataset.embedded === 'true';
   const urls = [];
   const removers = [];
   let renderer;
@@ -50,6 +51,10 @@
   }
   on(window, 'pagehide', dispose);
   try {
+    const optionsNode = document.getElementById('viewer-options');
+    const options = optionsNode ? JSON.parse(optionsNode.textContent) : {};
+    optionsNode?.remove();
+    const view = embedded ? options.view : undefined;
     const runtimeNode = document.getElementById('three-runtime');
     const runtime = JSON.parse(runtimeNode.textContent);
     runtimeNode.remove();
@@ -69,7 +74,7 @@
     runtime.module = '';
     if (disposed) return;
     try {
-      renderer = new THREE.WebGLRenderer({canvas, antialias: true, alpha: false});
+      renderer = new THREE.WebGLRenderer({canvas, antialias: true, alpha: embedded});
     } catch {
       fail('无法启动 WebGL 三维查看器。请使用支持 WebGL 2 的新版浏览器，并开启硬件加速后重新打开此文件。');
       return;
@@ -97,7 +102,8 @@
       dispose();
       return;
     }
-    scene.background = new THREE.Color('#e3e5e7');
+    scene.background = embedded ? null : new THREE.Color('#e3e5e7');
+    if (embedded) renderer.setClearColor(0x000000, 0);
     const environment=new RoomEnvironment(),pmrem=new THREE.PMREMGenerator(renderer);
     environmentTarget=pmrem.fromScene(environment,.04);scene.environment=environmentTarget.texture;
     scene.environmentIntensity=lighting.environment;environment.dispose();pmrem.dispose();
@@ -116,8 +122,10 @@
     key.position.copy(sphere.center).add(new THREE.Vector3(-12,24,14));key.target.position.copy(sphere.center);scene.add(key.target);
     key.castShadow=true;key.shadow.mapSize.set(2048,2048);const extent=Math.max(radius*1.5,2);
     Object.assign(key.shadow.camera,{left:-extent,right:extent,top:extent,bottom:-extent,near:.5,far:Math.max(60,radius*4+30)});key.shadow.camera.updateProjectionMatrix();key.shadow.bias=-.0002;key.shadow.normalBias=.0015;
-    const floor=new THREE.Mesh(new THREE.PlaneGeometry(Math.max(radius*12,10),Math.max(radius*12,10)),new THREE.MeshStandardMaterial({color:'#c8cbce',roughness:.92,metalness:0}));
-    floor.rotation.x=-Math.PI/2;floor.position.set(sphere.center.x,bounds.min.y-.001,sphere.center.z);floor.receiveShadow=true;scene.add(floor);
+    if (!embedded) {
+      const floor=new THREE.Mesh(new THREE.PlaneGeometry(Math.max(radius*12,10),Math.max(radius*12,10)),new THREE.MeshStandardMaterial({color:'#c8cbce',roughness:.92,metalness:0}));
+      floor.rotation.x=-Math.PI/2;floor.position.set(sphere.center.x,bounds.min.y-.001,sphere.center.z);floor.receiveShadow=true;scene.add(floor);
+    }
     const camera = new THREE.PerspectiveCamera(40, 1, radius / 1000, radius * 1000);
     const target = sphere.center.clone();
     const offset = new THREE.Vector3();
@@ -127,6 +135,7 @@
     let phi = Math.PI / 3;
     let distance = radius * 4;
     let pointer = null;
+    let atHome = true;
     function render() {
       if (disposed) return;
       offset.setFromSphericalCoords(distance, phi, theta);
@@ -139,11 +148,23 @@
     }
     function home() {
       target.copy(sphere.center);
-      theta = Math.PI / 4;
-      phi = Math.PI / 3;
+      theta = view ? THREE.MathUtils.degToRad(view.azimuth) : Math.PI / 4;
+      phi = view ? THREE.MathUtils.degToRad(90 - view.elevation) : Math.PI / 3;
+      camera.zoom = view ? view.zoom : 1;
+      atHome = true;
       const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
-      const limitingFov = Math.min(halfFov, Math.atan(Math.tan(halfFov) * camera.aspect));
-      distance = radius / Math.sin(limitingFov) * 1.12;
+      const tanV = Math.tan(halfFov), tanH = tanV * camera.aspect;
+      const backward = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
+      const horizontal = new THREE.Vector3().crossVectors(camera.up, backward).normalize();
+      const vertical = new THREE.Vector3().crossVectors(backward, horizontal).normalize();
+      const corner = new THREE.Vector3();
+      let fit = 0;
+      for (const x of [bounds.min.x, bounds.max.x]) for (const y of [bounds.min.y, bounds.max.y]) for (const z of [bounds.min.z, bounds.max.z]) {
+        corner.set(x, y, z).sub(sphere.center);
+        const depth = corner.dot(backward);
+        fit = Math.max(fit, depth + Math.abs(corner.dot(horizontal)) / tanH, depth + Math.abs(corner.dot(vertical)) / tanV);
+      }
+      distance = Math.max(radius * .1, fit * 1.08);
       render();
     }
     function resize() {
@@ -151,8 +172,11 @@
       const width = Math.max(viewport.clientWidth, 1);
       const height = Math.max(viewport.clientHeight, 1);
       camera.aspect = width / height;
+      // Shift the projection, not the geometry or orbit target. Positive offsets
+      // move the model right/down by fractions of the full viewport dimensions.
+      if (view) camera.setViewOffset(width, height, -view.offsetX * width, -view.offsetY * height, width, height);
       renderer.setSize(width, height, false);
-      render();
+      if (atHome) home(); else render();
     }
     on(canvas, 'contextmenu', event => event.preventDefault());
     on(canvas, 'pointerdown', event => {
@@ -164,13 +188,14 @@
     });
     on(canvas, 'pointermove', event => {
       if (!pointer || pointer.id !== event.pointerId) return;
+      atHome = false;
       const dx = event.clientX - pointer.x;
       const dy = event.clientY - pointer.y;
       pointer.x = event.clientX;
       pointer.y = event.clientY;
       const height = Math.max(viewport.clientHeight, 1);
       if (pointer.pan || event.shiftKey) {
-        const unitsPerPixel = 2 * distance * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / height;
+        const unitsPerPixel = 2 * distance * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / (height * camera.zoom);
         camera.updateMatrixWorld();
         right.setFromMatrixColumn(camera.matrixWorld, 0);
         up.setFromMatrixColumn(camera.matrixWorld, 1);
@@ -191,6 +216,7 @@
     on(canvas, 'lostpointercapture', () => { pointer = null; });
     on(canvas, 'wheel', event => {
       event.preventDefault();
+      atHome = false;
       const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.clientHeight : 1);
       distance = THREE.MathUtils.clamp(distance * Math.exp(THREE.MathUtils.clamp(delta * 0.001, -1, 1)), radius * 0.03, radius * 100);
       render();

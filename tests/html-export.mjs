@@ -27,6 +27,7 @@ Object.defineProperty(dom.window.HTMLImageElement.prototype,'src',{configurable:
 }});
 Object.defineProperty(dom.window.HTMLImageElement.prototype,'width',{configurable:true,get:()=>1});
 Object.defineProperty(dom.window.HTMLImageElement.prototype,'height',{configurable:true,get:()=>1});
+dom.window.HTMLImageElement.prototype.decode=function(){return rejectImage?Promise.reject(new Error('fixture decode failed')):Promise.resolve();};
 Object.defineProperty(globalThis,'Image',{configurable:true,writable:true,value:class {
   constructor(){return dom.window.document.createElement('img');}
 }});
@@ -40,7 +41,7 @@ function release(scene){scene.traverse(object=>{object.geometry?.dispose();for(c
 let passed=0;
 const test=async(name,fn)=>{await fn();passed++;console.log('PASS',name);};
 try {
-  const {exportHtml}=await server.ssrLoadModule('/src/scene/exportHtml.ts');
+  const {exportHtml,withHtmlViewerView}=await server.ssrLoadModule('/src/scene/exportHtml.ts');
   await test('empty and hidden-only documents reject without mutating the input',async()=>{
     for(const doc of [documentFor([]),documentFor([node({visible:false})])]){
       const before=structuredClone(doc);
@@ -64,6 +65,12 @@ try {
       assert.equal(output.window.document.querySelectorAll('script[src],link[href],iframe,img').length,0);
       assert.equal(output.window.injection,undefined);
     }finally{output.window.close();}
+  });
+  await test('authored embedded camera settings survive configuration replacement without changing scene data',async()=>{
+    const view={zoom:1.7,offsetX:.08,offsetY:-.12,azimuth:70,elevation:45};
+    const embedded=await exportHtml(doc,'看板模型',undefined,{embedded:true,view});
+    const changed=withHtmlViewerView(embedded,{...view,zoom:2});const {dom:original,data}=parse(embedded),{dom:output,data:after}=parse(changed);
+    try{assert.deepEqual(after,data);assert.deepEqual(JSON.parse(output.window.document.getElementById('viewer-options').textContent),{view:{...view,zoom:2}});assert.equal(output.window.document.body.dataset.embedded,'true');assert.throws(()=>withHtmlViewerView(embedded,{...view,offsetY:2}),/offsetY/);assert.throws(()=>withHtmlViewerView(embedded,{...view,zoom:NaN}),/zoom/);}finally{original.window.close();output.window.close();}
   });
   await test('only visible static meshes and materials are exported, without private document metadata',async()=>{
     const {dom:output,data}=parse(html);

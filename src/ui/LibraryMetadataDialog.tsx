@@ -5,10 +5,11 @@ import {CheckIcon,ChevronDownIcon,MagnifyingGlassIcon,PlusIcon} from '@radix-ui/
 import {categoryMatches,categoryPath,defaultLibraryCategories,listLibraryCategories,saveLibraryCategory,type LibraryCategory,type LibraryKind} from '../domain/libraryCategories';
 import {normalizeLibraryMetadata,type LibraryMetadata} from '../domain/libraryMetadata';
 import {listModelAssets} from '../domain/modelAssetStorage';
-import {saveLibraryProject} from '../domain/workspaceLibrary';
+import {saveLibraryProject,type LibrarySaveProgress} from '../domain/workspaceLibrary';
 import {useWorkspaceStore} from '../workspace';
 import {useEditorStore} from '../store';
 import {captureLibraryThumbnail} from '../scene/libraryThumbnail';
+import {captureSceneEvidence} from '../scene/capture';
 import {CategoryDirectory,CategoryFolderIcon} from './LibraryCategoryTree';
 import {PortalDialog} from './kit/PortalDialog';
 import {PopoverPanel} from './kit/PopoverPanel';
@@ -71,13 +72,16 @@ export function CategoryManager({onClose,encountered=[],kind='asset',onCreated,v
   <div className="category-manager-footer"><span>资产与场景的分类互不影响</span><Button htmlType="button" disabled={busy} onClick={onClose}>完成</Button></div>
  </PortalDialog>;
 }
-export function LibraryMetadataDialog({kind,initial,title,submitLabel,onSubmit,onClose,onBusyChange}:{kind:'asset'|'scene';initial:LibraryMetadata;title:string;submitLabel:string;onSubmit:(metadata:LibraryMetadata)=>Promise<void>;onClose:()=>void;onBusyChange?:(busy:boolean)=>void}){
+const saveStageLabels:Record<LibrarySaveProgress['stage'],string>={preparing:'准备模型数据',thumbnail:'生成预览图',validating:'检查模型数据',writing:'写入资源库',workspace:'保存工作区',complete:'保存完成'};
+export function LibraryMetadataDialog({kind,initial,title,submitLabel,onSubmit,onClose,onBusyChange,progress}:{kind:'asset'|'scene';initial:LibraryMetadata;title:string;submitLabel:string;onSubmit:(metadata:LibraryMetadata)=>Promise<void>;onClose:()=>void;onBusyChange?:(busy:boolean)=>void;progress?:LibrarySaveProgress}){
  const [name,setName]=useState(initial.name),[category,setCategory]=useState(initial.category??(kind==='asset'?'其他':'')),[description,setDescription]=useState(initial.description??''),[manage,setManage]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');const lock=useRef(false),alive=useRef(true);
  const formInitial=useRef({name:initial.name,description:initial.description??''});
  const {categories,error:categoryError,ready}=useLibraryCategories(category?[category]:[],kind);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
+ const saveProgress:LibrarySaveProgress=progress??{stage:'preparing',completed:0,total:5},stageLabel=saveStageLabels[saveProgress.stage];
+ function close(){if(!lock.current)onClose();}
  async function submit(){if(lock.current)return;setError('');let metadata:LibraryMetadata;try{metadata=normalizeLibraryMetadata({name,category,description},kind);}catch(e){setError((e as Error).message);return;}lock.current=true;setBusy(true);onBusyChange?.(true);try{await onSubmit(metadata);if(alive.current)onClose();}catch(e){if(alive.current)setError(e instanceof Error?e.message:'保存失败');}finally{lock.current=false;onBusyChange?.(false);if(alive.current)setBusy(false);}}
- return <><PortalDialog label={title} onClose={onClose} closable={!busy} width={480} className="library-metadata-dialog">
+ return <><PortalDialog label={title} onClose={close} closable={!busy} width={480} className="library-metadata-dialog">
   <h2 className="app-modal-title">{title}</h2>
   <p className="app-modal-description">{kind==='asset'?'整理资产名称、分类和说明。模型尺寸、版本与质量状态由实际数据保留。':'整理场景名称与说明，分类可选。场景中的资产引用保持固定版本。'}</p>
   <ProForm initialValues={formInitial.current} submitter={false} onValuesChange={values=>{if(values.name!==undefined)setName(values.name);if(values.description!==undefined)setDescription(values.description);}} onFinish={async()=>{await submit();}}>
@@ -86,18 +90,23 @@ export function LibraryMetadataDialog({kind,initial,title,submitLabel,onSubmit,o
    <div className="library-category-field"><label>{kind==='scene'?'分类（可选）':'分类'}<CategoryPicker label={kind==='asset'?'资产分类':'场景分类'} value={category} onChange={setCategory} categories={categories} optional={kind==='scene'} disabled={busy||!ready}/></label><Button type="text" disabled={busy||!ready} onClick={()=>setManage(true)}>管理分类</Button></div>
    <ProFormTextArea name="description" label="说明" fieldProps={{'aria-label':'库内容说明',maxLength:500,disabled:busy,rows:3}} placeholder="用途、结构或需要保留的细节"/>
    {(error||categoryError)&&<p role="alert" className="resource-error">{error||categoryError}</p>}
-   <div className="library-dialog-actions"><Button htmlType="button" disabled={busy} onClick={onClose}>取消</Button><Button type="primary" htmlType="submit" disabled={busy||!ready}>{busy?'正在保存…':submitLabel}</Button></div>
+   {busy&&<div className="library-save-progress" role="status" aria-live="polite" aria-atomic="true">
+    <div className="library-save-progress-heading"><strong>{stageLabel}</strong><span>{saveProgress.completed}/{saveProgress.total} 个阶段已完成</span></div>
+    <progress aria-label="保存阶段" aria-valuetext={`${stageLabel}，${saveProgress.completed}/${saveProgress.total} 个阶段已完成`} max={saveProgress.total} value={saveProgress.completed}/>
+    <p>大型模型可能需要较长时间。阶段进度不代表耗时比例；保存完成前无法关闭，请稍候。</p>
+   </div>}
+   <div className="library-dialog-actions"><Button htmlType="button" disabled={busy} onClick={close}>取消</Button><Button type="primary" htmlType="submit" disabled={busy||!ready}>{busy?'正在保存…':submitLabel}</Button></div>
   </ProForm>
  </PortalDialog>{manage&&<CategoryManager kind={kind} onCreated={c=>{setCategory(c.value);setManage(false);}} encountered={category?[category]:[]} onClose={()=>setManage(false)}/>}</>;
 }
 export function LibraryProjectSaveDialog({onClose,onSaved,onBusyChange}:{onClose:()=>void;onSaved:(notice:string)=>void;onBusyChange:(busy:boolean)=>void}){
  const [target]=useState(()=>{const w=useWorkspaceStore.getState();return {session:w.sessions.find(s=>s.id===w.activeId),projectId:useEditorStore.getState().doc.projectId};});
- const [initial,setInitial]=useState<LibraryMetadata>(),[revision,setRevision]=useState(0),[error,setError]=useState('');const session=target.session;
+ const [initial,setInitial]=useState<LibraryMetadata>(),[revision,setRevision]=useState(0),[error,setError]=useState(''),[progress,setProgress]=useState<LibrarySaveProgress>();const session=target.session;
  useEffect(()=>{let alive=true;void (async()=>{if(!session)throw Error('找不到当前项目');const head=session.assetSource?(await listModelAssets()).find(a=>a.id===session.assetSource!.id):undefined;if(session.assetSource&&!head)throw Error('找不到资产记录，草稿已保留');if(alive){setInitial(head?{name:head.name,category:head.category,description:head.description}:{name:/^未命名(资产|场景)$/.test(session.title)?'':session.title,category:session.moduleKind==='asset'?session.assetCategory:session.sceneCategory,description:session.libraryDescription});setRevision(head?.metadataRevision??session.libraryMetadataRevision??0);}})().catch(e=>{if(alive)setError(e.message);});return()=>{alive=false;};},[session]);
  if(!initial||!session)return <PortalDialog label="保存到库" onClose={onClose} width={480}>
   <h2 className="app-modal-title">保存到库</h2>
   <p className="app-modal-description">{error||'正在读取项目信息…'}</p>
   <div className="app-modal-actions"><Button htmlType="button" onClick={onClose}>取消</Button></div>
  </PortalDialog>;
- return <LibraryMetadataDialog kind={session.moduleKind??'scene'} initial={initial} title={session.moduleKind==='asset'?'保存资产到库':'保存场景到库'} submitLabel="保存到库" onBusyChange={onBusyChange} onClose={onClose} onSubmit={async metadata=>{let imageNotice='';const notice=await saveLibraryProject(async d=>{const result=await captureLibraryThumbnail(d);imageNotice=result.notice;return result.image;},{metadata,sessionId:session.id,projectId:target.projectId,metadataRevision:revision});onSaved(notice+(imageNotice?` ${imageNotice}`:''));}}/>;
+ return <LibraryMetadataDialog kind={session.moduleKind??'scene'} initial={initial} title={session.moduleKind==='asset'?'保存资产到库':'保存场景到库'} submitLabel="保存到库" onBusyChange={onBusyChange} onClose={onClose} progress={progress} onSubmit={async metadata=>{setProgress({stage:'preparing',completed:0,total:5});let imageNotice='';const notice=await saveLibraryProject(async d=>{const result=await captureLibraryThumbnail(d,captureSceneEvidence);imageNotice=result.notice;return result.image;},{metadata,sessionId:session.id,projectId:target.projectId,metadataRevision:revision,onProgress:setProgress});onSaved(notice+(imageNotice?` ${imageNotice}`:''));}}/>;
 }

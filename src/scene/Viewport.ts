@@ -22,6 +22,7 @@ import { Geometry, Material, SceneDocument, SceneNode } from '../domain/types';
 interface NodeResources {
   mesh: THREE.Mesh;
   geometry: THREE.BufferGeometry;
+  geometrySource: Geometry;
   material: THREE.MeshStandardMaterial;
 }
 
@@ -48,10 +49,16 @@ export class Viewport {
   private orbitPhi = 1.012; // 仰角（自 +Y 起算，限制不穿越极点）
   private readonly defaultMaterial: THREE.MeshStandardMaterial;
   private readonly sharedGeometryCache = new Map<string, THREE.BufferGeometry>();
+  private geometryKeys?: WeakMap<Geometry,string>;
   private readonly materialCache = new Map<string, THREE.MeshStandardMaterial>();
   private readonly nodeMap = new Map<string, NodeResources>();
   private selectionHelpers: THREE.BoxHelper[] = [];
+  private selectedIds?: Set<string>;
   private rafHandle: number | null = null;
+  private loopVersion = 0;
+  private active = true;
+  private renderWidth = 0;
+  private renderHeight = 0;
   private dirty = true;
   private quality:AdaptiveRenderQuality;
   private contactShading:ContactShading|null=null;
@@ -128,7 +135,7 @@ export class Viewport {
     this.setBackdrop('slate');
     this.setupPicking();
 
-    this.resizeObserver = new ResizeObserver(() => this.markDirty());
+    this.resizeObserver = new ResizeObserver(() => {if(this.active!==false&&this.hostSizeChanged())this.markDirty();});
     this.resizeObserver.observe(host);
   }
 
@@ -368,8 +375,8 @@ export class Viewport {
   // Incremental reconciliation: preserve unchanged mesh/geometry/material identities.
   sync(doc: SceneDocument): void {
     this.cancelPointerGesture?.();
-    this.frameMaterialKeys.clear();
     if(doc===this.lastSyncedDoc)return;
+    this.frameMaterialKeys.clear();
     this.instancedRender?.dispose();
     this.frameMaterialsById = new Map(doc.materials.map(m => [m.id, m]));
     if(!this.animationClock)this.animationClock=new AnimationClock();
@@ -383,8 +390,9 @@ export class Viewport {
       if(!visible.has(node.id))continue;
       const existing=this.nodeMap.get(node.id);
       if(!existing){this.createNodeMesh(node);continue;}
-      const geometry=this.buildGeometry(node.geometry!),material=this.buildMaterial(node.materialId,node.label);
-      existing.geometry=geometry;existing.material=material;existing.mesh.geometry=geometry;existing.mesh.material=material;
+      if(existing.geometrySource!==node.geometry){const geometry=this.buildGeometry(node.geometry!);existing.geometry=geometry;existing.geometrySource=node.geometry!;existing.mesh.geometry=geometry;}
+      const material=this.buildMaterial(node.materialId,node.label);
+      existing.material=material;existing.mesh.material=material;
       existing.mesh.position.fromArray(node.transform.position);existing.mesh.quaternion.fromArray(node.transform.rotationQuaternion);existing.mesh.scale.fromArray(node.transform.scale);
       existing.mesh.visible=node.visible;existing.mesh.name=node.name;existing.mesh.userData.noAO=!!node.label;existing.mesh.castShadow=materialCastsShadow(material)&&!node.label;
     }
@@ -418,12 +426,17 @@ export class Viewport {
     mesh.scale.set(sx, sy, sz);
 
     this.scene.add(mesh);
-    this.nodeMap.set(node.id, { mesh, geometry, material });
+    this.nodeMap.set(node.id, { mesh, geometry, geometrySource:node.geometry!, material });
   }
 
   // 几何构建：几何默认以局部原点为中心（方案第 4 节）
   private buildGeometry(g: Geometry): THREE.BufferGeometry {
-    const key = JSON.stringify(g);
+    // Documents preserve immutable geometry identities across transform/material edits.
+    // Weak keys retain no inactive document or GPU resources; the value cache still
+    // deduplicates equivalent geometries from separately instantiated assets.
+    this.geometryKeys??=new WeakMap();
+    let key=this.geometryKeys.get(g);
+    if(key===undefined){key=JSON.stringify(g);this.geometryKeys.set(g,key);}
     const cached = this.sharedGeometryCache.get(key);
     if (cached) return cached;
     const geometry = buildPrimitiveGeometry(g);
@@ -453,7 +466,9 @@ export class Viewport {
 
   // 选择高亮：视口选中状态是从文档派生的运行时状态，不写入项目主文档
   setSelection(selectedIds: Set<string>): void {
+    if(this.selectedIds?.size===selectedIds.size){let unchanged=true;for(const id of selectedIds)if(!this.selectedIds.has(id)){unchanged=false;break;}if(unchanged)return;}
     this.clearSelectionHelpers();
+    this.selectedIds=new Set(selectedIds);
     for (const id of selectedIds) {
       const node = this.nodeMap.get(id);
       if (!node) continue;
@@ -468,6 +483,7 @@ export class Viewport {
       this.scene.remove(helper); helper.geometry.dispose(); helper.material.dispose();
     }
     this.selectionHelpers = [];
+    this.selectedIds=undefined;
   }
 
   async captureDocument(doc: SceneDocument, view: 'perspective' | 'front' | 'side' | 'back' | 'left' | 'top' | 'bottom' | 'underside', targetIds?:string[],time?:number): Promise<string> {
@@ -559,15 +575,21 @@ export class Viewport {
     const info=this.renderer.info;
     return {quality:this.quality.mode,tier:this.quality.tier,contactShadows:!!this.contactShading,postprocessingError:this.postprocessingError,drawCalls:info.render.calls,triangles:info.render.triangles,cpuRenderMs:this.cpuRenderMs,geometries:info.memory.geometries,textures:info.memory.textures,programs:info.programs?.length??0,pixelRatio:this.renderer.getPixelRatio(),gpu:this.gpu,softwareRenderer:this.softwareRenderer};
   }
+  private hostSizeChanged():boolean {
+    const w=this.host.clientWidth,h=this.host.clientHeight;
+    return w>0&&h>0&&(w!==this.renderWidth||h!==this.renderHeight);
+  }
   private render(): boolean {
-    if (!this.dirty) return false;
-    this.dirty = false;
+    if (!this.dirty || (this.active===false&&!this.capturing)) return false;
     const w = this.host.clientWidth;
     const h = this.host.clientHeight;
-    if (w > 0 && h > 0) {
+    if(w<=0||h<=0)return false;
+    this.dirty = false;
+    if (w!==this.renderWidth||h!==this.renderHeight) {
       this.camera.aspect = w / h;this.camera.fov=this.viewportFov();
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(w, h, false);
+      this.renderWidth=w;this.renderHeight=h;
     }
     const started=performance.now(),autoReset=this.renderer.info.autoReset;
     this.renderer.info.autoReset=false;this.renderer.info.reset();
@@ -581,15 +603,34 @@ export class Viewport {
     return true;
   }
 
+  // Keep the current scene and backing canvas while workspace navigation hides it.
+  setActive(active:boolean):void {
+    if(this.active===active){if(active)this.start();return;}
+    this.active=active;
+    this.lastFrame=0;this.previousDraw=false;this.quality?.resetSamples();
+    if(!active){
+      this.loopVersion=(this.loopVersion??0)+1;
+      if(this.rafHandle!=null)cancelAnimationFrame(this.rafHandle);
+      this.rafHandle=null;this.cancelPointerGesture?.();
+      return;
+    }
+    if(this.hostSizeChanged())this.markDirty();
+    this.start();
+  }
+
   // 按需渲染循环：静态场景不持续刷新
   start(): void {
+    this.active??=true;
+    if(this.active===false||this.rafHandle!=null)return;
+    const version=this.loopVersion??0;
     const loop = (now:number) => {
+      if(this.active===false||version!==(this.loopVersion??0))return;
       const delta=this.lastFrame?(now-this.lastFrame)/1000:0;this.lastFrame=now;
       if(this.animationClock.tick(delta)){try{this.applyAnimation(this.animationClock.state.time);}catch(e){this.animationClock.fail(e instanceof Error?e.message:'动画计算失败');this.restoreBasePose();}if(now-this.playbackNotified>100||!this.animationClock.state.playing){this.notifyPlayback();this.playbackNotified=now;}}
       const drew=this.render();
       if(drew&&this.previousDraw&&!this.capturing){if(this.quality.sample(delta*1000))this.applyRenderQuality();}else this.quality.resetSamples();
       this.previousDraw=drew&&!this.capturing;
-      this.rafHandle = requestAnimationFrame(loop);
+      if(this.active&&version===(this.loopVersion??0))this.rafHandle = requestAnimationFrame(loop);
     };
     this.rafHandle = requestAnimationFrame(loop);
   }
@@ -597,7 +638,10 @@ export class Viewport {
   dispose(): void {
     this.clearAssetDropPreview();this.composition?.dispose();this.composition=null;
     this.cancelPointerGesture?.();window.removeEventListener('keydown',this.escapeSelection);
-    if (this.rafHandle !== null) cancelAnimationFrame(this.rafHandle);
+    this.active=false;
+    this.loopVersion=(this.loopVersion??0)+1;
+    if (this.rafHandle != null) cancelAnimationFrame(this.rafHandle);
+    this.rafHandle=null;
     this.resizeObserver?.disconnect();
     this.contactShading?.dispose();this.contactShading=null;
     this.disposeAllNodes();

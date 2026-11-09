@@ -15,8 +15,8 @@ export interface ModelAssetVersion {
  size:Vec3;nodes:SceneNode[];materials:Material[];thumbnail?:string;externalConnectionsRemoved:number;
 }
 export interface ModelAssetSummary {id:string;version:number;name:string;category:AssetCategory;createdAt:string;size:Vec3;parts:number;thumbnail?:string;quality:'unreviewed';purpose?:string;anchorCount?:number;description?:string;metadataRevision?:number}
-export const MAX_ASSET_BYTES=200*1024*1024;
-export const MAX_TEAM_ASSET_BYTES=50*1024*1024;
+export const MAX_ASSET_BYTES=400*1024*1024;
+export const MAX_TEAM_ASSET_BYTES=MAX_ASSET_BYTES;
 const assetSizeError=(maxBytes:number)=>`资产超过${maxBytes/1024/1024} MiB，请精简或分拆模型`;
 export const ASSET_SIZE_ERROR=assetSizeError(MAX_ASSET_BYTES);
 export function assetDocument(asset:ModelAssetVersion):SceneDocument{return {schemaVersion:SCHEMA_VERSION,projectId:asset.id,revision:0,unit:'m',upAxis:'Y',nodes:structuredClone(asset.nodes),materials:structuredClone(asset.materials),assets:[]};}
@@ -40,7 +40,7 @@ export function validateModelAsset(asset:ModelAssetVersion):void{
  if(!Number.isSafeInteger(asset.externalConnectionsRemoved)||asset.externalConnectionsRemoved<0)throw Error('资产连接元数据无效');
  if(asset.thumbnail&&!isThumbnailImage(asset.thumbnail))throw Error('缩略图无效或过大');
  if(asset.contract)validateAssetContract(asset.contract,asset.nodes);
- const errors=validateDocument(assetDocument(asset));if(errors.length)throw errors[0];
+ const errors=validateDocument({schemaVersion:SCHEMA_VERSION,projectId:asset.id,revision:0,unit:'m',upAxis:'Y',nodes:asset.nodes,materials:asset.materials,assets:[]});if(errors.length)throw errors[0];
  const actual=assemblyBounds(asset.nodes).getSize(new Vector3()).toArray();if(!Array.isArray(asset.size)||asset.size.length!==3||asset.size.some((n,i)=>!Number.isFinite(n)||Math.abs(n-actual[i])>1e-5))throw Error('资产尺寸与几何不一致');
  if(new TextEncoder().encode(JSON.stringify(asset)).length>MAX_ASSET_BYTES)throw Error(ASSET_SIZE_ERROR);
 }

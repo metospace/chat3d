@@ -6,6 +6,7 @@ import threeLicense from '../../node_modules/three/LICENSE?raw';
 import viewerSource from './htmlViewer.js?raw';
 import * as THREE from 'three';
 import type {SceneDocument} from '../domain/types';
+import type {DashboardView} from '../domain/dashboard';
 import {buildHtmlExportScene,disposeExportScene,prepareExportMaterials} from './export';
 
 function jsonForHtml(value:unknown):string {
@@ -24,10 +25,31 @@ function requireEmbeddedImages(value:unknown):void {
   }
 }
 export interface HtmlExportProgress {stage:'geometry'|'textures'|'serialize';completed?:number;total?:number}
+export interface HtmlExportOptions {embedded?:boolean;view?:DashboardView}
+const VIEWER_OPTIONS_START='<script id="viewer-options" type="application/json">';
+function validatedViewerView(view:DashboardView):DashboardView {
+  if(!view||typeof view!=='object')throw new Error('模型视图必须包含有效的缩放、位置和角度');
+  const ranges={zoom:[.25,4],offsetX:[-1,1],offsetY:[-1,1],azimuth:[-180,180],elevation:[5,85]} as const;
+  for(const key of Object.keys(ranges) as (keyof DashboardView)[]) {
+    const value=view[key],[min,max]=ranges[key];
+    if(typeof value!=='number'||!Number.isFinite(value)||value<min||value>max)throw new Error(`模型视图 ${key} 必须是 ${min} 到 ${max} 之间的有限数字`);
+  }
+  return {zoom:view.zoom,offsetX:view.offsetX,offsetY:view.offsetY,azimuth:view.azimuth,elevation:view.elevation};
+}
+/** Update only the inert viewer configuration; serialized geometry and materials stay untouched. */
+export function withHtmlViewerView(html:string,view:DashboardView):string {
+  const config=jsonForHtml({view:validatedViewerView(view)});
+  const start=html.indexOf(VIEWER_OPTIONS_START);
+  const contentStart=start+VIEWER_OPTIONS_START.length;
+  const end=start<0?-1:html.indexOf('</script>',contentStart);
+  if(end<0)throw new Error('离线模型缺少查看器配置，请重新导出');
+  return html.slice(0,contentStart)+config+html.slice(end);
+}
 async function yieldToInterface(){const {promise,resolve}=Promise.withResolvers<void>();setTimeout(resolve,0);await promise;}
 
 /** A standalone, static viewer. Only visible scene geometry/materials are serialized. */
-export async function exportHtml(doc:SceneDocument,title:string,onProgress?:(progress:HtmlExportProgress)=>void):Promise<string> {
+export async function exportHtml(doc:SceneDocument,title:string,onProgress?:(progress:HtmlExportProgress)=>void,options:HtmlExportOptions={}):Promise<string> {
+  const viewerOptions=jsonForHtml(options.view===undefined?{}:{view:validatedViewerView(options.view)});
   if(!doc.nodes.some(node=>node.visible)) throw new Error('没有可导出的可见对象');
   onProgress?.({stage:'geometry',completed:0,total:doc.nodes.filter(node=>node.visible).length});
   await yieldToInterface();
@@ -70,12 +92,14 @@ export async function exportHtml(doc:SceneDocument,title:string,onProgress?:(pro
 <title>${heading}</title>
 <style>
 :root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#242424;background:#f4f4f4;color-scheme:light}*{box-sizing:border-box}body{margin:0;height:100vh;height:100dvh;display:flex;flex-direction:column}header{display:flex;align-items:center;gap:16px;padding:13px 20px;background:#fff;border-bottom:1px solid #ddd}h1{font-size:14px;font-weight:600;margin:0;flex:1;overflow-wrap:anywhere}button{border:1px solid #ccc;background:#fff;color:#222;border-radius:5px;padding:7px 12px;cursor:pointer;font:inherit;font-size:12px}button:hover{background:#eee}button:focus-visible,canvas:focus-visible{outline:2px solid #333;outline-offset:-3px}main{position:relative;min-height:0;flex:1;overflow:hidden}canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab}canvas:active{cursor:grabbing}#status{position:absolute;inset:0;display:grid;place-content:center;padding:28px;text-align:center;font-size:14px;line-height:1.8;background:#f4f4f4}#status[hidden]{display:none}footer{display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:10px 20px;border-top:1px solid #ddd;background:#fff;font-size:12px;color:#666}footer>span{flex:1}details{position:relative}summary{cursor:pointer}pre{position:absolute;right:0;bottom:22px;width:min(600px,85vw);max-height:55vh;overflow:auto;white-space:pre-wrap;background:#fff;padding:16px;border:1px solid #ddd;font:11px/1.5 monospace;z-index:2}
+${options.embedded?':root{background:transparent;color:#dff6ff;color-scheme:normal}html,body{background:transparent}body>header,body>footer{display:none}#status{background:transparent;color:#dff6ff;text-shadow:0 1px 6px #000}':''}
 </style>
 </head>
-<body>
+<body${options.embedded?' data-embedded="true"':''}>
 <header><h1>${heading}</h1><button id="reset" type="button" disabled>重置视角</button></header>
 <main id="viewport"><canvas id="view" tabindex="0" aria-label="三维模型查看器"></canvas><div id="status" role="status">正在载入离线模型…</div></main>
 <footer><span>左键拖动旋转 · 右键或 Shift 拖动平移 · 滚轮缩放 · 双击重置</span><details><summary>Three.js · MIT</summary><pre>${textForHtml(threeLicense)}</pre></details></footer>
+${VIEWER_OPTIONS_START}${viewerOptions}</script>
 <script id="scene-data" type="application/json">${jsonForHtml(data)}</script>
 <script id="three-runtime" type="application/json">${jsonForHtml({core:threeCore,module:threeModule,roomEnvironment,lighting:RENDER_PRESETS[loadRenderPreset()]})}</script>
 <script>${viewerSource}</script>

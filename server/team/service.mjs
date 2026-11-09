@@ -1,8 +1,11 @@
 import {DatabaseSync} from 'node:sqlite';
 import {randomBytes,randomUUID,scryptSync,timingSafeEqual,createHash} from 'node:crypto';
-import {mkdirSync} from 'node:fs';
+import {mkdirSync,createReadStream} from 'node:fs';
 import {dirname} from 'node:path';
-const MAX_HTTP_BODY_BYTES=55*1024*1024;
+import {pipeline} from 'node:stream/promises';
+import {openDashboardStore} from './dashboard.mjs';
+import {openPublicationUploads} from './publishUploads.mjs';
+const MAX_HTTP_BODY_BYTES=416*1024*1024;
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const fail=(status,message)=>{throw Object.assign(Error(message),{status});};
 const categoryId=/^category-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -25,6 +28,12 @@ try{
  if(added){const update=db.prepare('UPDATE versions SET category_path=? WHERE item=? AND version=?');for(const row of db.prepare("SELECT v.item,v.version,v.payload FROM versions v JOIN items i ON i.id=v.item WHERE i.kind='asset'").all()){let payload;try{payload=JSON.parse(row.payload);}catch{continue;}const path=legacyCategoryPath('asset',payload);if(path.length)update.run(JSON.stringify(path),row.item,row.version);}}
  db.exec('COMMIT');
 }catch(e){db.exec('ROLLBACK');throw e;}
+const dashboardStore=openDashboardStore(db,`${path}.dashboards`);
+const publicationUploads=openPublicationUploads(db,`${path}.publish-uploads`);
+const dashboards={...dashboardStore,
+ completeUpload:async(_user,id,token)=>dashboardStore.completeUpload(await authenticate(token,{force:true}),id),
+ archive:async(_user,id,archived,token)=>dashboardStore.archive(await authenticate(token,{force:true}),id,archived),
+};
 const platformAuthBase=(options.platformAuthBase??process.env.CHAT3D_PLATFORM_AUTH_BASE??'http://36.133.218.210:48080').replace(/\/$/,'');
 const platformTenant=String(options.platformTenantId??process.env.CHAT3D_PLATFORM_TENANT_ID??'1');
 const passwordLogin=options.passwordLogin??process.env.CHAT3D_TEAM_PASSWORD_LOGIN!=='0';
@@ -129,19 +138,27 @@ function publish(user,body,validate,token){
    const result={id,version};db.prepare('INSERT INTO requests VALUES(?,?,?,?)').run(user.id,key,digest,JSON.stringify(result));return result;
   });
 }
-return {db,provision,login,loginSso,loginSsoCode,claimPending,authenticate,list,read,publish,logout:token=>db.prepare('DELETE FROM sessions WHERE token=?').run(hash(token??'')),disable:name=>transaction(()=>{db.prepare('UPDATE users SET disabled=1 WHERE name=?').run(name);db.prepare('DELETE FROM sessions WHERE user IN (SELECT id FROM users WHERE name=?)').run(name);}),close:()=>db.close()};
+return {db,provision,login,loginSso,loginSsoCode,claimPending,authenticate,list,read,publish,publicationUploads,dashboards,logout:token=>db.prepare('DELETE FROM sessions WHERE token=?').run(hash(token??'')),disable:name=>transaction(()=>{db.prepare('UPDATE users SET disabled=1 WHERE name=?').run(name);db.prepare('DELETE FROM sessions WHERE user IN (SELECT id FROM users WHERE name=?)').run(name);}),close:()=>db.close()};
 }
 export function teamMiddleware(team,validate,{origins=[]}={}){
  return async(req,res,next)=>{
   const url=new URL(req.url,'http://localhost');if(!url.pathname.startsWith('/api/team/'))return next();
   const send=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(data));};
+  const binary=async asset=>{
+   try{
+    const input=createReadStream(asset.path);
+    res.writeHead(200,{'Content-Type':asset.type,'Content-Length':String(asset.bytes),'X-Content-Type-Options':'nosniff','Cache-Control':'no-store','Content-Disposition':`attachment; filename*=UTF-8''${encodeURIComponent(asset.fileName).replace(/[!'()*]/g,char=>`%${char.charCodeAt(0).toString(16)}`)}`});
+    await pipeline(input,res);
+   }finally{await asset.cleanup?.();}
+  };
   try{
    const origin=req.headers.origin;
    if(origin){if(!origins.includes(origin))fail(403,'此客户端来源未获允许');res.setHeader('Access-Control-Allow-Origin',origin);res.setHeader('Vary','Origin');}
    if(req.method==='OPTIONS'){res.setHeader('Access-Control-Allow-Methods','GET,POST,OPTIONS');res.setHeader('Access-Control-Allow-Headers','Content-Type,Authorization');res.writeHead(204).end();return;}
    let body;if(req.method==='POST'){
     if(!req.headers['content-type']?.startsWith('application/json'))fail(415,'需要JSON');
-    let size=0;const parts=[];for await(const chunk of req.iterator({destroyOnReturn:false})){size+=chunk.length;if(size>MAX_HTTP_BODY_BYTES){res.setHeader('Connection','close');fail(413,`HTTP 请求体超过 ${MAX_HTTP_BODY_BYTES/(1024*1024)} MiB 上限`);}parts.push(chunk);}try{body=JSON.parse(Buffer.concat(parts).toString());}catch{fail(400,'JSON无效');}if(!body||typeof body!=='object')fail(400,'请求无效');
+    const bodyLimit=url.pathname.startsWith('/api/team/dashboards/uploads')||url.pathname.startsWith('/api/team/publish-uploads')?2*1024*1024:MAX_HTTP_BODY_BYTES;
+    let size=0;const parts=[];for await(const chunk of req.iterator({destroyOnReturn:false})){size+=chunk.length;if(size>bodyLimit){res.setHeader('Connection','close');fail(413,`HTTP 请求体超过 ${bodyLimit/(1024*1024)} MiB 上限`);}parts.push(chunk);}try{body=JSON.parse(Buffer.concat(parts).toString());}catch{fail(400,'JSON无效');}if(!body||typeof body!=='object')fail(400,'请求无效');
    }
    if(req.method==='POST'&&url.pathname==='/api/team/login')return send(200,team.login(body.name,body.password));
    if(req.method==='POST'&&url.pathname==='/api/team/login/sso')return send(200,await team.loginSso(body.accessToken,body.tenantId));
@@ -154,7 +171,24 @@ export function teamMiddleware(team,validate,{origins=[]}={}){
    const match=url.pathname.match(/^\/api\/team\/items\/([a-zA-Z0-9-]+)\/(\d+)$/);
    if(req.method==='GET'&&match)return send(200,team.read(match[1],Number(match[2])));
    if(req.method==='POST'&&url.pathname==='/api/team/publish')return send(200,await team.publish(user,body,validate,token));
+   if(req.method==='POST'&&url.pathname==='/api/team/publish-uploads/start')return send(200,team.publicationUploads.start(await team.authenticate(token,{force:true}),body));
+   const publicationUpload=url.pathname.match(/^\/api\/team\/publish-uploads\/([a-zA-Z0-9-]+)\/(chunk|complete)$/);
+   if(req.method==='POST'&&publicationUpload){if(publicationUpload[2]==='chunk')return send(200,team.publicationUploads.chunk(user,publicationUpload[1],body));const publisher=await team.authenticate(token,{force:true});return send(200,await team.publicationUploads.complete(publisher,publicationUpload[1],value=>team.publish(publisher,value,validate,token)));}
+   if(req.method==='GET'&&url.pathname==='/api/team/dashboards')return send(200,team.dashboards.list(user,{all:url.searchParams.get('all')==='1'}));
+   const dashboardVersion=url.pathname.match(/^\/api\/team\/dashboards\/([a-zA-Z0-9-]+)\/(\d+)$/);
+   if(req.method==='GET'&&dashboardVersion)return send(200,team.dashboards.read(user,dashboardVersion[1],Number(dashboardVersion[2])));
+   if(req.method==='POST'&&url.pathname==='/api/team/dashboards/uploads')return send(200,team.dashboards.createUpload(user,body));
+   const uploadFile=url.pathname.match(/^\/api\/team\/dashboards\/uploads\/([a-zA-Z0-9-]+)\/files$/);
+   if(req.method==='POST'&&uploadFile)return send(200,await team.dashboards.registerFile(user,uploadFile[1],body));
+   const uploadChunk=url.pathname.match(/^\/api\/team\/dashboards\/uploads\/([a-zA-Z0-9-]+)\/files\/([a-zA-Z0-9-]+)\/chunks$/);
+   if(req.method==='POST'&&uploadChunk)return send(200,await team.dashboards.writeChunk(user,uploadChunk[1],uploadChunk[2],body));
+   const uploadAction=url.pathname.match(/^\/api\/team\/dashboards\/uploads\/([a-zA-Z0-9-]+)\/(complete|cancel)$/);
+   if(req.method==='POST'&&uploadAction)return send(200,uploadAction[2]==='complete'?await team.dashboards.completeUpload(user,uploadAction[1],token):await team.dashboards.cancelUpload(user,uploadAction[1]));
+   const dashboardBinary=url.pathname.match(/^\/api\/team\/dashboards\/([a-zA-Z0-9-]+)\/(\d+)\/(files|source)$/);
+   if(req.method==='GET'&&dashboardBinary)return await binary(dashboardBinary[3]==='files'?team.dashboards.file(user,dashboardBinary[1],Number(dashboardBinary[2]),url.searchParams.get('path')):await team.dashboards.source(user,dashboardBinary[1],Number(dashboardBinary[2])));
+   const dashboardArchive=url.pathname.match(/^\/api\/team\/dashboards\/([a-zA-Z0-9-]+)\/archive$/);
+   if(req.method==='POST'&&dashboardArchive)return send(200,await team.dashboards.archive(user,dashboardArchive[1],body.archived,token));
    fail(404,'接口不存在');
-  }catch(e){if(!e.status)console.error('team request failed:',e.message);send(e.status??500,{error:e.status?e.message:'服务存储或校验失败，原件未修改；可重试'});}
+  }catch(e){if(!e.status)console.error('team request failed:',e.message);if(res.headersSent||res.destroyed){if(!res.destroyed)res.destroy(e);return;}send(e.status??500,{error:e.status?e.message:'服务存储或校验失败，原件未修改；可重试'});}
  };
 }

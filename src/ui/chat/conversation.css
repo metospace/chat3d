@@ -8,3 +8,30 @@
 .conversation-region .model-picker-trigger { min-width:0; max-width:190px; }
 .conversation-region .model-picker-trigger span { overflow:hidden; text-overflow:ellipsis; }
 .conversation-region .ant-bubble-content pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+
+.dashboard-command-picker {
+  margin:0 0 8px;
+  padding:10px;
+  border:1px solid var(--adx-line-strong);
+  border-radius:12px;
+  background:var(--adx-panel);
+  color:var(--adx-ink);
+  box-shadow:var(--adx-shadow);
+  font-size:12px;
+}
+.dashboard-command-picker-header { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:1px 2px 8px; }
+.dashboard-command-picker-header strong { font-size:12px; font-weight:600; }
+.dashboard-command-picker-header>span { flex:none; color:var(--adx-muted); font-size:11px; }
+.dashboard-command-picker-list { max-height:min(240px,30vh); overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
+.dashboard-command-picker-option { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:42px; padding:8px 10px; border-radius:7px; cursor:pointer; }
+.dashboard-command-picker-option.is-active { background:var(--adx-accent-soft); color:var(--adx-accent); }
+.dashboard-command-picker-option[aria-disabled="true"] { cursor:default; opacity:.65; }
+.dashboard-command-picker-name { min-width:0; overflow-wrap:anywhere; }
+.dashboard-command-picker-skill { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.dashboard-command-picker-description { color:var(--adx-muted); font-size:11px; line-height:1.5; }
+.dashboard-command-picker-meta { flex:none; max-width:50%; color:var(--adx-muted); font-size:11px; overflow-wrap:anywhere; text-align:right; }
+.dashboard-command-picker-state { display:flex; align-items:center; gap:8px; margin:0; padding:12px 4px; color:var(--adx-muted); line-height:1.7; overflow-wrap:anywhere; }
+.dashboard-command-picker-state>span { min-width:0; }
+.dashboard-command-picker-state .ant-btn { flex:none; }
+.dashboard-command-picker-warning { margin:0 2px 6px; padding:7px 9px; border-radius:7px; background:var(--adx-panel-soft); color:var(--adx-ink); line-height:1.6; }
+.dashboard-command-picker footer { margin:8px 2px 0; padding-top:8px; border-top:1px solid var(--adx-line); color:var(--adx-muted); font-size:10px; line-height:1.6; }

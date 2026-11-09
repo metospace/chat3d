@@ -1,6 +1,6 @@
 import {isTauri,invoke} from '@tauri-apps/api/core';
 
-export type ExportKind='html'|'glb'|'json';
+export type ExportKind='html'|'glb'|'json'|'zip';
 export type ExportContents=string|ArrayBuffer;
 export type ExportContentsFactory=()=>Promise<ExportContents>;
 
@@ -21,7 +21,7 @@ export async function exportFile(contents:ExportContents|ExportContentsFactory,k
   }
  }
  const value=typeof contents==='function'?await contents():contents;
- const type={html:'text/html;charset=utf-8',glb:'model/gltf-binary',json:'application/json'}[kind];
+ const type={html:'text/html;charset=utf-8',glb:'model/gltf-binary',json:'application/json',zip:'application/zip'}[kind];
  const url=URL.createObjectURL(new Blob([value],{type}));
  const link=document.createElement('a');
  try{link.href=url;link.download=filename;document.body.appendChild(link);link.click();return '已发起下载，请检查浏览器下载';}

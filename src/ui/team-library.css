@@ -110,6 +110,7 @@
 .team-transfer-source>label{color:var(--team-ink);min-width:0;overflow-wrap:anywhere}
 .team-transfer-source>label small{display:block;margin-top:5px;font-size:11px;line-height:1.6}
 .team-transfer-source select{width:240px;max-width:48%;min-height:32px;border:1px solid var(--team-line);border-radius:5px;background:var(--team-fill);color:var(--team-ink);font:inherit;font-size:11px;padding:4px 7px}
+.team-transfer-source select:disabled,.team-transfer-source input:disabled{cursor:wait;opacity:.6}
 .team-transfer-result>div{min-width:0}
 .team-transfer-result strong{display:block;font-size:12px;font-weight:500;overflow-wrap:anywhere}
 .team-transfer-result span{font-size:11px;color:var(--team-muted)}

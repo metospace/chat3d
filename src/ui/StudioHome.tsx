@@ -1,5 +1,6 @@
 import {ProCard} from '@ant-design/pro-components';
 import {prepareReference,MAX_ATTACHMENT_BYTES} from '../domain/referenceAttachments';
+import {OperationProgress,nextProgressPaint} from './OperationProgress';
 import {HomeTasks} from './HomeTasks';
 import {Button,Dropdown,Input,Modal,Segmented} from 'antd';
 import {Attachments,Sender} from '@ant-design/x';
@@ -37,14 +38,15 @@ export function StudioHome({onOpen,onGenerate,onConfigure,onTasks,onImport,hidde
  const configured=!!config&&!config.useMock&&!!config.baseURL.trim()&&!!config.apiKey.trim()&&!!config.model.trim();
  const ready=useWorkspaceStore(s=>s.ready),workspaceError=useWorkspaceStore(s=>s.error);
  const [kind,setKind]=useState<'asset'|'scene'>('asset'),[draft,setDraft]=useState(''),[images,setImages]=useState<string[]>([]),[imageBusy,setImageBusy]=useState(false);
+ const [attachmentProgress,setAttachmentProgress]=useState({completed:0,total:0,name:''});
  const [blenderModeling,setBlenderModeling]=useState(false);
- const [items,setItems]=useState<ModelAssetSummary[]>([]),[error,setError]=useState(''),[libraryError,setLibraryError]=useState('');
+ const [items,setItems]=useState<ModelAssetSummary[]>([]),[itemsReady,setItemsReady]=useState(false),[error,setError]=useState(''),[libraryError,setLibraryError]=useState('');
  const [renaming,setRenaming]=useState<WorkspaceSession|null>(null),[name,setName]=useState('');
  const [search,setSearch]=useState(''),[filter,setFilter]=useState<'all'|'asset'|'scene'>('all');
  const creating=useRef(false),imageBusyRef=useRef(false),attachmentsRef=useRef<ComponentRef<typeof Attachments>>(null),draftRef=useRef<ComponentRef<typeof Sender>>(null);
  useSenderLabel(draftRef,'新项目描述');
  const locked=!ready||!!workspaceError;
- useEffect(()=>{if(hidden)return;let alive=true;listModelAssets().then(a=>{if(alive){setItems(a);setLibraryError('');}}).catch(()=>{if(alive)setLibraryError('资产预览读取失败，项目仍可打开。请稍后重试。');});return()=>{alive=false;};},[hidden]);
+ useEffect(()=>{if(hidden)return;let alive=true;listModelAssets().then(a=>{if(alive){setItems(a);setItemsReady(true);setLibraryError('');}}).catch(()=>{if(alive){setItemsReady(true);setLibraryError('资产预览读取失败，项目仍可打开。请稍后重试。');}});return()=>{alive=false;};},[hidden]);
  const projects=sessions.filter(s=>!s.deletedAt&&(s.moduleKind||s.snapshot.doc.nodes.length||s.snapshot.messages.length)).sort((a,b)=>b.updatedAt-a.updatedAt);
  const matching=projects.filter(s=>(filter==='all'||(s.moduleKind??'scene')===filter)&&(s.title+' '+artworkTitle(s)).toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
  const recent=matching.slice(0,12);
@@ -76,7 +78,7 @@ export function StudioHome({onOpen,onGenerate,onConfigure,onTasks,onImport,hidde
    setDraft('');setImages([]);setError('');onOpen();onGenerate?.(projectId,blenderModeling);
   }catch(e){setError(e instanceof Error?e.message:'新建失败');creating.current=false;}
  }
- async function addImages(files:File[]){if(imageBusyRef.current)return;imageBusyRef.current=true;setImageBusy(true);setError('');const prepared:string[]=[];try{for(const file of files){if(file.size>MAX_ATTACHMENT_BYTES){setError('单个附件不能超过100MB');continue;}try{prepared.push(await prepareReference(file,compressImage));}catch{setError('附件处理失败，请重新选择');}}setImages(old=>[...old,...prepared]);}catch{setError('附件处理失败，请重新选择');}finally{imageBusyRef.current=false;setImageBusy(false)}}
+ async function addImages(files:File[]){if(imageBusyRef.current||!files.length)return;imageBusyRef.current=true;setImageBusy(true);setAttachmentProgress({completed:0,total:files.length,name:files[0].name});setError('');const prepared:string[]=[];try{for(const [index,file] of files.entries()){setAttachmentProgress({completed:index,total:files.length,name:file.name});await nextProgressPaint();if(file.size>MAX_ATTACHMENT_BYTES){setError('单个附件不能超过100MB');continue;}try{prepared.push(await prepareReference(file,compressImage));}catch{setError('附件处理失败，请重新选择');}}setImages(old=>[...old,...prepared]);}catch{setError('附件处理失败，请重新选择');}finally{imageBusyRef.current=false;setImageBusy(false)}}
  // A new visit can start another project; repeated submit events within the current visit cannot.
  useEffect(()=>{if(!hidden)creating.current=false;},[hidden]);
  const openRecent=(id:string)=>{if(switchSession(id))onOpen();else setError('项目暂时无法打开，请检查工作区保存状态');};
@@ -91,6 +93,7 @@ export function StudioHome({onOpen,onGenerate,onConfigure,onTasks,onImport,hidde
       header={<Sender.Header title={`参考附件 · ${images.length}`} open={images.length>0} forceRender closable={false}><ReferenceAttachments ref={attachmentsRef} values={images} disabled={locked||imageBusy} onAdd={files=>void addImages(files)} onRemove={index=>setImages(old=>old.filter((_,i)=>i!==index))}/></Sender.Header>}
       footer={(_, {components:{SendButton}})=><div className="pro-home-composer-actions home-composer-toolbar"><Button aria-label={imageBusy?'正在处理参考附件':'添加参考附件'} title="添加参考附件（单文件100MB以内）" type="text" disabled={locked||imageBusy} onClick={()=>attachmentsRef.current?.select({multiple:true})} icon={<PaperClipOutlined/>}/><GenerationMethodPicker forNewProject onConfigure={onConfigure} blenderModeling={blenderModeling} onBlenderModelingChange={setBlenderModeling}/><ModelPicker forNewProject onConfigure={onConfigure}/><span className="pro-spacer"/><SendButton shape="default" icon={<ArrowRightIcon/>} aria-label="开始生成" disabled={locked||imageBusy||(!draft.trim()&&!images.length)}>开始生成</SendButton></div>}/>
     </form>
+   {imageBusy&&<OperationProgress title="处理参考附件" stage="读取并准备附件" completed={attachmentProgress.completed} total={attachmentProgress.total} detail={attachmentProgress.name}/>}
    </div>
    <div className="home-idea-footnote">{!configured?<span><Button type="link" disabled={locked} onClick={onConfigure}>连接模型</Button>后即可生成，输入和附件会保留。</span>:<span>{blenderModeling?'Blender 模型会在工作台预览，应用后可编辑。':'每次生成独立项目，预览确认后再应用。'}</span>}<Dropdown trigger={['click']} menu={{items:createMenu}}><Button type="text" disabled={locked} aria-label="新建项目">空白项目 / 导入 GLB <ArrowRightIcon/></Button></Dropdown></div>
    {(error||workspaceError)&&<p className="resource-error" role="alert">{error||'工作区保存异常，请关闭其他标签页后刷新本页'}</p>}
@@ -102,7 +105,7 @@ export function StudioHome({onOpen,onGenerate,onConfigure,onTasks,onImport,hidde
      {libraryError&&<p role="alert" className="resource-error">{libraryError}</p>}
      {recent.length?<div className="project-artwork-grid">{recent.map(project=>{const title=artworkTitle(project);return <article key={project.id} className="project-artwork-card">
       <button type="button" className="project-artwork-open" aria-label={`继续编辑 ${title}`} disabled={locked} onClick={()=>openRecent(project.id)}>
-       <div className="project-gallery-preview"><ProjectThumb src={project.sceneThumbnail??items.find(item=>item.id===project.assetSource?.id)?.thumbnail} name={title} kind={project.moduleKind??'scene'} document={project.snapshot.pendingResult?.doc??project.snapshot.doc}/><span className="project-artwork-continue">继续创作 <ArrowRightIcon/></span><span className="project-artwork-kind">{project.moduleKind==='asset'?'模型':'场景'}</span></div>
+       <div className="project-gallery-preview"><ProjectThumb active={!hidden&&(!project.assetSource||itemsReady)} src={project.sceneThumbnail??items.find(item=>item.id===project.assetSource?.id)?.thumbnail} name={title} kind={project.moduleKind??'scene'} document={project.snapshot.pendingResult?.doc??project.snapshot.doc}/><span className="project-artwork-continue">继续创作 <ArrowRightIcon/></span><span className="project-artwork-kind">{project.moduleKind==='asset'?'模型':'场景'}</span></div>
        <div className="project-artwork-info"><strong title={project.title}>{title}</strong><div className="project-gallery-meta"><span>{projectLabel(project)}</span><time dateTime={new Date(project.updatedAt).toISOString()}>{new Date(project.updatedAt).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</time></div></div>
       </button>
       <Dropdown trigger={['click']} menu={{items:[{key:'rename',label:'重命名',onClick:()=>{setRenaming(project);setName(title);}}]}}><Button type="text" className="project-artwork-menu" aria-label={`作品操作 ${title}`} disabled={locked} icon={<DotsHorizontalIcon/>}/></Dropdown>

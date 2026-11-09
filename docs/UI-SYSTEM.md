@@ -97,6 +97,14 @@ Workbench 3D viewport and modeling engine are unchanged; `studio-workbench.css` 
 
 The conversation process starts collapsed, with one keyboard-accessible action/elapsed row. Expanding reveals public explanations and known executed actions in one flat flow; do not add phase sub-accordions. Streaming and termination must not override the user's open/closed choice. The stop action remains visible outside the disclosure. Pending streamed tool instructions are preparation, not execution. Never synthesize private reasoning or expose raw tool payloads as progress. Blender script/stage details live inside the same process disclosure.
 
+### Operation feedback and progress
+
+- Global import/export progress and operation results live in the fixed bottom-right `.feedback-rail`, outside page flow. Cards stack without covering each other; manager pages must not regain top-of-page banners.
+- Use `OperationProgress` inside the owning dialog or attachment composer for local save, backup/restore, upload and publication preparation. Call `nextProgressPaint()` before synchronous preparation so the initial status can render.
+- Show completed/total only for measured work (objects, processed files, batch entries or confirmed uploaded bytes). Unknown duration uses an indeterminate bar with the current stage and elapsed time, never a simulated percentage. Library save progress counts stages, not elapsed-time percentage.
+- Successful/informational result cards expire; errors remain until dismissed. Autosave/storage conflicts remain actionable with backup/recovery controls; dismissing the card must not clear the underlying storage error.
+- Browser downloads report that the download was initiated, not that the file was written successfully. Native save cancellation clears progress without reporting success.
+
 
 ## Changing the UI safely
 

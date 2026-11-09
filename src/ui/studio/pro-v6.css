@@ -3,7 +3,12 @@
 .canvas-studio.frosted-studio.pro-v6 .pro-studio-layout {width:100%;height:100%;min-height:0}
 .pro-v6.manager-mode .pro-studio-layout .ant-layout-content {height:calc(100dvh - 56px);overflow:auto;min-width:0}
 .pro-v6.manager-mode .pro-studio-main {display:block;position:relative;grid-area:auto;width:100%;height:auto;min-height:100%;padding:0;overflow:visible;background:transparent}
-.pro-v6.editor-mode > .pro-studio-main {height:100%;width:100%;margin:0;padding:0;overflow:hidden}
+.pro-v6.editor-mode .pro-studio-main {height:100%;width:100%;margin:0;padding:0;overflow:hidden}
+.pro-v6.editor-mode .pro-studio-layout :is(.ant-layout-header,.ant-layout-sider,.ant-pro-layout-bg-list){display:none!important}
+.pro-v6.editor-mode .pro-studio-layout>.ant-layout{padding:0!important;height:100dvh!important;min-height:0!important}
+.pro-v6.editor-mode .pro-studio-layout>.ant-layout>:not(.ant-pro-layout-container){display:none!important}
+.pro-v6.editor-mode .pro-studio-layout .ant-pro-layout-container{width:100%;min-width:0}
+.pro-v6.editor-mode .pro-studio-layout .ant-layout-content{height:100dvh!important;min-height:0!important;margin:0!important;padding:0!important;overflow:hidden}
 .pro-v6 .pro-studio-layout .ant-pro-layout-bg-list {background:var(--sc-surface-page)}
 .pro-v6 .pro-studio-layout .pro-studio-menu-link.ant-btn {display:flex;width:100%;height:auto;min-height:36px;justify-content:flex-start;text-align:left;padding:0;border:0;color:inherit;background:transparent;box-shadow:none;font-size:14px;gap:8px}
 .pro-v6 .pro-studio-layout .pro-studio-menu-link.ant-btn:not(:disabled):not(.ant-btn-disabled):is(:hover,:active,:focus-visible) {color:inherit;background:transparent;border:0;box-shadow:none}

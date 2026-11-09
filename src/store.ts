@@ -1,3 +1,4 @@
+import {validDashboardBinding,type DashboardBinding} from './domain/dashboard';
 import {loadModelConfig,saveModelConfig} from './ai/modelConfigStorage';
 export {loadModelConfig} from './ai/modelConfigStorage';
 // 编辑器状态 — Zustand（React UI 外壳与 Three.js 视口共享的储物间）
@@ -72,6 +73,7 @@ export interface HistoryEntry {
   applied: CommandWithInverse[]; // before/after 快照
   docAfter: SceneDocument;
   createdMaterialIds?: string[]; // Only this history entry's new materials; legacy entries stay compatible.
+  dashboardBefore?:{value:DashboardBinding|undefined};
   bytes: number;
 }
 
@@ -85,6 +87,7 @@ export interface EditorState {
   autosaveError: string | null;
   replaceProject: (doc: SceneDocument) => boolean;
   markSaved: () => void;
+  setDashboard:(binding:DashboardBinding|undefined)=>{ok:boolean;error?:string};
 
   composerText: string;
   composerImages: string[];
@@ -160,6 +163,13 @@ export const createEditorStore = (initial: Partial<EditorState> = {}) => create<
     return true;
   },
   markSaved: () => set({ dirty: false }),
+  setDashboard:(binding)=>{
+    const state=get();if(EDIT_LOCKED.has(state.aiStatus))return {ok:false,error:'请先完成或放弃当前操作'};
+    if(binding!==undefined&&!validDashboardBinding(binding))return {ok:false,error:'看板接入配置无效'};
+    const doc={...state.doc,revision:state.doc.revision+1};if(binding)doc.dashboard=structuredClone(binding);else delete doc.dashboard;
+    const entry:HistoryEntry={id:makeId(),createdAt:Date.now(),source:'manual',summary:binding?'接入看板 '+binding.name:'移除看板',applied:[],docAfter:doc,dashboardBefore:{value:state.doc.dashboard},bytes:JSON.stringify(binding??null).length};
+    set({doc,past:pushHistory(state.past,entry),future:[],dirty:true});return {ok:true};
+  },
   selection: [],
   messages: [],
   aiStatus: 'idle',
@@ -325,6 +335,7 @@ export const useEditorStore = createEditorStore({doc:restoredProject.doc??create
 // - before 里有快照的节点：回写旧值（保留原 ID、父子、参数、材料）
 // - after 里有但 before 里没有的节点：删除（即撤销创建）
 function restoreFromBefore(doc: SceneDocument, entry: HistoryEntry): SceneDocument {
+  if(entry.dashboardBefore){const restored={...doc,revision:doc.revision+1};if(entry.dashboardBefore.value)restored.dashboard=structuredClone(entry.dashboardBefore.value);else delete restored.dashboard;return restored;}
   let nodes = doc.nodes.map(cloneSnapshot);
   let animation=doc.animation;
   // 逐条反向还原，避免同一节点多次编辑覆盖批次最初状态。

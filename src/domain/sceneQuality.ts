@@ -18,7 +18,7 @@ export function boundsFor(g:Geometry):Box3{
  let size:[number,number,number];
  switch(g.type){
   case 'sectionLoft':case 'profileSweep':case 'loft':case 'sweepTube': {const geo=buildPrimitiveGeometry(g);geo.computeBoundingBox();const b=geo.boundingBox!.clone();geo.dispose();return b;}
-  case 'mesh': {const b=new Box3();const p=g.params.positions;for(let i=0;i<p.length;i+=3)b.expandByPoint(new Vector3(p[i],p[i+1],p[i+2]));return b;}
+  case 'mesh': {const b=new Box3(),v=new Vector3(),p=g.params.positions;for(let i=0;i<p.length;i+=3)b.expandByPoint(v.set(p[i],p[i+1],p[i+2]));return b;}
   case 'lathe': {const r=Math.max(...g.params.points.map(p=>p[0]));return new Box3(new Vector3(-r,g.params.points[0][1],-r),new Vector3(r,g.params.points[g.params.points.length-1][1],r));}
   case 'profile': return new Box3(new Vector3(Math.min(...g.params.points.map(p=>p[0])),Math.min(...g.params.points.map(p=>p[1])),-g.params.depth/2),new Vector3(Math.max(...g.params.points.map(p=>p[0])),Math.max(...g.params.points.map(p=>p[1])),g.params.depth/2));
   case 'box':case 'roundedPlate':case 'frame':size=[g.params.width,g.params.height,g.params.depth];break;

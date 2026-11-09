@@ -164,7 +164,7 @@ export function restoreSession(id:string):void{
 }
 
 
-export const MAX_WORKSPACE_BACKUP_BYTES=200*1024*1024;
+export const MAX_WORKSPACE_BACKUP_BYTES=400*1024*1024;
 export const WORKSPACE_BACKUP_SIZE_ERROR=`备份超过${MAX_WORKSPACE_BACKUP_BYTES/1024/1024} MiB，请分别导出项目`;
 /** Portable local backup. No model configuration or browser credentials are included. */
 export function exportWorkspaceBackup():string{

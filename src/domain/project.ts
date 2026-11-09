@@ -3,7 +3,7 @@ import { SceneDocument, SCHEMA_VERSION, validateDocument } from './types';
 import {validPublishedCategoryPath} from './teamCategories';
 
 export const MAX_PROJECT_BYTES = 400 * 1024 * 1024;
-export const MAX_TEAM_SCENE_BYTES = 50 * 1024 * 1024;
+export const MAX_TEAM_SCENE_BYTES = MAX_PROJECT_BYTES;
 export const PROJECT_SIZE_LIMIT = `${MAX_PROJECT_BYTES / (1024 * 1024)} MiB`;
 export const TEAM_SCENE_SIZE_LIMIT = `${MAX_TEAM_SCENE_BYTES / (1024 * 1024)} MiB`;
 const projectSizeError = (bytes: number) => `项目文件超过 ${bytes / (1024 * 1024)} MiB`;
@@ -16,7 +16,7 @@ export function serializeProject(doc: SceneDocument, overflowMessage?: string, m
   const scene: SceneDocument = {
     schemaVersion: doc.schemaVersion, projectId: doc.projectId, revision: doc.revision,
     unit: doc.unit, upAxis: doc.upAxis, nodes: doc.nodes, materials: doc.materials,
-    assets: doc.assets, ...(doc.animation?{animation:doc.animation}:{}), ...(doc.viewState ? { viewState: doc.viewState } : {}),
+    assets: doc.assets, ...(doc.dashboard?{dashboard:doc.dashboard}:{}), ...(doc.animation?{animation:doc.animation}:{}), ...(doc.viewState ? { viewState: doc.viewState } : {}),
   };
   // Compact JSON keeps whitespace from consuming the portable byte budget.
   const output = JSON.stringify({ format: 'chat3d-project', version: 1, scene, ...(teamCategoryPath !== undefined ? {teamCategoryPath} : {}) });
