@@ -174,12 +174,12 @@ function createConversationController(editor:EditorStore) {
     setStarted(Date.now());
     runMessageId.current=store().addUserMessage(text || '请根据参考附件建模', sentImages);
     ui.setState({runMessageId:runMessageId.current});
-    store().updateMessageRun(runMessageId.current,{startedAt:Date.now(),status:'running',generationQuality:cfg.generationQuality==='fast'?'fast':'fine',mode:usePi?'pi':'single'});
+    store().updateMessageRun(runMessageId.current,{startedAt:Date.now(),status:'running',mode:usePi?'pi':'single'});
     const trace=createRunTraceLog(cfg.apiKey.trim());
     diagnosticRuns.set(runMessageId.current,trace.entries);
     const record=(kind:string,data:unknown)=>{if(alive())trace.record(kind,data);};
     recordDiagnostic=record;
-    record('start',{method:options.blenderModeling?'blender':usePi?'direct-agent':'direct-single',model:cfg.model,endpoint:cfg.baseURL,quality:cfg.generationQuality,text:modelText});
+    record('start',{method:options.blenderModeling?'blender':usePi?'direct-agent':'direct-single',model:cfg.model,endpoint:cfg.baseURL,text:modelText});
     store().setAiError(null); store().setAiStatus('capturing');
     const baseRevision = working.revision;
     const projectId = working.projectId;

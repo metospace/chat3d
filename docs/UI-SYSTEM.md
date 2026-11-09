@@ -62,7 +62,7 @@ Prefer these over new one-off class names. Page-specific layout may still use BE
 
 - Multi-line prompts — Radix `TextArea`.
 - Search/filter — Radix `TextField`.
-- Model/quality pickers — existing `ModelPicker` / `QualityPicker` (Radix popover/dropdown).
+- Model/method pickers — existing `ModelPicker` / `GenerationMethodPicker`; generation methods are direct and Blender, sharing one high-quality standard.
 
 ### Empty states
 
@@ -92,6 +92,11 @@ All routes render inside:
 | 工作台 | `editor-workspace` in `App` | Chrome only: rails, transform bar, conversation, dialogs |
 
 Workbench 3D viewport and modeling engine are unchanged; `studio-workbench.css` only restyles surrounding panels.
+
+### Assistant progress disclosure
+
+The conversation process starts collapsed, with one keyboard-accessible action/elapsed row. Expanding reveals public explanations and known executed actions in one flat flow; do not add phase sub-accordions. Streaming and termination must not override the user's open/closed choice. The stop action remains visible outside the disclosure. Pending streamed tool instructions are preparation, not execution. Never synthesize private reasoning or expose raw tool payloads as progress. Blender script/stage details live inside the same process disclosure.
+
 
 ## Changing the UI safely
 

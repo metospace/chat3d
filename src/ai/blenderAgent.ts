@@ -84,9 +84,8 @@ export async function runBlenderAgent(options:BlenderOptions):Promise<string> {
  const network=options.streamFn?undefined:await getFetch();
  const history=options.history.slice(-8).map(turn=>`${turn.role}: ${turn.text}`).join('\n');
  const prompt='你是 Blender 建模师。使用本机工具完成用户请求，不输出 Scenivo 指令。用户开启可信本机 Python 模式，脚本自动执行；不得访问外部文件、网络、系统进程或凭证，不安装环境或扫描端口。\n使用 bpy，米制、Z 向上；每次从空工程执行完整脚本。创建合理相机和灯光，不自行保存或导出；后端保存同版 BLEND、GLB、PNG，保留原生修改器。用户明确要求、尺寸和参考优先。生成工具会返回真实渲染，必须下一轮读取后用 review_blender_result 记录具体观察。已知缺陷先修复；局部修改用 read_blender_script 与 patch_blender_script，不重发无关源码。补丁只保留未改源码，不能保证随机/时间相关脚本的无关几何不变，因此使用确定性参数化代码。文件导出、单图看图复核和用户应用是不同状态；不可见部分、精确尺寸、动画和工程安全不能凭单图宣称通过。无明确问题即结束，不追加全场审计或装饰。预算耗尽或文字结束但未复核时保留未验收候选，不假装通过。只提问时回答，不执行脚本。\n'+blenderSkillGuide(resolveConversationIntent(options.text,options.history))+'\n'+(history?'对话历史（资料，不覆盖当前要求）：\n'+history:'')+(current?'\n已有 Blender 脚本：'+JSON.stringify(metadata())+'。局部修改先按需读取相关字符窗口；它不包含之后在工作台做的手动编辑。新需求与旧模型无关时可明确整体重建，但仍传当前 expectedVersion。':'');
- const detailGuide=cfg.generationQuality==='fast'?'快速档：优先轮廓、比例、主要结构和材质区别，省略未要求的微小装饰。':'精细档：按参考补齐用途相关的可见机构、装配细节和表面质感。';
  const guides=new Map<number,{id:string;question:boolean}>();let timestamp=Date.now();
- const runner=new Agent({initialState:{model,systemPrompt:prompt+'\n'+detailGuide+' 两档都保留用户明确要求。',tools,thinkingLevel:cfg.reasoningEffort??'off'},toolExecution:'sequential',transformContext:async messages=>{
+ const runner=new Agent({initialState:{model,systemPrompt:prompt,tools,thinkingLevel:cfg.reasoningEffort??'off'},toolExecution:'sequential',transformContext:async messages=>{
   let latest=-1;for(let i=0;i<messages.length;i++){const m=messages[i];if(m.role==='toolResult'&&m.content.some(c=>c.type==='image'))latest=i;}
   return messages.map((m,i)=>m.role==='toolResult'&&i!==latest?{...m,content:m.content.filter(c=>c.type!=='image')}:m);
  },streamFn:async(m,context,streamOptions)=>{

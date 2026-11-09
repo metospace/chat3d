@@ -1,11 +1,9 @@
-// Adapted from blender-mcp-modeling 1.0.1: modeling-quality.md and smt-conventions.md.
-// Project-specific models, dimensions, brands and installation instructions are not defaults.
-const general = `# Blender 建模质量规则
-- 以用户明确尺寸、参考图及厂家尺寸图为准；先定整体剪影、主比例、连续曲率、关键负空间，再补细节。透视缩短不等于真实变形；有疑问用正交比例判断。未知尺寸或不可见面按估计处理，不冒充实测或复刻。
-- 按制造方式表达真实板厚、装配间隙、壳体接缝和小倒角；可见开孔应有内壁或合理遮挡，不能用整块黑贴片代替。按尺度决定倒角，平滑曲面但保留机械锐边；不要靠全局细分、堆小零件或整机贴照片掩盖错误轮廓。
-- 喷漆、裸金属、塑料、橡胶和玻璃用不同 PBR 参数，不只是换颜色。纹理尺度适当；UV 不拉伸、不镜像文字，颜色贴图用 sRGB，法线/粗糙度等用 Non-Color。需要带到 GLB 的程序纹理在 Blender 内烘焙为兼容贴图；标签看不清就不编造。
-- 检查相关部位的悬空、穿插、共面闪烁和法线；设计上的薄片、开口不是缺陷。局部修改从上一份脚本保留无关几何、材质、位置和动作，只改相关参数或对象；不套用旧场景到新的无关需求。
-- 在本次 Blender 作业内按改动选择最能判断问题的相机角度；预览优先清楚和低成本，不默认四视图、全量审计或独立重导入。定稿保持原生工程与 GLB 同版；源工程保留修改器、贴图和层级，GLB 遵循自身格式限制。文件导出成功不等于视觉或工程验收。`;
+import {generationStylePrompt} from './generationStyle';
+// Domain-specific notes supplement the shared standard only when relevant.
+const general = generationStylePrompt('blender')+`\n# Blender 数据与取景约定
+- 颜色贴图用 sRGB，法线/粗糙度等用 Non-Color；GLB 不能携带的程序节点需要兼容烘焙或明确说明限制。
+- 局部修改沿用上一份脚本，保留未涉及的几何、材质、位置和动作；新无关任务不得套用旧场景。
+- 每次选择最能判断当前改动的相机角度，近景与全形证据按问题需要获取，不默认全量审计。输出文件成功不代表视觉、动作或工程验收。`;
 
 const topics = [
  {match:/\b(?:SMT|PCB|MES|SPI|AOI)\b|贴片|回流焊|上板机|下板机|接驳台|飞达|钢网|板流|料盘/i, guide:`### SMT、输送与过站

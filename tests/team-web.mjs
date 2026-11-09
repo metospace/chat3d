@@ -1,3 +1,5 @@
+import 'fake-indexeddb/auto';
+import {JSDOM} from 'jsdom';
 import assert from 'node:assert/strict';
 import {createServer} from 'vite';
 
@@ -23,7 +25,7 @@ assert.equal(sceneCopy.revision,0);
 
 assert.match(teamCopyFilename(assetItem),/scenivo-team-asset/);
 assert.match(teamCopyFilename(sceneItem),/\.chat3d\.json$/);
-const {buildPlatformAuthorizeUrl,DEFAULT_OAUTH_CLIENT_ID,DEFAULT_SSO_UI_BASE,SSO_CALLBACK_PATH,configuredTeamServiceBase,showTeamPasswordLogin}=await server.ssrLoadModule('/src/domain/platformOAuth.ts');
+const {buildPlatformAuthorizeUrl,DEFAULT_OAUTH_CLIENT_ID,DEFAULT_SSO_UI_BASE,DEFAULT_TEAM_SERVICE_BASE,SSO_CALLBACK_PATH,configuredTeamServiceBase,platformOAuthRedirectUri,showTeamPasswordLogin}=await server.ssrLoadModule('/src/domain/platformOAuth.ts');
 const authUrlRaw=buildPlatformAuthorizeUrl(configuredTeamServiceBase(),'state-test');
 assert.ok(authUrlRaw.startsWith(DEFAULT_SSO_UI_BASE+'/#/sso?'),authUrlRaw);
 assert.equal(new URL(authUrlRaw).origin,'http://pm.jiezi365.com:48001','account authorization opens the configured domain instead of the legacy IP');
@@ -36,18 +38,43 @@ assert.equal(authUrl.searchParams.has('scope'),false);
 assert.equal(authUrl.searchParams.get('state'),'state-test');
 assert.equal(authUrl.searchParams.get('redirect_uri'),configuredTeamServiceBase()+SSO_CALLBACK_PATH);
 assert.equal(showTeamPasswordLogin(),false);
-const overrideServer=await createServer({server:{middlewareMode:true,hmr:false},appType:'custom',define:{'import.meta.env.VITE_CHAT3D_PLATFORM_LOGIN_URL':JSON.stringify('https://sso.example/authorize?scope=user.read&theme=dark')}});
+const dom=new JSDOM('<html><body></body></html>',{url:'http://localhost:1420/'});
+for(const key of ['window','document','localStorage'])Object.defineProperty(globalThis,key,{value:dom.window[key],configurable:true});
+const {defaultTeamServiceBase}=await server.ssrLoadModule('/src/domain/teamLibrary.ts');
+for(const path of ['/','/team','/team/','/team/sso/callback']){
+ dom.reconfigure({url:'https://workbench.example'+path});
+ assert.equal(defaultTeamServiceBase(),'https://workbench.example','all browser entrypoints use same-origin API');
+}
+dom.reconfigure({url:'http://localhost:1420/team/'});
+assert.equal(defaultTeamServiceBase(),'http://localhost:1420');
+assert.equal(platformOAuthRedirectUri(defaultTeamServiceBase()),'http://localhost:1420'+SSO_CALLBACK_PATH);
+assert.equal(platformOAuthRedirectUri('https://remote-api.example'),'https://remote-api.example'+SSO_CALLBACK_PATH,'remote API must not silently redirect to localhost');
+Object.defineProperty(globalThis,'__TAURI_INTERNALS__',{value:{},configurable:true});
+for(const url of ['http://localhost:1420/team/','http://tauri.localhost/','https://tauri.localhost/']){
+ dom.reconfigure({url});
+ assert.equal(defaultTeamServiceBase(),DEFAULT_TEAM_SERVICE_BASE,'Tauri retains desktop portal default');
+ assert.equal(platformOAuthRedirectUri(defaultTeamServiceBase()),DEFAULT_TEAM_SERVICE_BASE+SSO_CALLBACK_PATH);
+}
+Object.defineProperty(globalThis,'__TAURI_INTERNALS__',{value:undefined,configurable:true});
+dom.reconfigure({url:'http://localhost:1420/team/'});
+const overrideServer=await createServer({server:{middlewareMode:true,hmr:false},appType:'custom',define:{'import.meta.env.VITE_CHAT3D_PLATFORM_LOGIN_URL':JSON.stringify('https://sso.example/authorize?scope=user.read&theme=dark'),'import.meta.env.VITE_CHAT3D_TEAM_DEFAULT_BASE':JSON.stringify(' https://configured-api.example/ '),'import.meta.env.VITE_CHAT3D_PLATFORM_OAUTH_REDIRECT_URI':JSON.stringify('https://registered.example/team/sso/callback')}});
 try{
- const {buildPlatformAuthorizeUrl:buildOverride}=await overrideServer.ssrLoadModule('/src/domain/platformOAuth.ts');
- const overrideUrl=new URL(buildOverride(configuredTeamServiceBase(),'override-state'));
+ const {buildPlatformAuthorizeUrl:buildOverride,configuredTeamServiceBase:configuredOverride}=await overrideServer.ssrLoadModule('/src/domain/platformOAuth.ts');
+ const {defaultTeamServiceBase:defaultOverride}=await overrideServer.ssrLoadModule('/src/domain/teamLibrary.ts');
+ assert.equal(configuredOverride(),'https://configured-api.example');
+ assert.equal(defaultOverride(),'https://configured-api.example','explicit API base wins on /team');
+ Object.defineProperty(globalThis,'__TAURI_INTERNALS__',{value:{},configurable:true});
+ assert.equal(defaultOverride(),'https://configured-api.example','explicit API base wins on desktop');
+ const overrideUrl=new URL(buildOverride(configuredOverride(),'override-state'));
  assert.equal(overrideUrl.searchParams.has('scope'),false);
  assert.equal(overrideUrl.searchParams.get('client_id'),DEFAULT_OAUTH_CLIENT_ID);
- assert.equal(overrideUrl.searchParams.get('redirect_uri'),configuredTeamServiceBase()+SSO_CALLBACK_PATH);
+ assert.equal(overrideUrl.searchParams.get('redirect_uri'),'https://registered.example/team/sso/callback');
  assert.equal(overrideUrl.searchParams.get('response_type'),'code');
  assert.equal(overrideUrl.searchParams.get('state'),'override-state');
  assert.equal(overrideUrl.searchParams.get('theme'),'dark');
-}finally{await overrideServer.close();}
+}finally{await overrideServer.close();dom.window.close();delete globalThis.__TAURI_INTERNALS__;}
 await server.close();
 console.log('PASS team web copy export produces desktop-importable snapshots');
 console.log('PASS platform authorize URLs preserve OAuth parameters without auto-approval scope');
+console.log('PASS root/team browser origins, desktop defaults, remote redirects and explicit API/redirect overrides');
 

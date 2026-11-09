@@ -6,14 +6,14 @@ try{
  const {runModelingAgent}=await server.ssrLoadModule('/src/ai/modelingAgent.ts');
  const {createInitialDoc}=await server.ssrLoadModule('/src/store.ts');
  const {DETAIL_CRITERIA}=await server.ssrLoadModule('/src/domain/detailAcceptance.ts');
- const config={baseURL:'https://offline.invalid/v1',apiKey:'mock-only',model:'fixture',generationQuality:'fine'};
+ const config={baseURL:'https://offline.invalid/v1',apiKey:'mock-only',model:'fixture'};
  const image='data:image/png;base64,YWJj';
  const edit={name:'edit_scene',args:{summary:'body',operations:[{op:'createPrimitive',name:'body',parentId:null,materialId:'mat_gray',geometry:{type:'box',params:{width:1,height:1,depth:1}},transform:{position:[0,.5,0],rotationQuaternion:[0,0,0,1],scale:[1,1,1]}}]}};
  const fake=steps=>{let i=0;const contexts=[];return {contexts,fn:async(_model,context)=>{contexts.push(structuredClone(context));const raw=steps[i++]??'done';const step=typeof raw==='function'?raw():raw;const content=Array.isArray(step)?step.map((x,j)=>({type:'toolCall',id:`${i}_${j}`,name:x.name,arguments:x.args})):[{type:'text',text:step}];const message={role:'assistant',content,api:'openai-completions',provider:'mock',model:'mock',stopReason:Array.isArray(step)?'toolUse':'stop',timestamp:Date.now(),usage:{input:20,output:10,cacheRead:0,cacheWrite:0,totalTokens:30,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}};const stream=createAssistantMessageEventStream();queueMicrotask(()=>{stream.push({type:'start',partial:message});stream.push({type:'done',reason:message.stopReason,message});});return stream;}};};
  const capture={name:'capture_multiview',args:{views:['front','back']}};
  const one=fake([[edit],[capture],'keep unreviewed']);
  const bad=await runModelingAgent({text:'创建主体',document:createInitialDoc(),selection:[],config,streamFn:one.fn,captureEvidence:async(doc,view,targetIds,time)=>({image,backend:'webgl',projectId:'wrong-task',revision:doc.revision,view,targetIds,time})});
- assert.equal(bad.batch.incomplete,true);assert.match(bad.batch.summary,/检查图片与当前任务文档不匹配/);assert.doesNotMatch(JSON.stringify(one.contexts),/"type":"image"/);console.log('PASS wrong-project capture evidence is rejected before it reaches model context');
+ assert.equal(bad.batch.incomplete,true);assert.doesNotMatch(JSON.stringify(one.contexts),/"type":"image"/);console.log('PASS wrong-project capture evidence is rejected before it reaches model context');
  let nodeId='';
  const soft=fake([[edit],[capture],()=>[{name:'audit_model_detail',args:{componentId:nodeId,checks:DETAIL_CRITERIA.map(x=>({criterion:x.key,status:'pass',evidence:'当前两张图包含该对象可见结构和材质的检查依据',nodeIds:[nodeId]}))}}],'keep pending']);
  const gpu=fake([[edit],[capture],'keep pending']);

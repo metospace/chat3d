@@ -24,7 +24,7 @@ import {SiteAccessRecovery} from '../SiteAccessRecovery';
 import {MessageText} from '../MessageText';
 import {ResultMessage} from '../ResultMessage';
 import {ModelPicker} from '../ModelPicker';
-import {QualityPicker} from '../QualityPicker';
+import {GenerationMethodPicker} from '../GenerationMethodPicker';
 import {AppTheme} from '../theme/AppTheme';
 import {RunTrace} from './RunTrace';
 import './adx-chat.css';
@@ -288,7 +288,7 @@ function ChatSurface({onConfigure,canvasMode=false,expanded=true,onExpand,autoSt
           <div className="adx-composer-controls">
             <Button type="text" shape="circle" aria-label="添加参考附件" title="添加参考附件（单文件100MB以内）" disabled={imageBusy}
               icon={<PlusIcon/>} onClick={()=>attachmentsRef.current?.select({multiple:true})}/>
-            {configured&&<QualityPicker onConfigure={onConfigure} blenderModeling={blenderModeling} onBlenderModelingChange={value=>{setBlenderStatus('checking');setBlenderModeling(value);setNotice('');}}/>}
+            {configured&&<GenerationMethodPicker onConfigure={onConfigure} blenderModeling={blenderModeling} onBlenderModelingChange={value=>{setBlenderStatus('checking');setBlenderModeling(value);setNotice('');}}/>}
             <ModelPicker onConfigure={onConfigure}/>
           </div>
           <span className="adx-send-cluster">

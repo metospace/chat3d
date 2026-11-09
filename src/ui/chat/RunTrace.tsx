@@ -5,15 +5,16 @@ import {runStatusLabel} from '../../domain/runStatusLabel';
 import type {MessageRun} from '../../store';
 import type {AgentActivity} from '../../ai/modelingAgent';
 import type {BlenderActivityProgress} from '../../ai/blenderProgress';
-import {workTimeline,workTimelineTime,WORK_TIMELINE_STATUS,type WorkTimelineEntry} from './workTimeline';
+import {progressFeed,workTimelineTime,type ProgressEntry} from './workTimeline';
 import {BLENDER_STAGE_LABELS,liveProgress} from './liveProgress';
 
-function TimelineRecord({entry}:{entry:WorkTimelineEntry}){
- return <li className={`adx-work-entry is-${entry.status}`} data-status={entry.status} data-kind={entry.kind} data-phase={entry.phase}>
-  <div className="adx-work-time">{entry.startedAt===undefined?<span>时间未记录</span>:<time dateTime={new Date(entry.startedAt).toISOString()}>{workTimelineTime(entry.startedAt)}</time>}
-   {entry.endedAt!==undefined&&entry.endedAt!==entry.startedAt&&<><span aria-hidden="true"> — </span><time dateTime={new Date(entry.endedAt).toISOString()}>{workTimelineTime(entry.endedAt)}</time></>}</div>
-  <div className="adx-work-content"><div className="adx-work-heading"><span>{entry.title}</span><span className="adx-work-status">{WORK_TIMELINE_STATUS[entry.status]}</span></div>
-   {entry.text&&<p className="adx-run-text">{entry.text}</p>}</div>
+function ProgressRecord({entry}:{entry:ProgressEntry}){
+ const status={recorded:'',running:'进行中',completed:'已完成',failed:'未成功',interrupted:'未完成'}[entry.status];
+ return <li className={`adx-progress-entry is-${entry.kind} is-${entry.status}`} data-kind={entry.kind} data-status={entry.status}>
+  {entry.kind==='explanation'?<p className="adx-run-text">{entry.text}</p>:<>
+   <div className="adx-progress-action"><span className="adx-progress-mark" aria-hidden="true">{entry.status==='completed'?'✓':entry.status==='failed'?'!':'·'}</span><span>{entry.text}{(entry.count??1)>1?` ×${entry.count}`:''}</span><span className="adx-progress-action-status">{status}</span></div>
+   {entry.summary&&<p className="adx-progress-summary">{entry.summary}</p>}
+  </>}
  </li>;
 }
 
@@ -46,32 +47,27 @@ function BlenderProgressPanel({progress,status,now}:{progress:BlenderActivityPro
  </section>;
 }
 
-/** Recorded public explanations, grouped by phase and ordered by their own timestamps. */
+/** One visible progress stream: public explanations and actual execution, not hidden reasoning. */
 export function RunTrace({run,activity,onStop,blender=false}:{run:MessageRun;activity?:AgentActivity|null;onStop?:()=>void;blender?:boolean}){
- const active=run.status==='running';
- const a=activity??run.activity;
- const entries=workTimeline(run,a);
- const [now,setNow]=useState(Date.now());
- const [expanded,setExpanded]=useState(true);
- const timelineId=useId();
+ const active=run.status==='running',a=activity??run.activity;
+ const entries=progressFeed(run,a);
+ const [now,setNow]=useState(Date.now()),[expanded,setExpanded]=useState(false);
+ const detailsId=useId();
  useEffect(()=>{if(!active)return;setNow(Date.now());const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[active,run.startedAt]);
- const elapsed=Number.isFinite(run.startedAt)?Math.max(0,Math.floor((now-run.startedAt)/1000)):undefined;
- const label=runStatusLabel(run,a);
- const progress=activityProgress(a,active,now);
- const live=liveProgress(a,blender);
- const heading=<button type="button" className="adx-run-heading" aria-expanded={expanded} aria-controls={timelineId} onClick={()=>setExpanded(value=>!value)}>
-  <span>{active?'工作说明':label}</span>
- </button>;
+ const elapsed=Number.isFinite(run.startedAt)?Math.max(0,Math.floor(((active?now:run.endedAt??now)-run.startedAt)/1000)):undefined;
+ const progress=activityProgress(a,active,now),live=liveProgress(a,blender),label=runStatusLabel(run,a);
+ const currentAction=[...(a?.timings??[])].reverse().find(step=>step.kind==='tool'&&step.endedAt===undefined);
+ const history=active&&currentAction?entries.filter(entry=>entry.id!=='action-'+currentAction.id):entries;
  return <section className={`conversation-process adx-run ${active?'is-active':''}`} aria-label="工作时间线" data-phase={progress.phase} data-model-state={progress.modelState}>
-  {active&&<div className="adx-live-progress" role="status" aria-live="polite" aria-label="生成进度">
-   <div className="adx-live-progress-title"><span className="adx-live-dot" aria-hidden="true"/><strong>{live.label}</strong>{elapsed!==undefined&&<span className="adx-run-elapsed" aria-live="off">{elapsed} 秒</span>}</div>
-   <p>{live.note}</p>
-   <span className="adx-live-progress-help">可在下方补充要求，或停止生成。</span>
-  </div>}
-  {a?.blenderProgress&&<BlenderProgressPanel progress={a.blenderProgress} status={run.status} now={now}/>}
-  {entries.length>0?<>{heading}<div id={timelineId} hidden={!expanded}>
-   <ol className="adx-work-timeline" aria-label="按时间排列的工作记录">{entries.map(entry=><TimelineRecord key={entry.id} entry={entry}/>)}</ol>
-  </div></>:!active&&<span className="adx-run-heading">{label}</span>}
+  <button type="button" className="adx-progress-header" aria-expanded={expanded} aria-controls={detailsId} onClick={()=>setExpanded(value=>!value)}>
+   <span className={`adx-progress-chevron ${expanded?'is-open':''}`} aria-hidden="true">›</span>
+   {active&&<span className="adx-live-dot" aria-hidden="true"/>}<strong>{active?live.label:label}</strong>{elapsed!==undefined&&<span className="adx-run-elapsed" aria-live="off">{elapsed} 秒</span>}
+  </button>
+  <div id={detailsId} hidden={!expanded} className="adx-progress-details">
+   {history.length>0&&<ol className="adx-progress-feed" aria-label="建模进展">{history.map(entry=><ProgressRecord key={entry.id} entry={entry}/>)}</ol>}
+   {active&&<div className="adx-progress-current"><span className="adx-progress-current-label">{currentAction?'正在执行':progress.modelState==='responding'?'正在接收':'等待响应'}</span><p>{live.note}</p></div>}
+   {a?.blenderProgress&&<BlenderProgressPanel progress={a.blenderProgress} status={run.status} now={now}/>}
+  </div>
   {active&&onStop&&<ConversationActions className="adx-run-actions" items={[{key:'stop',label:'停止生成',onClick:onStop}]}/>}
  </section>;
 }

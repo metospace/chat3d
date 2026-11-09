@@ -14,7 +14,7 @@ import {listModelAssets} from '../domain/modelAssetStorage';
 import type {ModelAssetSummary} from '../domain/modelAssets';
 import {compressImage} from './ChatPanel';
 import {ModelPicker} from './ModelPicker';
-import {QualityPicker} from './QualityPicker';
+import {GenerationMethodPicker} from './GenerationMethodPicker';
 import {assertLibraryReady,projectLabel} from '../domain/libraryNavigation';
 import {ProjectThumb} from './ProjectLibrary';
 import {StudioPage} from './studio/StudioPage';
@@ -89,7 +89,7 @@ export function StudioHome({onOpen,onGenerate,onConfigure,onTasks,onImport,hidde
     <form className="pro-home-form" aria-label="创建项目" onSubmit={event=>{event.preventDefault();startProject();}}>
      <Sender ref={draftRef} className="home-x-sender pro-home-sender" value={draft} onChange={setDraft} onPasteFile={files=>void addImages(Array.from(files))} onSubmit={startProject} onKeyDown={event=>{if(event.nativeEvent.isComposing||event.keyCode===229)return false;}} submitType="enter" disabled={locked} readOnly={imageBusy} suffix={false} autoSize={{minRows:3,maxRows:8}} placeholder={kind==='asset'?'描述你想创建的模型，例如：一台带升降机构的仓储 AGV…':'描述你想创建的空间，例如：一个有两排货架和中央通道的仓库…'}
       header={<Sender.Header title={`参考附件 · ${images.length}`} open={images.length>0} forceRender closable={false}><ReferenceAttachments ref={attachmentsRef} values={images} disabled={locked||imageBusy} onAdd={files=>void addImages(files)} onRemove={index=>setImages(old=>old.filter((_,i)=>i!==index))}/></Sender.Header>}
-      footer={(_, {components:{SendButton}})=><div className="pro-home-composer-actions home-composer-toolbar"><Button aria-label={imageBusy?'正在处理参考附件':'添加参考附件'} title="添加参考附件（单文件100MB以内）" type="text" disabled={locked||imageBusy} onClick={()=>attachmentsRef.current?.select({multiple:true})} icon={<PaperClipOutlined/>}/><QualityPicker forNewProject onConfigure={onConfigure} blenderModeling={blenderModeling} onBlenderModelingChange={setBlenderModeling}/><ModelPicker forNewProject onConfigure={onConfigure}/><span className="pro-spacer"/><SendButton shape="default" icon={<ArrowRightIcon/>} aria-label="开始生成" disabled={locked||imageBusy||(!draft.trim()&&!images.length)}>开始生成</SendButton></div>}/>
+      footer={(_, {components:{SendButton}})=><div className="pro-home-composer-actions home-composer-toolbar"><Button aria-label={imageBusy?'正在处理参考附件':'添加参考附件'} title="添加参考附件（单文件100MB以内）" type="text" disabled={locked||imageBusy} onClick={()=>attachmentsRef.current?.select({multiple:true})} icon={<PaperClipOutlined/>}/><GenerationMethodPicker forNewProject onConfigure={onConfigure} blenderModeling={blenderModeling} onBlenderModelingChange={setBlenderModeling}/><ModelPicker forNewProject onConfigure={onConfigure}/><span className="pro-spacer"/><SendButton shape="default" icon={<ArrowRightIcon/>} aria-label="开始生成" disabled={locked||imageBusy||(!draft.trim()&&!images.length)}>开始生成</SendButton></div>}/>
     </form>
    </div>
    <div className="home-idea-footnote">{!configured?<span><Button type="link" disabled={locked} onClick={onConfigure}>连接模型</Button>后即可生成，输入和附件会保留。</span>:<span>{blenderModeling?'Blender 模型会在工作台预览，应用后可编辑。':'每次生成独立项目，预览确认后再应用。'}</span>}<Dropdown trigger={['click']} menu={{items:createMenu}}><Button type="text" disabled={locked} aria-label="新建项目">空白项目 / 导入 GLB <ArrowRightIcon/></Button></Dropdown></div>

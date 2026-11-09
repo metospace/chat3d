@@ -6,12 +6,12 @@ type Content=TextContent|ImageContent;
 const CAPTURE_TOOLS:Record<string,true|undefined>={capture_view:true,capture_multiview:true,capture_quality_review:true,capture_component_intrinsic:true,capture_detail_diagnostic:true,preview_animation:true};
 const IMAGE_LIMIT=6,RECALL_LIMIT=3,CATALOG_LIMIT=12;
 
-type ImageEvidence={index:number;revision:number|null;scopes:string[];views:string[]};
-export type ActiveEvidence={captureId:string;toolCallId:string;revision:number|null;images:ImageEvidence[]};
+type ImageEvidence={index:number;revision:number|null;originalRevision?:number|null;scopes:string[];views:string[]};
+export type ActiveEvidence={captureId:string;toolCallId:string;revision:number|null;originalRevision?:number|null;images:ImageEvidence[]};
 export type EvidenceCatalogEntry={captureId:string;toolCallId:string;toolName:string;revision:number|null;scopes:string[];views:string[];imageCount:number;available:true};
 type Packet={id:string;message:ResultMessage;images:ImageContent[];manifest:ImageEvidence[];entry:EvidenceCatalogEntry};
 type Occurrence={position:number;packet:Packet;indices:number[];recall:boolean};
-type RecallReference={captureId:string;imageIndices:number[];revision:number};
+type RecallReference={captureId:string;imageIndices:number[];revision:number;originalRevision?:number};
 
 function record(value:unknown):Record<string,unknown>{
  if(typeof value==='string'){try{return record(JSON.parse(value));}catch{return {};}}
@@ -75,9 +75,27 @@ export class EvidenceContext{
  private readonly packets:Packet[]=[];
  private readonly byCall=new Map<string,Packet>();
  private readonly byId=new Map<string,Packet>();
+ private readonly revisionAliases=new Map<number,number>();
  private activeEvidence:ActiveEvidence[]=[];
  get activeImageCount():number{return this.activeEvidence.reduce((count,entry)=>count+entry.images.length,0);}
  active():ActiveEvidence[]{return structuredClone(this.activeEvidence);}
+
+ /** Call only after confirming that both revisions have identical visual fingerprints. */
+ carryForward(fromRevision:number,toRevision:number):void{
+  if(revision(fromRevision)===null||revision(toRevision)===null)throw new Error('Evidence revisions must be nonnegative safe integers');
+  const from=this.visualRevision(fromRevision),to=this.visualRevision(toRevision);
+  if(from!==to)this.revisionAliases.set(from,to);
+ }
+
+ private visualRevision(value:number):number{
+  let current=value;
+  while(this.revisionAliases.has(current))current=this.revisionAliases.get(current)!;
+  return current;
+ }
+
+ private usableRevision(source:number|null,current:number|null):boolean{
+  return source!==null&&current!==null&&this.visualRevision(source)===this.visualRevision(current);
+ }
 
  private ingest(messages:AgentMessage[]):void{
   for(const message of messages){
@@ -104,12 +122,12 @@ export class EvidenceContext{
  /** Recall does not refresh capture turns, evidence keys, review state, or the active manifest. */
  recall(args:{captureId:string;startImage?:number;count?:number},currentRevision:number):{content:Content[];details:{[key:string]:JsonValue}&{evidenceRecall:RecallReference&{startImage:number;count:number;totalImages:number;nextImage:number|null;originalToolCallId:string;originalToolName:string}}}{
   const packet=this.byId.get(args.captureId);if(!packet)throw new Error(`Unknown captureId: ${args.captureId}; use list to find available captures`);
-  if(packet.entry.revision===null||packet.entry.revision!==currentRevision)throw new Error(`Capture ${args.captureId} revision ${packet.entry.revision??'unknown'} does not match current revision ${currentRevision}; stale screenshots cannot be recalled`);
+  if(!this.usableRevision(packet.entry.revision,currentRevision))throw new Error(`Capture ${args.captureId} revision ${packet.entry.revision??'unknown'} does not match current revision ${currentRevision}; stale screenshots cannot be recalled`);
   const start=pageNumber(args.startImage,0,'startImage'),count=Math.min(RECALL_LIMIT,pageNumber(args.count,RECALL_LIMIT,'count'));
   if(!count)throw new Error('count must be at least 1');
   if(start>=packet.images.length)throw new Error(`startImage must be below ${packet.images.length}`);
   const indices=Array.from({length:Math.min(count,packet.images.length-start)},(_,index)=>start+index),end=start+indices.length;
-  const reference={captureId:packet.id,revision:currentRevision,imageIndices:indices,startImage:start,count:indices.length,totalImages:packet.images.length,nextImage:end<packet.images.length?end:null,originalToolCallId:packet.message.toolCallId,originalToolName:packet.message.toolName};
+  const reference={captureId:packet.id,revision:currentRevision,...(packet.entry.revision!==currentRevision?{originalRevision:packet.entry.revision!}:{}),imageIndices:indices,startImage:start,count:indices.length,totalImages:packet.images.length,nextImage:end<packet.images.length?end:null,originalToolCallId:packet.message.toolCallId,originalToolName:packet.message.toolName};
   return {content:this.content(packet,new Set(indices),`Recalled original capture page: ${JSON.stringify(reference)}. Original provenance and limitations below; recall is not a new capture or acceptance.`),details:{...jsonDetails(packet.message.details),evidenceRecall:reference}};
  }
 
@@ -123,7 +141,7 @@ export class EvidenceContext{
  }
 
  private projectPrepared(messages:AgentMessage[],requestedRevision?:number):AgentMessage[]{
-  const knownRevisions=[...this.packets.flatMap(packet=>packet.manifest.flatMap(image=>image.revision===null?[]:[image.revision])),...messages.flatMap(message=>message.role==='toolResult'?revision(record(message.details).revision)??[]:[])];
+  const knownRevisions=[...this.revisionAliases.keys(),...this.revisionAliases.values(),...this.packets.flatMap(packet=>packet.manifest.flatMap(image=>image.revision===null?[]:[image.revision])),...messages.flatMap(message=>message.role==='toolResult'?revision(record(message.details).revision)??[]:[])];
   const currentRevision=requestedRevision??knownRevisions.reduce<number|null>((latest,value)=>Math.max(latest??0,value),null);
   const occurrences:Occurrence[]=[];
   for(let position=0;position<messages.length;position++){
@@ -131,10 +149,10 @@ export class EvidenceContext{
    const recall=record(record(message.details).evidenceRecall);
    if(typeof recall.captureId==='string'){
     const packet=this.byId.get(recall.captureId),indices=recall.imageIndices;
-    if(packet&&packet.entry.revision===currentRevision&&recall.revision===currentRevision&&Array.isArray(indices)&&indices.length<=RECALL_LIMIT&&indices.every(index=>Number.isSafeInteger(index)&&index>=0&&index<packet.images.length))occurrences.push({position,packet,indices:unique(indices.map(String)).map(Number),recall:true});
+    if(packet&&this.usableRevision(packet.entry.revision,currentRevision)&&this.usableRevision(revision(recall.revision),currentRevision)&&Array.isArray(indices)&&indices.length<=RECALL_LIMIT&&indices.every(index=>Number.isSafeInteger(index)&&index>=0&&index<packet.images.length))occurrences.push({position,packet,indices:unique(indices.map(String)).map(Number),recall:true});
    }else{
     const packet=this.byCall.get(message.toolCallId);
-    if(packet)occurrences.push({position,packet,indices:packet.manifest.filter(image=>image.revision!==null&&image.revision===currentRevision).map(image=>image.index),recall:false});
+    if(packet)occurrences.push({position,packet,indices:packet.manifest.filter(image=>this.usableRevision(image.revision,currentRevision)).map(image=>image.index),recall:false});
    }
   }
   const newest=[...occurrences].reverse(),chosen=new Map<number,Set<number>>(),seenImages=new Set<string>();
@@ -166,7 +184,10 @@ export class EvidenceContext{
   this.activeEvidence=[];
   for(const occurrence of occurrences){
    const selected=chosen.get(occurrence.position);if(!selected)continue;
-   this.activeEvidence.push({captureId:occurrence.packet.id,toolCallId:occurrence.packet.message.toolCallId,revision:occurrence.packet.entry.revision,images:[...selected].map(index=>structuredClone(occurrence.packet.manifest[index]))});
+   this.activeEvidence.push({captureId:occurrence.packet.id,toolCallId:occurrence.packet.message.toolCallId,revision:currentRevision,...(occurrence.packet.entry.revision!==currentRevision?{originalRevision:occurrence.packet.entry.revision}:{}),images:[...selected].map(index=>{
+    const image=occurrence.packet.manifest[index];
+    return {...structuredClone(image),revision:currentRevision,...(image.revision!==currentRevision?{originalRevision:image.revision}:{})};
+   })});
   }
   const occurrenceByPosition=new Map(occurrences.map(occurrence=>[occurrence.position,occurrence]));
   const catalog=this.packets.slice(-CATALOG_LIMIT).map(packet=>packet.entry);
@@ -181,11 +202,12 @@ export class EvidenceContext{
    }
    const {packet}=occurrence,selected=chosen.get(position)??new Set<number>();
    const catalogText=position===catalogPosition?` Archive catalog (latest ${catalog.length}/${this.packets.length}, availability only): ${JSON.stringify(catalog)}. All captures remain reachable with recall_evidence list pagination offset=0, limit<=12.`:'';
-   const recallText=occurrence.recall?` Recalled page cursor: ${JSON.stringify(recall)}.`:'';
-   const notice=`Evidence ${packet.id}: revision=${packet.entry.revision??'unknown'}, scopes=${JSON.stringify(packet.entry.scopes)}, views=${JSON.stringify(packet.entry.views)}, available=true, active image indices=${JSON.stringify([...selected])}, totalImages=${packet.images.length}. Original capture retained; archived images are not visible and are not acceptance evidence.${recallText}${catalogText}`;
+   const effectiveRecall=occurrence.recall?{...recall,revision:currentRevision,...(packet.entry.revision!==currentRevision?{originalRevision:packet.entry.revision}:{})}:undefined;
+   const recallText=effectiveRecall?` Recalled page cursor: ${JSON.stringify(effectiveRecall)}.`:'';
+   const notice=`Evidence ${packet.id}: revision=${selected.size?currentRevision:packet.entry.revision??'unknown'}${selected.size&&packet.entry.revision!==currentRevision?`, originalRevision=${packet.entry.revision??'unknown'}`:''}, scopes=${JSON.stringify(packet.entry.scopes)}, views=${JSON.stringify(packet.entry.views)}, available=true, active image indices=${JSON.stringify([...selected])}, totalImages=${packet.images.length}. Original capture retained; archived images are not visible and are not acceptance evidence.${recallText}${catalogText}`;
    // Archived packets need a compact pointer, not the original potentially large review plan.
    const content=selected.size?this.content(packet,selected,notice):[{type:'text' as const,text:notice}];
-   return {...message,content,details:{...jsonDetails(packet.message.details),...(occurrence.recall?{evidenceRecall:jsonDetails(recall)}:{}),evidenceProjection:{captureId:packet.id,imageIndices:[...selected],archived:selected.size===0}}};
+   return {...message,content,details:{...jsonDetails(packet.message.details),...(effectiveRecall?{evidenceRecall:jsonDetails(effectiveRecall)}:{}),evidenceProjection:{captureId:packet.id,revision:currentRevision,originalRevision:packet.entry.revision,imageIndices:[...selected],archived:selected.size===0}}};
   });
  }
 }

@@ -6,7 +6,7 @@ let passed=0;
 const test=async(name,fn)=>{await fn();console.log('PASS '+name);passed++;};
 try{
  const {parseModelResponse}=await server.ssrLoadModule('/src/ai/provider.ts');
- const {saveModelConfig,loadModelConfig}=await server.ssrLoadModule('/src/ai/modelConfigStorage.ts');
+ const {MODEL_CONFIG_KEY,saveModelConfig,loadModelConfig}=await server.ssrLoadModule('/src/ai/modelConfigStorage.ts');
  const {createInitialDoc}=await server.ssrLoadModule('/src/store.ts');
  const {validateMaterial,validateDocument}=await server.ssrLoadModule('/src/domain/types.ts');
  const {applyBatch}=await server.ssrLoadModule('/src/domain/commands.ts');
@@ -18,12 +18,20 @@ try{
  const {proceduralMaps}=await server.ssrLoadModule('/src/scene/surfaceTextures.ts');
  const {serializeProject,parseProject}=await server.ssrLoadModule('/src/domain/project.ts');
  const {normalizeRenderPreset,loadRenderPreset,saveRenderPreset}=await server.ssrLoadModule('/src/scene/renderPreset.ts');
- const config={baseURL:'https://example.invalid/v1',apiKey:'private-test-key',model:'test',generationQuality:'fast',generationStyle:'illustrative'};
+ const config={baseURL:'https://example.invalid/v1',apiKey:'private-test-key',model:'test'};
  const base=createInitialDoc();
 
- await test('legacy style is discarded without losing quality or leaking an unapproved API key',()=>{
+ await test('legacy quality and style are discarded while respecting API key consent',()=>{
   const values=new Map();globalThis.localStorage={getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,String(v)),removeItem:k=>values.delete(k)};
-  saveModelConfig(config);const loaded=loadModelConfig();assert.equal(Object.hasOwn(loaded,'generationStyle'),false);assert.equal(loaded.generationQuality,'fast');assert.equal(loaded.apiKey,'');assert.ok(!JSON.stringify([...values]).includes(config.apiKey));
+  for(const rememberApiKey of [false,true]){
+   const legacy={...config,generationQuality:'fast',generationStyle:'illustrative',rememberApiKey};
+   saveModelConfig(legacy);const saved=JSON.parse(values.get(MODEL_CONFIG_KEY)),loaded=loadModelConfig();
+   for(const value of [saved,loaded]){assert.equal(Object.hasOwn(value,'generationQuality'),false);assert.equal(Object.hasOwn(value,'generationStyle'),false);assert.equal(value.baseURL,config.baseURL);assert.equal(value.model,config.model);}
+   assert.equal(loaded.apiKey,rememberApiKey?config.apiKey:'');assert.equal(saved.apiKey,rememberApiKey?config.apiKey:undefined);assert.equal(JSON.stringify([...values]).includes(config.apiKey),rememberApiKey);
+   values.set(MODEL_CONFIG_KEY,JSON.stringify(legacy));const migrated=loadModelConfig(),persisted=JSON.parse(values.get(MODEL_CONFIG_KEY));
+   for(const value of [migrated,persisted]){assert.equal(Object.hasOwn(value,'generationQuality'),false);assert.equal(Object.hasOwn(value,'generationStyle'),false);assert.equal(value.baseURL,config.baseURL);assert.equal(value.model,config.model);}
+   assert.equal(migrated.apiKey,config.apiKey);assert.equal(persisted.apiKey,rememberApiKey?config.apiKey:undefined);assert.equal(JSON.stringify([...values]).includes(config.apiKey),rememberApiKey);
+  }
   assert.equal(normalizeRenderPreset('invalid'),'studio');saveRenderPreset('classic');assert.equal(loadRenderPreset(),'classic');
   globalThis.localStorage={getItem(){throw Error('blocked')},setItem(){throw Error('blocked')}};assert.equal(loadRenderPreset(),'classic');assert.doesNotThrow(()=>saveRenderPreset('studio'));assert.equal(loadRenderPreset(),'studio');delete globalThis.localStorage;
  });

@@ -609,7 +609,7 @@ await test('renderer recovery on the next task restores required capture and lat
  const f=fake([[edit,capture],[{name:'review_model',args:{observations:'已检查主体外形；材质细节尚未验收',issues:[],completion:{summary:'主体已生成，提交待确认',remainingIssues:['材质待验收']}}}]]);const r=await runModelingAgent(opts(f));assert.equal(f.calls,2);assert.equal(r.batch.taskStatus,'submitted');assert.match(r.batch.summary,/材质待验收/);assert.equal(r.activity.detailAcceptance.status,'pending');
  });
  await test('repeated unchanged screenshots reuse evidence without rendering or claiming new progress',async()=>{
- const f=fake([[edit,capture],[capture],[{name:'review_model',args:{observations:'读取之前当前版本的真实画面',issues:[],completion:{summary:'复核后提交',remainingIssues:[]}}}]]);const o=opts(f);let rendered=0;o.capture=async()=>{rendered++;return picture;};const r=await runModelingAgent(o);assert.equal(rendered,1);assert.equal(r.batch.taskStatus,'submitted');assert.ok(f.contexts.some(c=>JSON.stringify(c).includes('相同目标和视角')));
+ const f=fake([[edit,capture],[capture],[{name:'review_model',args:{observations:'读取之前当前版本的真实画面',issues:[],completion:{summary:'复核后提交',remainingIssues:[]}}}]]);const o=opts(f);let rendered=0;o.capture=async()=>{rendered++;return picture;};const r=await runModelingAgent(o);assert.equal(rendered,1);assert.equal(r.batch.taskStatus,'submitted');
  });
  await test('combined review cannot bypass same-turn screenshot evidence requirement',async()=>{
  const done={name:'review_model',args:{observations:'不能提前判定刚返回的图片',issues:[],completion:{summary:'提前提交',remainingIssues:[]}}};const f=fake([[edit,capture,done],'保留未完成']);const r=await runModelingAgent(opts(f));assert.equal(r.batch.taskStatus,'partial');assert.ok(r.activity.timings.some(t=>t.failed&&t.label==='记录视觉检查'));

@@ -18,10 +18,10 @@
 .product-v3 .home-composer-toolbar .model-picker-trigger>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .product-v3 .home-composer-toolbar .model-picker-trigger svg{flex:none}
 .product-v3 .home-composer-toolbar .pro-spacer{min-width:0}
-@media(max-width:600px){.product-v3 .home-idea-composer .home-composer-toolbar{flex-wrap:nowrap;gap:2px}.product-v3 .home-composer-toolbar .ant-btn{padding-inline:5px;gap:4px}.product-v3 .home-composer-toolbar .quality-picker-trigger{font-size:11px}.product-v3 .home-composer-toolbar .model-picker-trigger{flex:1;max-width:none;min-width:32px}.product-v3 .home-composer-toolbar .pro-spacer{display:none}.product-v3 .home-composer-toolbar .ant-sender-actions-btn{padding-inline:8px}}
-.product-v3 .home-composer-toolbar .quality-picker-trigger{min-width:0;max-width:190px}
-.product-v3 .home-composer-toolbar .quality-picker-trigger>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-@media(max-width:600px){.product-v3 .home-composer-toolbar .quality-picker-trigger{flex:0 1 145px;max-width:145px}.product-v3 .home-composer-toolbar .quality-picker-trigger>svg:first-child{display:none}}
+@media(max-width:600px){.product-v3 .home-idea-composer .home-composer-toolbar{flex-wrap:nowrap;gap:2px}.product-v3 .home-composer-toolbar .ant-btn{padding-inline:5px;gap:4px}.product-v3 .home-composer-toolbar .generation-method-picker-trigger{font-size:11px}.product-v3 .home-composer-toolbar .model-picker-trigger{flex:1;max-width:none;min-width:32px}.product-v3 .home-composer-toolbar .pro-spacer{display:none}.product-v3 .home-composer-toolbar .ant-sender-actions-btn{padding-inline:8px}}
+.product-v3 .home-composer-toolbar .generation-method-picker-trigger{min-width:0;max-width:190px}
+.product-v3 .home-composer-toolbar .generation-method-picker-trigger>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:600px){.product-v3 .home-composer-toolbar .generation-method-picker-trigger{flex:0 1 145px;max-width:145px}.product-v3 .home-composer-toolbar .generation-method-picker-trigger>svg:first-child{display:none}}
 .product-v3 .home-idea-footnote{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 4px 0;color:var(--sc-ink-muted);font-size:12px;flex-wrap:wrap}
 .product-v3 .home-idea-footnote .ant-btn{font-size:12px;height:auto;padding:0;color:var(--sc-ink-muted)}
 .product-v3 .home-idea-footnote .ant-btn-link{color:var(--sc-accent)}

@@ -17,7 +17,7 @@ const reply=(request,content)=>{
  const encoder=new TextEncoder();request.stream.enqueue(encoder.encode('data: '+JSON.stringify({choices:[{index:0,delta:{role:'assistant',content},finish_reason:null}]})+'\n\ndata: '+JSON.stringify({choices:[{index:0,delta:{},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n'));request.stream.close();
 };
 const output=name=>JSON.stringify({summary:name,operations:[{op:'createPrimitive',name,geometry:{type:'box',params:{width:1,height:1,depth:1}}}]});
-const config={baseURL:'https://example.test/v1',apiKey:'SECRET-A-NOT-IN-SNAPSHOTS',model:'model-a',useMock:false,agentMode:'single',stream:true,generationQuality:'fast',taskBudget:{maxMinutes:10,maxRounds:12,maxReportedTokens:12345}};
+const config={baseURL:'https://example.test/v1',apiKey:'SECRET-A-NOT-IN-SNAPSHOTS',model:'model-a',useMock:false,agentMode:'single',stream:true,taskBudget:{maxMinutes:10,maxRounds:12,maxReportedTokens:12345}};
 try{
  const {useEditorStore:ui,createInitialDoc,createEditorStore}=await server.ssrLoadModule('/src/store.ts');
  const w=await server.ssrLoadModule('/src/workspace.ts');
@@ -26,18 +26,16 @@ try{
  ui.setState({aiConfig:config});await w.initializeWorkspace();
  const a=w.useWorkspaceStore.getState().activeId, A=w.getSessionEditor(a), ca=runtime.conversationController(A);
  let b,B,cb,c,C,cc,pa,pb;
- await test('two mocked streaming runs keep independent inputs, config and quality across navigation',async()=>{
+ await test('two mocked streaming runs keep independent inputs and configuration across navigation',async()=>{
   ui.getState().setComposerText('创建 A');pa=ca.send();await wait(()=>requests.length===1);
-  assert.equal(A.getState().messages[0].run.generationQuality,'fast');
   assert.equal(w.createSession(),true);b=w.useWorkspaceStore.getState().activeId;B=w.getSessionEditor(b);cb=runtime.conversationController(B);
-  ui.setState({aiConfig:{...config,apiKey:'SECRET-B-NOT-IN-SNAPSHOTS',model:'model-b',generationQuality:'fine',taskBudget:{...config.taskBudget,maxReportedTokens:54321}}});
+  ui.setState({aiConfig:{...config,apiKey:'SECRET-B-NOT-IN-SNAPSHOTS',model:'model-b',taskBudget:{...config.taskBudget,maxReportedTokens:54321}}});
   ui.getState().setComposerText('创建 B');pb=cb.send();await wait(()=>requests.length===2);
   assert.equal(runtime.useConversationRuns.getState().activeCount,2);assert.equal(requests[0].init.signal.aborted,false);
   assert.match(requests[0].init.body,/创建 A/);assert.doesNotMatch(requests[0].init.body,/创建 B/);
   assert.match(requests[1].init.body,/创建 B/);assert.doesNotMatch(requests[1].init.body,/创建 A/);
   assert.equal(JSON.parse(requests[0].init.body).model,'model-a');assert.equal(JSON.parse(requests[1].init.body).model,'model-b');
   assert.notEqual(requests[0].init.signal,requests[1].init.signal);
-  assert.equal(B.getState().messages[0].run.generationQuality,'fine');
   assert.equal(w.switchSession(a),true);assert.equal(ui.getState().aiStatus,'generating');assert.equal(ca.ui.getState().running,true);
  });
  await test('third start refuses without consuming composer text/images or queuing paid work',async()=>{

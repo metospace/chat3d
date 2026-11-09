@@ -197,7 +197,7 @@ Click-Control '资产库'
  if(!$diagnostic){throw 'Diagnostic button did not save a file'}
  $diagnosticText=Get-Content $diagnostic.FullName -Raw
  $diagnosticData=$diagnosticText | ConvertFrom-Json
- if($diagnosticData.format -ne 'chat3d-full-diagnostics-v1'){throw 'Wrong diagnostics format'}
+ if($diagnosticData.format -ne 'chat3d-diagnostics-v2'){throw 'Wrong diagnostics format'}
  if($diagnosticText.Contains('smoke-test-not-a-secret')){throw 'Diagnostic export leaked dummy API credential'}
  Shot 'ui-diagnostics-saved';Dump-Controls 'ui-diagnostics-controls'
  $checks.Add(@{name='diagnostic download button saves full diagnostics with credentials stripped after synthetic network failure';pass=$true;file=$diagnostic.FullName})

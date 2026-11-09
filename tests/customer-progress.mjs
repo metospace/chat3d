@@ -75,7 +75,7 @@ try{
   assert.notEqual(runStatusLabel({status:'running'},review),runStatusLabel({status:'running'},{...review,phase:'building'}));
   assert.equal(runStatusLabel({status:'stopped'},review),'已停止');assert.equal(runStatusLabel({status:'failed'},review),'处理未完成');
  });
- await test('long reviews retain public prose and elapsed status without synthesizing timing events',async()=>{
+ await test('long reviews keep collapsed progress, public history and honest elapsed status across updates',async()=>{
   const realNow=Date.now,realSet=globalThis.setInterval,realClear=globalThis.clearInterval;
   let now=1_000_000,nextId=0;const timers=new Map();
   Date.now=()=>now;globalThis.setInterval=(fn,delay)=>{assert.equal(delay,1000);const id=++nextId;timers.set(id,fn);return id;};globalThis.clearInterval=id=>timers.delete(id);
@@ -85,18 +85,25 @@ try{
    const review={...activity,phase:'reviewing',lastModelEditAt:now-240_000,lastEventAt:now,explanations:[explanation],timings:[{id:'waiting',kind:'model',label:'secret_model_tool',startedAt:now-100_000}]};
    const run={status:'running',startedAt:now-496_000,mode:'pi',activity:review};let stopped=0;
    const ui=render(React.createElement(ChatRunTrace,{run,onStop:()=>stopped++}));
-   const section=ui.getByRole('region',{name:'工作时间线'});
-   assert.equal(section.dataset.phase,'reviewing');assert.equal(section.dataset.modelState,'waiting');
-   assert.ok(ui.getByText('496 秒'));assert.ok(ui.getByText(explanation.text));
+   const section=ui.getByRole('region',{name:'工作时间线'}),disclosure=section.querySelector('button[aria-expanded]');assert.ok(disclosure);
+   const details=document.getElementById(disclosure.getAttribute('aria-controls'));assert.ok(details);assert.ok(section.contains(details));
+   const assertCollapsed=()=>{assert.equal(disclosure.getAttribute('aria-expanded'),'false');assert.equal(details.hidden,true);assert.equal(ui.queryByRole('list',{name:'建模进展'}),null);};
+   assertCollapsed();const initialAction=disclosure.querySelector('strong').textContent;assert.ok(initialAction.trim());assert.match(disclosure.textContent,/496 秒/);assert.ok(details.contains(ui.getByText(explanation.text)));
    assert.equal(ui.queryByLabelText('当前模型处理状态'),null);assert.equal(ui.queryByLabelText('距上次模型修改'),null);assert.equal(ui.container.textContent.includes('secret_model_tool'),false);
-   assert.equal(ui.container.querySelectorAll('.adx-work-entry').length,1);assert.equal(ui.container.querySelector('.adx-work-entry').dataset.kind,'explanation');
-   assert.equal(timers.size,1);now+=1000;act(()=>{for(const tick of timers.values())tick();});assert.ok(ui.getByText('497 秒'));
+   const stop=ui.getByRole('button',{name:'停止生成'});assert.ok(!details.contains(stop));fireEvent.click(stop);assert.equal(stopped,1);assertCollapsed();
+   fireEvent.click(disclosure);assert.equal(disclosure.getAttribute('aria-expanded'),'true');assert.equal(details.hidden,false);
+   const feed=ui.getByRole('list',{name:'建模进展'});assert.equal(feed.children.length,1);assert.equal(feed.children[0].textContent,explanation.text);assert.equal(feed.querySelector('ol,ul'),null);
+   assert.equal(timers.size,1);now+=1000;act(()=>{for(const tick of timers.values())tick();});assert.match(disclosure.textContent,/497 秒/);
    ui.rerender(React.createElement(ChatRunTrace,{run:{...run,activity:{...review,phase:'repairing',lastEventAt:now}},onStop:()=>stopped++}));
-   assert.equal(section.dataset.phase,'repairing');assert.ok(ui.getByText(explanation.text));assert.equal(ui.queryByLabelText('距上次模型修改'),null);
-   fireEvent.click(ui.getByRole('button',{name:'停止生成'}));assert.equal(stopped,1);
-   ui.rerender(React.createElement(ChatRunTrace,{run:{...run,status:'stopped',endedAt:now},onStop:()=>stopped++}));
-   assert.equal(timers.size,0);assert.equal(section.dataset.phase,undefined);assert.equal(ui.queryByLabelText('距上次模型修改'),null);assert.equal(ui.queryByRole('button',{name:'停止生成'}),null);ui.unmount();
-   const mounted=render(React.createElement(ChatRunTrace,{run}));assert.equal(timers.size,1);mounted.unmount();assert.equal(timers.size,0);
+   assert.notEqual(disclosure.querySelector('strong').textContent,initialAction,'the current action follows the updated phase without rewriting public history');assert.equal(disclosure.getAttribute('aria-expanded'),'true');assert.equal(details.hidden,false);assert.ok(ui.getByText(explanation.text));assert.equal(ui.queryByLabelText('距上次模型修改'),null);
+   fireEvent.click(disclosure);assertCollapsed();
+   const added={id:'public-update',text:'检查结果已记录。'},updated={...review,phase:'repairing',lastEventAt:now,explanations:[explanation,added]};
+   ui.rerender(React.createElement(ChatRunTrace,{run:{...run,activity:updated},onStop:()=>stopped++}));
+   assertCollapsed();assert.ok(details.contains(ui.getByText(added.text)));fireEvent.click(ui.getByRole('button',{name:'停止生成'}));assert.equal(stopped,2);assertCollapsed();
+   ui.rerender(React.createElement(ChatRunTrace,{run:{...run,status:'stopped',endedAt:now,activity:updated},onStop:()=>stopped++}));
+   assert.equal(timers.size,0);assertCollapsed();assert.equal(ui.queryByLabelText('距上次模型修改'),null);assert.equal(ui.queryByRole('button',{name:'停止生成'}),null);assert.match(disclosure.textContent,/497 秒/);
+   fireEvent.click(disclosure);assert.equal(disclosure.getAttribute('aria-expanded'),'true');assert.equal(details.hidden,false);assert.deepEqual(Array.from(ui.getByRole('list',{name:'建模进展'}).children,row=>row.textContent),[explanation.text,added.text]);ui.unmount();
+   const mounted=render(React.createElement(ChatRunTrace,{run}));assert.equal(timers.size,1);assert.equal(mounted.getByRole('button').getAttribute('aria-expanded'),'false');assert.equal(mounted.queryByRole('list',{name:'建模进展'}),null);mounted.unmount();assert.equal(timers.size,0);
   }finally{cleanup();Date.now=realNow;globalThis.setInterval=realSet;globalThis.clearInterval=realClear;}
  });
  await test('busy task panel and historical trace use phase without replacing draft or ending semantics',async()=>{
