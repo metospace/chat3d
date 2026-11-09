@@ -2,7 +2,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {randomBytes,randomUUID,scryptSync,timingSafeEqual,createHash} from 'node:crypto';
 import {mkdirSync} from 'node:fs';
 import {dirname} from 'node:path';
-const MAX_HTTP_BODY_BYTES=55*1024*1024;
+const MAX_HTTP_BODY_BYTES=500*1024*1024;
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const fail=(status,message)=>{throw Object.assign(Error(message),{status});};
 const categoryId=/^category-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

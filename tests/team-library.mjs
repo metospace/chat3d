@@ -111,12 +111,12 @@ try{
  assert.equal((await call('items?kind=scene',{headers:{Origin:'https://evil.invalid',Authorization:`Bearer ${a.token}`}})).status,403);
  const cors=await call('publish',{method:'OPTIONS',headers:{Origin:'http://tauri.localhost'}});assert.equal(cors.status,204);assert.equal(cors.headers.get('access-control-allow-origin'),'http://tauri.localhost');
  assert.equal((await call('publish',{method:'POST',headers:{Authorization:`Bearer ${a.token}`,'Content-Type':'application/json'},body:'null'})).status,400);
- const paddedRequest=bytes=>'{"padding":"'+'x'.repeat(bytes-14)+'"}';
- const withinHttpCap=await call('login',{method:'POST',headers:{'Content-Type':'application/json'},body:paddedRequest(55*1024*1024)});
- assert.equal(withinHttpCap.status,400,'55 MiB body reaches login validation');
- const beyondHttpCap=await call('login',{method:'POST',headers:{'Content-Type':'application/json'},body:paddedRequest(55*1024*1024+1)});
- assert.equal(beyondHttpCap.status,413);assert.match(await beyondHttpCap.text(),/55 MiB/);
- console.log('PASS HTTP body accepts 55 MiB and rejects overflow');
+ const paddedRequest=async function*(bytes){yield Buffer.from('{}');const chunk=Buffer.alloc(1024*1024,0x20);for(let remaining=bytes-2;remaining>0;remaining-=chunk.length)yield chunk.subarray(0,Math.min(remaining,chunk.length));};
+ const withinHttpCap=await call('login',{method:'POST',headers:{'Content-Type':'application/json'},body:paddedRequest(500*1024*1024),duplex:'half'});
+ assert.equal(withinHttpCap.status,400,'500 MiB body reaches login validation');await withinHttpCap.arrayBuffer();
+ const beyondHttpCap=await call('login',{method:'POST',headers:{'Content-Type':'application/json'},body:paddedRequest(500*1024*1024+1),duplex:'half'});
+ assert.equal(beyondHttpCap.status,413);assert.match(await beyondHttpCap.text(),/500 MiB/);
+ console.log('PASS HTTP body accepts 500 MiB and rejects overflow with streamed 1 MiB chunks');
  const result=await call('items?kind=scene',{headers:{Authorization:`Bearer ${b.token}`}});assert.equal(result.status,200);assert.equal((await result.json()).length,2);
  const httpCategoryRequest={...request,itemId:first.id,expectedVersion:3,key:crypto.randomUUID(),categoryPath:['  场景目录  ','装配车间']};
  const httpCategory=await call('publish',{method:'POST',headers:{Authorization:`Bearer ${a.token}`,'Content-Type':'application/json'},body:JSON.stringify(httpCategoryRequest)});assert.equal(httpCategory.status,200);assert.deepEqual(await httpCategory.json(),{id:first.id,version:4});

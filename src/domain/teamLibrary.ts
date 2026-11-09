@@ -35,6 +35,15 @@ export interface TeamPublish {kind:'asset'|'scene';name:string;description:strin
 export class TeamServiceError extends Error {
  constructor(readonly status:number,message:string){super(message);this.name='TeamServiceError';}
 }
+/** Truncated, redacted body preview for non-JSON team responses (empty / HTML 502 / CF pages). */
+export function teamResponseBodyPreview(text:string,maxChars=200){
+ const collapsed=String(text??'').replace(/[\u0000-\u001f\u007f]+/g,' ').replace(/\s+/g,' ').trim();
+ const redacted=collapsed
+  .replace(/Bearer\s+[A-Za-z0-9._\-+=\/]+/gi,'Bearer [已隐藏]')
+  .replace(/"(access_?token|refresh_?token|token|password)"\s*:\s*"[^"]*"/gi,'"$1":"[已隐藏]"');
+ if(!redacted)return '空响应';
+ return redacted.length>maxChars?redacted.slice(0,maxChars)+'…':redacted;
+}
 const TEAM_ADDRESS_KEY='chat3d.team.address';
 export function teamAddress(value:string){const url=new URL(value);if(url.username||url.password||url.search||url.hash||url.pathname!=='/'||(url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(url.hostname))))throw Error('请输入 HTTPS 服务根地址（本机测试可用 HTTP localhost）');return url.origin;}
 export function defaultTeamServiceBase(){return configuredTeamServiceBase();}
@@ -48,10 +57,12 @@ export class TeamClient {
    ?await sendTeamPublication(this.base,this.token,serialized,onProgress)
    :await teamFetch(this.base+'/api/team/'+path,{method:body===undefined?'GET':'POST',headers:{...(body===undefined?{}:{'Content-Type':'application/json'}),...(this.token?{Authorization:'Bearer '+this.token}:{})},body:serialized,signal:AbortSignal.timeout(60000),redirect:'error',credentials:'omit'});
   const authentication=path==='login'||path.startsWith('login/');
+  const raw=await response.text();
   let data:unknown;
-  try{data=await response.json();}catch{
-   if(authentication)throw new TeamServiceError(response.status,`团队授权服务未返回 JSON（HTTP ${response.status}），请检查团队服务地址与 /api/team 路由；本地开发需配置 CHAT3D_TEAM_DEV_BASE。`);
-   throw Error('团队服务响应未完整返回，尚未确认操作结果；可重试同一项。');
+  try{if(!raw.length)throw new SyntaxError('empty');data=JSON.parse(raw);}catch{
+   const preview=teamResponseBodyPreview(raw);
+   if(authentication)throw new TeamServiceError(response.status,`团队授权服务未返回 JSON（HTTP ${response.status}，${preview}），请检查团队服务地址与 /api/team 路由；本地开发需配置 CHAT3D_TEAM_DEV_BASE。`);
+   throw Error(`团队服务响应未完整返回（HTTP ${response.status}，${preview}），尚未确认操作结果；可重试同一项。`);
   }
   if(!response.ok){
    if(response.status===401&&this.token&&sharedClient===this){expireTeamSession(this);throw new TeamServiceError(401,'团队登录已失效，请重新登录。');}
