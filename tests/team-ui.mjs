@@ -31,6 +31,8 @@ try{
  publishClient.publish=(request,onProgress)=>{uploadProgress=onProgress;return new Promise(resolve=>finishUpload=()=>resolve({id:'progress-test',version:1}));};
  ui=render(React.createElement(TeamTransferDialog,{kind:'asset',mode:'publish',sources:[{id:asset.id,version:1}],onClose:()=>{}}));dialog=ui.getByRole('dialog');
  await waitFor(()=>assert.ok(within(dialog).getByRole('checkbox',{name:'发布 隔离测试资产'})));
+ // The earlier publish linked this asset to an original absent from the mock remote list; explicitly save as new.
+ fireEvent.change(within(dialog).getByLabelText('隔离测试资产 发布位置'),{target:{value:''}});
  fireEvent.click(within(dialog).getByRole('button',{name:'准备发布'}));await waitFor(()=>assert.ok(within(dialog).getByRole('button',{name:'确认发布'})));fireEvent.click(within(dialog).getByRole('button',{name:'确认发布'}));await waitFor(()=>assert.ok(uploadProgress));
  await act(async()=>uploadProgress({phase:'uploading',loaded:45,total:100}));
  assert.equal(within(dialog).getByRole('progressbar').getAttribute('value'),'45');assert.equal(within(dialog).queryByText('已发布 v1'),null);
