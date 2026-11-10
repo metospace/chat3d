@@ -37,7 +37,7 @@ try{
  assert.ok(Math.abs(structureFrame(rotatedAgain.doc.nodes).yaw-35)<1e-6);assert.deepEqual(structureFrame(rotatedAgain.doc.nodes).origin,[2,0,3]);
  const {STRUCTURED_BYTES_LIMIT}=await server.ssrLoadModule('/src/domain/structureLimits.ts');
  const {MAX_PROJECT_BYTES}=await server.ssrLoadModule('/src/domain/project.ts');
- // Existing factory already over the 20 MiB structured budget; adding a small scripted part must still succeed under the 400 MiB project cap.
+ // Existing factory already over the structured budget; adding a small scripted part must still succeed under the 400 MiB project cap.
  const factoryPad='x'.repeat(STRUCTURED_BYTES_LIMIT+1024),factoryId=makeId(),factoryMat=makeId();
  const factory={...createInitialDoc(),materials:[{id:factoryMat,baseColor:'#999999',roughness:.5,metalness:0}],nodes:[{id:factoryId,assemblyId:factoryId,assemblyName:'工厂',name:factoryPad,kind:'primitive',parentId:null,visible:true,materialId:factoryMat,geometry:{type:'box',params:{width:1,height:1,depth:1}},transform:{position:[0,0,0],rotationQuaternion:[0,0,0,1],scale:[1,1,1]}}]};
  assert.ok(new TextEncoder().encode(serializeProject(factory)).length>STRUCTURED_BYTES_LIMIT);
@@ -46,8 +46,8 @@ try{
  // A merge that would exceed the real project cap still fails with the 400 MiB project error.
  const overProject={...factory,nodes:[{...factory.nodes[0],name:'y'.repeat(MAX_PROJECT_BYTES)}]};
  assert.throws(()=>modelingProgramCommands(overProject,generated,args,plan),/项目文件超过 400 MiB/);
- // Oversized newly generated component still hits the structured 20 MiB budget, not the project cap.
+ // Oversized newly generated component still hits the structured budget, not the project cap.
  const hugeGenerated=structuredClone(generated);hugeGenerated.nodes[0]={...hugeGenerated.nodes[0],budgetPad:'z'.repeat(STRUCTURED_BYTES_LIMIT+1024)};
- assert.throws(()=>modelingProgramCommands(base,hugeGenerated,args,plan),/项目文件超过 20 MiB/);
+ assert.throws(()=>modelingProgramCommands(base,hugeGenerated,args,plan),new RegExp(`项目文件超过 ${STRUCTURED_BYTES_LIMIT/(1024*1024)} MiB`));
  console.log('PASS parameterized draft atomic replacement, actual feature binding, PBR/source project roundtrip, protected animation/dimensions, and project vs structured byte caps');
 }finally{await server.close();}
