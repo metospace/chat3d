@@ -55,7 +55,7 @@ export function StudioHome({onOpen,onGenerate,onConfigure,onTasks,onImport,hidde
   creating.current=true;
   try{
    assertLibraryReady();
-   if(!createSession(undefined,{moduleKind:kind,title:kind==='asset'?'未命名资产':'未命名场景',...(kind==='asset'?{assetCategory:'其他' as const}:{})}))throw Error('当前无法新建，请关闭其他标签页后刷新本页');
+   if(!createSession(undefined,{moduleKind:kind,title:kind==='asset'?'未命名资产':'未命名场景',...(kind==='asset'?{assetCategory:'其他' as const}:{})})){assertLibraryReady();throw Error('当前无法新建，请重试');}
    setError('');onOpen();
   }catch(e){setError(e instanceof Error?e.message:'新建失败');creating.current=false;}
  }
@@ -71,7 +71,7 @@ export function StudioHome({onOpen,onGenerate,onConfigure,onTasks,onImport,hidde
    if(config.agentMode!=='single'&&config.stream===false)throw Error('请在连接设置中开启流式输出，或选择单次生成模式');
    if(blenderModeling&&config.agentMode==='single')throw Error('Blender Python 建模需要 Agent 模式，请在模型配置中切换；输入已保留');
    const title=draft.trim()?ideaTitle(draft,kind):(kind==='asset'?'参考附件资产':'参考附件场景');
-   if(!createSession(undefined,{moduleKind:kind,title, ...(kind==='asset'?{assetCategory:'其他' as const}:{})}))throw Error('当前无法新建，请关闭其他标签页后刷新本页');
+   if(!createSession(undefined,{moduleKind:kind,title, ...(kind==='asset'?{assetCategory:'其他' as const}:{})})){assertLibraryReady();throw Error('当前无法新建，请重试');}
    // An explicit home submit authorizes one generation in a new project. Images stay in that project.
    useEditorStore.getState().setComposerText(draft);useEditorStore.getState().setComposerImages([...images]);
    const projectId=useEditorStore.getState().doc.projectId;
@@ -82,7 +82,7 @@ export function StudioHome({onOpen,onGenerate,onConfigure,onTasks,onImport,hidde
  // A new visit can start another project; repeated submit events within the current visit cannot.
  useEffect(()=>{if(!hidden)creating.current=false;},[hidden]);
  const openRecent=(id:string)=>{if(switchSession(id))onOpen();else setError('项目暂时无法打开，请检查工作区保存状态');};
- const createMenu=[{key:'blank',label:`新建空白${kind==='asset'?'资产':'场景'}`,onClick:startBlankProject},{key:'import',label:'导入 GLB',disabled:!onImport,onClick:onImport}];
+ const createMenu=[{key:'blank',label:`新建空白${kind==='asset'?'资产':'场景'}`,onClick:startBlankProject},{key:'import',label:'导入 GLB 为新资产',disabled:!onImport,onClick:onImport}];
  return <StudioPage className="pro-home-page project-dashboard ai-start-home" hidden={hidden}>
   <section className="home-idea-stage" aria-label="创建新项目">
    <header className="home-idea-heading"><span className="home-idea-eyebrow">SCENIVO · AI 三维创作</span></header>
@@ -95,8 +95,8 @@ export function StudioHome({onOpen,onGenerate,onConfigure,onTasks,onImport,hidde
     </form>
    {imageBusy&&<OperationProgress title="处理参考附件" stage="读取并准备附件" completed={attachmentProgress.completed} total={attachmentProgress.total} detail={attachmentProgress.name}/>}
    </div>
-   <div className="home-idea-footnote">{!configured?<span><Button type="link" disabled={locked} onClick={onConfigure}>连接模型</Button>后即可生成，输入和附件会保留。</span>:<span>{blenderModeling?'Blender 模型会在工作台预览，应用后可编辑。':'每次生成独立项目，预览确认后再应用。'}</span>}<Dropdown trigger={['click']} menu={{items:createMenu}}><Button type="text" disabled={locked} aria-label="新建项目">空白项目 / 导入 GLB <ArrowRightIcon/></Button></Dropdown></div>
-   {(error||workspaceError)&&<p className="resource-error" role="alert">{error||'工作区保存异常，请关闭其他标签页后刷新本页'}</p>}
+   <div className="home-idea-footnote">{!configured?<span><Button type="link" disabled={locked} onClick={onConfigure}>连接模型</Button>后即可生成，输入和附件会保留。</span>:<span>{blenderModeling?'Blender 模型会在工作台预览，应用后可编辑。':'每次生成独立项目，预览确认后再应用。'}</span>}<Dropdown trigger={['click']} menu={{items:createMenu}}><Button type="text" disabled={locked} aria-label="新建项目">空白项目 / 导入为新资产 <ArrowRightIcon/></Button></Dropdown>{kind==='scene'&&<span>导入 GLB 始终新建资产，可在资产库中用它新建场景。</span>}</div>
+   {error&&<p className="resource-error" role="alert">{error}</p>}
   </section>
   <div className="home-resume-area"><HomeTasks items={items} disabled={locked} hidden={hidden} onOpen={onOpen} onAll={onTasks}/>
    <section className="project-dashboard-library" aria-label="本地项目"><header className="home-recent-heading"><div><h2>最近作品 <span>{projects.length}</span></h2></div>{!!projects.length&&<Input.Search aria-label="搜索项目" placeholder="搜索作品" value={search} onChange={event=>setSearch(event.target.value)} allowClear/>}</header>

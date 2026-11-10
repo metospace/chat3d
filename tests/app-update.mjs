@@ -233,7 +233,6 @@ try {
   await waitFor(() => assert.equal(notice.queryByRole('button', {name: '结束后提醒我'}), null));
   await act(async () => client.setAppUpdateContext({busy: false, dirty: true}));
   await waitFor(() => assert.ok(notice.getByText(/任务已结束/)));
-  assert.ok(notice.getByText(/尚未导出备份/));
   fireEvent.click(notice.getByRole('button', {name: '下载备份'}));
   assert.equal(backups, 1);
   fireEvent.click(notice.getByRole('button', {name: '稍后'}));

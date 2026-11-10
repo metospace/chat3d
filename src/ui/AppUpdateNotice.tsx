@@ -56,7 +56,7 @@ export function AppUpdateBanner({view, onLater, onRemind, onApply, onBackup, onR
         {view.kind === 'installed' && <p><strong>版本 {version} 已安装。</strong> {view.progress}</p>}
         {view.kind === 'failed' && <p className="app-update-status-error" role="alert"><strong>更新未完成。</strong> {view.message}</p>}
         {(view.kind === 'busy' || view.kind === 'ready') && <div className="app-update-callout" data-warning={dirty || view.kind === 'busy' || undefined}>
-          <p>{view.kind === 'busy' ? '当前还有生成或待确认的预览。请先结束这次任务并下载备份，更新不会打断它。' : dirty ? '当前修改尚未导出备份。请先下载项目备份，确认文件已保存在电脑上。' : '建议先下载项目备份，再更新。'}</p>
+          <p>{view.kind === 'busy' ? '当前还有生成或待确认的预览。请先结束这次任务并下载备份，更新不会打断它。' : dirty ? '当前修改尚未下载为项目文件。更新前建议下载项目文件或工作台备份，并确认已保存。' : '建议先下载项目备份，再更新。'}</p>
           <p className="app-update-backup-tip">模型密钥不会写入备份。</p>
         </div>}
         {notes && <div className="app-update-notes"><span className="app-update-notes-label">更新说明</span><p>{notes}</p></div>}
@@ -112,7 +112,7 @@ export function AppUpdatePanel({layout = 'settings'}: {layout?: 'settings' | 'di
     {showInstalled && <p className="app-update-status"><strong>版本 {version} 已安装。</strong> {view.progress}</p>}
     {showFailed && <p className="app-update-status app-update-status-error" role="alert"><strong>更新未完成。</strong> {view.message}</p>}
     {showBusyActions && <p className="app-update-status">当前还有生成或待确认的预览。可以先结束任务并备份，再回来更新。</p>}
-    {showReadyActions && view.kind === 'ready' && view.dirty && <p className="app-update-status">当前修改尚未导出备份。建议先下载项目备份，再更新。</p>}
+    {showReadyActions && view.kind === 'ready' && view.dirty && <p className="app-update-status">当前修改尚未下载为项目文件。更新前建议下载项目文件或工作台备份。</p>}
     {installDisplay && !showInstalling && <AppUpdateProgressBar label={installDisplay.label} percent={installDisplay.percent} indeterminate={installDisplay.indeterminate}/>}
     <div className="app-update-panel-actions">
       {showReadyActions && <>

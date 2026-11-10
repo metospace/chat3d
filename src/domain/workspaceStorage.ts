@@ -71,11 +71,11 @@ export async function readWorkspace():Promise<WorkspaceEnvelope|null>{
  return promise;
 }
 function storageFailureMessage(error:DOMException|Error|null,conflict:boolean):string{
- if(conflict)return '另一个标签页已更新会话。请先下载本页项目备份，再刷新；本页不会覆盖其他标签页的数据。';
- if(error?.name==='QuotaExceededError')return '会话保存失败：浏览器本地存储空间已满。请下载项目备份，并清理回收站或其他浏览器数据后重试。';
- if(error?.name==='DataCloneError')return '会话保存失败：部分数据无法写入本地存储。请下载项目备份后刷新页面。';
- if(error?.message)return `会话保存失败：${error.message}。请下载项目备份。`;
- return '会话保存失败，可能存储空间不足或浏览器禁止写入。请下载项目备份。';
+ if(conflict)return '另一个标签页已更新会话，本页不会覆盖其他标签页的数据。';
+ if(error?.name==='QuotaExceededError')return '会话保存失败：浏览器本地存储空间已满。';
+ if(error?.name==='DataCloneError')return '会话保存失败：部分数据无法写入本地存储。';
+ if(error?.message)return `会话保存失败：${error.message}。`;
+ return '会话保存失败，无法写入本地存储。';
 }
 export async function writeWorkspace(data:Omit<WorkspaceEnvelope,'revision'>,expectedRevision:number):Promise<number>{
  const sessions=data.sessions as SessionRecord[];

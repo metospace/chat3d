@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState,useSyncExternalStore,type ReactNode} from 'react';
 import {Badge,Breadcrumb,Button,Tooltip} from 'antd';
 import {ProLayout,type MenuDataItem} from '@ant-design/pro-components';
-import {GearIcon,HomeIcon,CubeIcon,LayersIcon,PersonIcon,ClockIcon,LockClosedIcon,ExclamationTriangleIcon} from '@radix-ui/react-icons';
+import {GearIcon,HomeIcon,CubeIcon,LayersIcon,DashboardIcon,PersonIcon,ClockIcon,LockClosedIcon,ExclamationTriangleIcon} from '@radix-ui/react-icons';
 import {getTeamSession,getTeamSessionStatus,restoreRememberedTeamSession,subscribeTeamSession} from '../../domain/teamLibrary';
 import {StudioAccount} from './StudioAccount';
 import {BrandMark} from '../BrandMark';
@@ -10,8 +10,8 @@ import {hasPendingAppUpdate,useAppUpdate} from '../../domain/appUpdateClient';
 import {TaskQueue} from '../TaskQueue';
 import './pro-v6.css';
 export type StudioNavPage='home'|'workbench'|'asset'|'scene'|'team'|'dashboards'|'tasks'|'settings';
-const NAV=[{page:'home',name:'项目工作台',label:'首页',icon:<HomeIcon/>},{page:'asset',name:'资产库',label:'资产库',icon:<CubeIcon/>},{page:'scene',name:'场景库',label:'场景库',icon:<LayersIcon/>},{page:'dashboards',name:'看板库',label:'看板库',icon:<LayersIcon/>},{page:'tasks',name:'任务中心',label:'任务记录',icon:<ClockIcon/>},{page:'team',name:'团队资源',label:'团队库',icon:<PersonIcon/>}] as const;
-const LABELS:Record<StudioNavPage,string>={home:'项目工作台',asset:'资产库',scene:'场景库',workbench:'工作台',team:'团队资源',dashboards:'看板库',tasks:'任务中心',settings:'设置'};
+const LABELS:Record<StudioNavPage,string>={home:'首页',asset:'资产库',scene:'场景库',workbench:'工作台',team:'团队库',dashboards:'看板库',tasks:'任务中心',settings:'设置'};
+const NAV=[{page:'home',icon:<HomeIcon/>},{page:'asset',icon:<CubeIcon/>},{page:'scene',icon:<LayersIcon/>},{page:'dashboards',icon:<DashboardIcon/>},{page:'tasks',icon:<ClockIcon/>},{page:'team',icon:<PersonIcon/>}] as const;
 export function StudioShell({activePage,onNavigate,disabled,taskQueueRequest,onTaskOpen,onTaskHistory,children}:{activePage:StudioNavPage;onNavigate:(page:StudioNavPage)=>void;disabled:boolean;taskQueueRequest:number;onTaskOpen:()=>void;onTaskHistory:()=>void;children?:(workbenchUtilities:ReactNode)=>ReactNode}){
  const client=useSyncExternalStore(subscribeTeamSession,getTeamSession,getTeamSession),sessionStatus=useSyncExternalStore(subscribeTeamSession,getTeamSessionStatus,getTeamSessionStatus);
  const updatePending=useAppUpdate(hasPendingAppUpdate),{resolved}=useAppearance();
@@ -26,7 +26,7 @@ export function StudioShell({activePage,onNavigate,disabled,taskQueueRequest,onT
   ?<Tooltip title="团队登录已过期，点击重新授权"><Button type="text" className="workbench-team-expired" aria-label="重新登录团队账户" icon={<ExclamationTriangleIcon/>} onClick={()=>requestLogin()}/></Tooltip>
   :<Button type="text" aria-label="重新登录团队账户" icon={<ExclamationTriangleIcon/>} onClick={()=>requestLogin()}><span role="status">团队登录已过期</span></Button>);
  const utilities=<div className="studio-global-utilities pro-studio-utilities">{expiryAction}<TaskQueue openRequest={taskQueueRequest} disabled={disabled} onOpen={onTaskOpen} onHistory={onTaskHistory}/><AppearanceMenu/></div>;
- const routes:MenuDataItem[]=NAV.map(item=>({path:'/'+item.page,name:item.name,icon:item.icon,page:item.page,accessibleLabel:item.label}));
+ const routes:MenuDataItem[]=NAV.map(item=>({path:'/'+item.page,name:LABELS[item.page],icon:item.icon,page:item.page}));
  return <>
   {workbench&&<div hidden>{account}</div>}
   <ProLayout className="pro-studio-layout" title="Scenivo" logo={<span className="pro-brand-mark"><BrandMark/></span>} layout="mix" splitMenus={false}
@@ -35,7 +35,7 @@ export function StudioShell({activePage,onNavigate,disabled,taskQueueRequest,onT
    location={{pathname:'/'+activePage}} route={{path:'/',routes:[{path:'/workspace',name:'工作空间',type:'group',children:routes.filter(item=>['home','tasks'].includes(item.page))},{path:'/resources',name:'资源管理',type:'group',children:routes.filter(item=>['asset','scene','team','dashboards'].includes(item.page))}]}}
    menu={{locale:false,type:"group",defaultOpenAll:true}} menuProps={{'aria-label':'主导航',theme:'light'}}
    onMenuHeaderClick={()=>onNavigate('home')}
-   menuItemRender={(item,dom)=>{const page=item.page as StudioNavPage;return <Button type="text" className="pro-studio-menu-link" aria-label={item.accessibleLabel} aria-current={activePage===page?'page':undefined} disabled={disabled} title={page==='team'&&!client?.user?'登录以访问团队资源':item.name} onClick={()=>page==='team'&&!client?.user?requestLogin('team'):page==='tasks'?onTaskHistory():onNavigate(page)}>{dom}{page==='team'&&!client?.user&&<LockClosedIcon className="pro-menu-lock"/>}</Button>;}}
+   menuItemRender={(item,dom)=>{const page=item.page as StudioNavPage;return <Button type="text" className="pro-studio-menu-link" aria-label={LABELS[page]} aria-current={activePage===page?'page':undefined} disabled={disabled} title={page==='team'&&!client?.user?'登录以访问团队库':LABELS[page]} onClick={()=>page==='team'&&!client?.user?requestLogin('team'):page==='tasks'?onTaskHistory():onNavigate(page)}>{dom}{page==='team'&&!client?.user&&<LockClosedIcon className="pro-menu-lock"/>}</Button>;}}
    menuExtraRender={()=>collapsed?null:<span className="pro-studio-caption">本地工作空间</span>}
    menuFooterRender={()=> <div className="studio-sidebar-footer pro-studio-footer" data-collapsed={collapsed}><Button type="text" aria-label="设置" className="pro-settings-link" aria-current={activePage==='settings'?'page':undefined} disabled={disabled} onClick={()=>onNavigate('settings')}><GearIcon/>{!collapsed&&<span>设置</span>}{updatePending&&<Badge status="error" className="studio-settings-update" title="有新版本可用"/>}</Button>{account}</div>}
    headerContentRender={()=> <Breadcrumb items={[{title:'本地工作空间'},{title:LABELS[activePage]}]}/>}

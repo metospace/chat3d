@@ -33,11 +33,11 @@ try{
  const send=text=>{fireEvent.change(ui.getByLabelText('建模描述'),{target:{value:text}});fireEvent.click(ui.getByRole('button',{name:'发送',exact:true}));};
  handler=item=>new Promise(resolve=>item.resolve=resolve);
  send('讨论 A 货架');await waitFor(()=>assert.equal(requests.length,1));
- fireEvent.change(ui.getByLabelText('建模描述'),{target:{value:'A 要蓝色'}});fireEvent.click(ui.getByRole('button',{name:'加入消息队列'}));assert.ok(ui.getByRole('region',{name:'排队消息'}));
+ fireEvent.change(ui.getByLabelText('建模描述'),{target:{value:'A 要蓝色'}});fireEvent.click(ui.getByRole('button',{name:'暂存补充要求'}));assert.ok(ui.getByRole('region',{name:'排队消息'}));
  await act(async()=>{w.createSession();editor.setState({aiConfig:{...config,apiKey:'only-B-secret',model:'B-model'}});});const b=w.useWorkspaceStore.getState().activeId;
  assert.equal(requests[0].args[1].signal.aborted,false);send('讨论 B 托盘');await waitFor(()=>assert.equal(requests.length,2));assert.equal(useConversationRuns.getState().activeCount,2);
  console.log('PASS keyed ChatPanel unmount/navigation preserves A while B begins its own mocked stream');
- fireEvent.change(ui.getByLabelText('建模描述'),{target:{value:'B 材质问题'}});fireEvent.click(ui.getByRole('button',{name:'加入消息队列'}));fireEvent.keyDown(ui.getByRole('button',{name:'消息选项 B 材质问题'}),{key:'Enter'});fireEvent.click(ui.getByRole('menuitem',{name:'只提问，不修改模型'}));
+ fireEvent.change(ui.getByLabelText('建模描述'),{target:{value:'B 材质问题'}});fireEvent.click(ui.getByRole('button',{name:'暂存补充要求'}));fireEvent.keyDown(ui.getByRole('button',{name:'消息选项 B 材质问题'}),{key:'Enter'});fireEvent.click(ui.getByRole('menuitem',{name:'只提问，不修改模型'}));
  await act(async()=>w.createSession());const c=w.useWorkspaceStore.getState().activeId;send('C 输入不能丢');assert.equal(requests.length,2);assert.equal(ui.getByLabelText('建模描述').value,'C 输入不能丢');assert.match(ui.getByRole('status').textContent,/2 个会话/);
  await act(async()=>w.switchSession(a));assert.ok(ui.getByRole('region',{name:'排队消息'}));fireEvent.click(ui.getByRole('button',{name:'引导',exact:true}));assert.equal(requests.length,2);assert.ok(ui.getByText('补充要求 · 等待接收'));
  await act(async()=>w.switchSession(b));assert.equal(ui.queryByText('A 要蓝色'),null);fireEvent.click(ui.getByRole('button',{name:'停止生成'}));assert.equal(requests[1].args[1].signal.aborted,true);assert.equal(requests[0].args[1].signal.aborted,false);assert.ok(ui.getByText('补充要求 · 未送达，可重新发送'));

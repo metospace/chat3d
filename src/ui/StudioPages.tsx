@@ -17,7 +17,7 @@ export function TaskCenter({onOpen}:{onOpen:()=>void;locked:boolean}){
  const [selectedId,setSelectedId]=useState('');
  const selected=w.sessions.find(session=>session.id===selectedId&&!session.deletedAt);
  const taskEditor=useMemo(()=>selected?(getSessionEditor(selected.id)??createEditorStore({...selected.snapshot,aiStatus:selected.snapshot.wasRunning?'generating':selected.snapshot.pendingBatch?'previewing':'idle'})):undefined,[selected?.id,selected?.snapshot]);
- const tasks=w.sessions.filter(s=>!s.deletedAt).map(s=>{const summary=taskSummary(s),waiting=s.snapshot.messages.some(m=>m.queuedTask?.status==='waiting');const status=summary.group==='running'?'running':summary.group==='review'?'review':waiting?'waiting':summary.label==='失败'?'failed':'completed';return {session:s,summary,status};}).filter(t=>t.summary.visible||t.status==='waiting');
+ const tasks=w.sessions.filter(s=>!s.deletedAt).map(s=>{const summary=taskSummary(s),waiting=s.snapshot.messages.some(m=>m.queuedTask?.status==='waiting');const status=summary.group==='running'?'running':summary.group==='review'?'review':waiting?'waiting':summary.label==='失败'?'failed':'completed';return {session:s,summary,status,waiting};}).filter(t=>t.summary.visible||t.waiting);
  const labels:Record<string,string>={all:'全部任务',waiting:'待处理',running:'执行中',review:'待确认',failed:'失败',completed:'已完成 / 已停止'};
  const projects=tasks.filter(t=>t.session.title.toLowerCase().includes(query.trim().toLowerCase())&&(filter==='all'||filter===t.status)).sort((a,b)=>b.session.updatedAt-a.session.updatedAt);
  return <StudioPage className="pro-task-page"><StudioPageHeader title="任务中心" description="跨项目查看生成进展。查看记录保持当前项目，进入项目后再继续操作。"/>
@@ -28,7 +28,7 @@ export function TaskCenter({onOpen}:{onOpen:()=>void;locked:boolean}){
     {title:'项目',dataIndex:'title',render:(_,row)=><Button type="link" className="pro-task-project" aria-pressed={selectedId===row.session.id} onClick={()=>setSelectedId(row.session.id)}>{row.session.title}</Button>},
     {title:'状态',dataIndex:'status',width:140,render:(_,row)=><Tag color={row.status==='failed'?'error':row.status==='review'?'warning':row.status==='running'?'processing':'default'}>{row.status==='completed'?row.summary.label:labels[row.status]}</Tag>},
     {title:'更新时间',dataIndex:'updated',valueType:'dateTime',width:190,render:(_,row)=>new Date(row.session.updatedAt).toLocaleString('zh-CN')},
-    {title:'下一步',dataIndex:'next',render:(_,row)=>row.status==='review'?'检查并确认预览':row.status==='failed'?'查看原因并重试':row.status==='waiting'?'等待当前任务完成':'查看执行记录'},
+    {title:'下一步',dataIndex:'next',render:(_,row)=>row.waiting?(row.status==='running'?'打开对话：可用时点“引导”送入当前任务':'打开对话：点“准备发送”，确认后发送'):row.status==='review'?'检查并确认预览':row.status==='failed'?'查看原因并重试':'查看执行记录'},
     {title:'操作',valueType:'option',width:180,render:(_,row)=><div className="pro-inline-actions"><Button type="link" onClick={()=>setSelectedId(row.session.id)}>查看记录</Button><Button type="link" onClick={()=>{if(switchSession(row.session.id))onOpen();else setError('请先处理工作区保存异常');}}>打开项目</Button></div>}
    ]} locale={{emptyText:tasks.length?'没有符合筛选条件的任务':'暂无任务，开始创作后会显示执行进展'}}/>
   {error&&<p role="alert">{error}</p>}

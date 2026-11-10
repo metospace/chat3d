@@ -50,7 +50,7 @@ try{
  });
  await check('scene library and task table remain reachable',async()=>{
   await page.getByRole('button',{name:'关闭详情',exact:true}).click();await page.locator('.resource-inspector-drawer.ant-drawer-open').waitFor({state:'hidden'});await page.getByRole('button',{name:'场景库',exact:true}).click();await page.getByRole('heading',{name:'场景库',exact:true}).waitFor();
-  await page.getByRole('button',{name:'任务记录',exact:true}).click();await page.getByRole('heading',{name:'任务中心',exact:true}).waitFor();
+  await page.getByRole('button',{name:'任务中心',exact:true}).click();await page.getByRole('heading',{name:'任务中心',exact:true}).waitFor();
   assert.ok(await page.locator('.ant-pro-table').count());await page.screenshot({path:join(output,'pro-v6-tasks.png'),fullPage:true});
  });
  await check('settings uses native tabs and update settings',async()=>{

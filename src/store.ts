@@ -7,6 +7,7 @@ export {loadModelConfig} from './ai/modelConfigStorage';
 // - 历史条数与字节数双限制（方案第 6 节）
 import { EXTRA_MATERIALS } from './domain/materials';
 import type { AgentActivity } from './ai/modelingAgent';
+import type {StopResult} from './domain/generationFailure';
 import { create } from 'zustand';
 import { applyBatch, cloneGeometry, Command, CommandBatch, CommandWithInverse, ExecutionResult } from './domain/commands';
 import { Material, Quaternion, SceneDocument, SceneNode, SCHEMA_VERSION, Vec3 } from './domain/types';
@@ -52,6 +53,7 @@ export type AiTaskStatus =
 
 export interface MessageRun {
   mode?:'demo'|'single'|'pi'; startedAt:number; endedAt?:number; status:'running'|'preview'|'completed'|'failed'|'stopped'; activity?:AgentActivity;
+  stopResult?:StopResult;
 }
 export interface ChatMessage {
   id: string;

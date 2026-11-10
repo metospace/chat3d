@@ -1,8 +1,15 @@
-import {getTeamSession} from '../domain/teamLibrary';
-import {dashboardBinding,listDashboards,parseDashboardCommand,readDashboard} from '../domain/dashboard';
+import {getTeamSession,type TeamClient} from '../domain/teamLibrary';
+import {dashboardBinding,listDashboards,parseDashboardCommand,readDashboard,type DashboardMode,type DashboardVersion} from '../domain/dashboard';
 import {inspectDashboardPlacement} from '../scene/dashboardRuntime';
 import {activeConversationStore} from '../conversationStores';
 import type {EditorStore} from '../store';
+
+export async function prepareDashboardBinding(client:TeamClient,template:DashboardVersion,mode:DashboardMode){
+ if(template.archived)throw Error('模板已下架，不能新接入；已有场景的固定版本不受影响');
+ const description=mode==='dashboard'?(await inspectDashboardPlacement(template.package)).description:'';
+ if(getTeamSession()!==client)throw Error('团队账户已变更，请重新选择看板');
+ return {binding:dashboardBinding(client.base,template,mode),description};
+}
 
 /** A selected slash command binds only the scene that was active at selection time. */
 export async function handleDashboardCommand(editor:EditorStore,selection?:{templateId:string;version:number}):Promise<boolean>{
@@ -21,9 +28,7 @@ export async function handleDashboardCommand(editor:EditorStore,selection?:{temp
   if(matches.length!==1)throw Error(matches.length?'模板重名，请在 /看板 列表选择具体模板':'未找到模板，请在 /看板 列表重新选择');
   if(selection&&matches[0].version!==selection.version)throw Error('模板已发布新版，请在列表重新选择');
   const template=await readDashboard(client,matches[0].id,selection?.version??matches[0].version);
-  if(command.mode==='dashboard')description=(await inspectDashboardPlacement(template.package)).description;
-  if(getTeamSession()!==client)throw Error('团队账户已变更，请重新选择看板');
-  binding=dashboardBinding(client.base,matches[0],command.mode);
+  ({binding,description}=await prepareDashboardBinding(client,template,command.mode));
  }
  const current=editor.getState();
  if(activeConversationStore()!==editor||current.doc.projectId!==projectId||current.doc.revision!==revision||current.composerText!==text)throw Error('当前场景或输入已变更，请重新选择看板');

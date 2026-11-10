@@ -5,6 +5,9 @@ import {Cross1Icon,UploadIcon,DownloadIcon} from '@radix-ui/react-icons';
 import {acquireLinkedTeamVersion,beginTeamAuthorization,defaultTeamServiceBase,getTeamSession,getTeamSessionStatus,listTeamPublishSources,loginTeamSession,logoutTeamSession,prepareTeamPublications,publishPreparedTeamBatch,resolveTeamPublishTarget,resumeTeamFromPlatformAuth,subscribeTeamSession,type PreparedTeamPublication,type TeamItem,type TeamLocalSource,type TeamPreparationProgress,type TeamPublishSource} from '../domain/teamLibrary';
 import {showTeamPasswordLogin} from '../domain/platformOAuth';
 import {OperationProgress,nextProgressPaint} from './OperationProgress';
+import {listModelAssets} from '../domain/modelAssetStorage';
+import {useWorkspaceStore} from '../workspace';
+import type {TeamResourceLink} from '../domain/teamResourceLinks';
 import './team-library.css';
 
 export function TeamSessionLogin({onConnected,serviceOrigin}:{onConnected?:()=>void;serviceOrigin?:string}){
@@ -29,9 +32,9 @@ export function TeamSessionLogin({onConnected,serviceOrigin}:{onConnected?:()=>v
 }
 
 export interface TeamTransferDialogProps {
- kind:'asset'|'scene';mode:'publish'|'acquire';sources?:TeamLocalSource[];items?:TeamItem[];serviceOrigin?:string;onClose:()=>void;onCompleted?:()=>void;
+ kind:'asset'|'scene';mode:'publish'|'acquire';sources?:TeamLocalSource[];items?:TeamItem[];serviceOrigin?:string;onClose:()=>void;onCompleted?:()=>void;onLocate?:(ids:string[])=>void;
 }
-interface Acquisition {item:TeamItem;status:'ready'|'running'|'success'|'error';error?:string;reused?:boolean}
+interface Acquisition {item:TeamItem;status:'ready'|'running'|'success'|'error';error?:string;reused?:boolean;link?:TeamResourceLink}
 function publicationSize(bytes:number){return bytes<1024?`${bytes} B`:bytes<1024*1024?`${(bytes/1024).toFixed(1)} KB`:`${(bytes/1024/1024).toFixed(2)} MB`;}
 function PublishEntry({entry,now}:{entry:PreparedTeamPublication;now:number}){
  const running=entry.status==='running',upload=entry.upload,uploading=running&&upload?.phase==='uploading',processing=running&&upload?.phase==='processing';
@@ -44,9 +47,11 @@ function PublishEntry({entry,now}:{entry:PreparedTeamPublication;now:number}){
   {entry.error&&<p className="team-error" role="alert">{entry.error}</p>}
  </div><Tag color={entry.status==='error'?'red':undefined} variant="filled">{label}</Tag></div>;
 }
-export function TeamTransferDialog({kind,mode,sources,items,serviceOrigin,onClose,onCompleted}:TeamTransferDialogProps){
+export function TeamTransferDialog({kind,mode,sources,items,serviceOrigin,onClose,onCompleted,onLocate}:TeamTransferDialogProps){
  const client=useSyncExternalStore(subscribeTeamSession,getTeamSession,getTeamSession),[available,setAvailable]=useState<TeamPublishSource[]>([]),[selected,setSelected]=useState(()=>new Set(sources?.map(source=>source.id)??[])),[targets,setTargets]=useState<Record<string,string>>({}),[remote,setRemote]=useState<TeamItem[]>([]),[prepared,setPrepared]=useState<PreparedTeamPublication[]>(),[acquisitions]=useState<Acquisition[]>(()=>items?.map(item=>({item:{...item},status:'ready'}))??[]),[busy,setBusy]=useState(false),[error,setError]=useState(''),[revision,setRevision]=useState(0);const lock=useRef(false),alive=useRef(true);
  const kindLabel=kind==='asset'?'资产':'场景';
+ const sessions=useWorkspaceStore(state=>state.sessions),[localNames,setLocalNames]=useState<Record<string,string>>({});
+ const localIds=acquisitions.flatMap(entry=>entry.link?[entry.link.localId]:[]);
  const [now,setNow]=useState(Date.now);
  const [operation,setOperation]=useState<'preparing'|'transferring'>(),[batchCompleted,setBatchCompleted]=useState(0);
  const [preparation,setPreparation]=useState<TeamPreparationProgress>();
@@ -68,7 +73,10 @@ export function TeamTransferDialog({kind,mode,sources,items,serviceOrigin,onClos
    if(alive.current)setBatchCompleted(finished.size);changed();
   }
   if(mode==='publish')await publishPreparedTeamBatch(client,publishEntries,reportBatch);
-  else for(const entry of acquisitions){if(entry.status==='success')continue;entry.status='running';entry.error=undefined;reportBatch();try{const fixed=await client.read(entry.item);if(fixed.id!==entry.item.id||fixed.kind!==kind||fixed.version!==entry.item.version)throw Error('团队服务返回的固定版本不匹配');const result=await acquireLinkedTeamVersion(client,fixed);entry.reused=result.reused;entry.status='success';}catch(error){entry.status='error';entry.error=error instanceof Error?error.message:'获取失败，可重试';}reportBatch();}
+  else {
+   for(const entry of acquisitions){if(entry.status==='success')continue;entry.status='running';entry.error=undefined;reportBatch();try{const fixed=await client.read(entry.item);if(fixed.id!==entry.item.id||fixed.kind!==kind||fixed.version!==entry.item.version)throw Error('团队服务返回的固定版本不匹配');const result=await acquireLinkedTeamVersion(client,fixed);entry.reused=result.reused;entry.link=result.link;entry.status='success';}catch(error){entry.status='error';entry.error=error instanceof Error?error.message:'获取失败，可重试';}reportBatch();}
+   if(kind==='asset'&&acquisitions.some(entry=>entry.link))try{const ids=new Set(acquisitions.map(entry=>entry.link?.localId));const rows=await listModelAssets();if(alive.current)setLocalNames(Object.fromEntries(rows.filter(row=>ids.has(row.id)).map(row=>[row.id,row.name])));}catch{/* The stored identity still supports location if names could not be read. */}
+  }
   if(results.some(entry=>entry.status==='success'))onCompleted?.();
  }
  const dialogTitle=mode==='publish'?`发布${kindLabel}到团队`:`获取团队${kindLabel}`;
@@ -84,12 +92,13 @@ export function TeamTransferDialog({kind,mode,sources,items,serviceOrigin,onClos
      const resolution=resolveTeamPublishTarget(client,source,remote),destination=targets[source.id]??'',issue=resolution.issue&&(destination==='__choose__'||destination===resolution.target?.id)?resolution.issue:undefined;
      return <div className="team-transfer-source" key={source.id}><label><input type="checkbox" aria-label={`发布 ${source.name}`} disabled={busy} checked={selected.has(source.id)} onChange={event=>setSelected(previous=>{const next=new Set(previous);if(event.target.checked)next.add(source.id);else next.delete(source.id);return next;})}/><span>{source.name}{source.version?` · v${source.version}`:''}{issue&&<small className="team-error" role="status">{issue}</small>}{resolution.link&&!issue&&destination===resolution.target?.id&&<small>关联团队原件 · 基于 v{resolution.link.teamVersion}</small>}</span></label><select aria-label={`${source.name} 发布位置`} disabled={busy} value={destination} onChange={event=>setTargets(previous=>({...previous,[source.id]:event.target.value}))}><option value="__choose__" disabled>请选择发布位置</option><option value="">新增到团队库</option>{remote.filter(item=>item.owner===client.user?.id||client.user?.role==='admin'||item.id===resolution.target?.id).map(item=><option key={item.id} value={item.id} disabled={item.owner!==client.user?.id&&client.user?.role!=='admin'}>更新团队版本 v{item.version+1} · {item.name}</option>)}</select></div>;
     })}</section>:<section className="team-transfer-selection" aria-label={mode==='publish'?'发布列表':'固定版本获取列表'}><div className="team-selection-heading"><strong>{mode==='publish'?'发布内容':'将获取以下固定版本'}</strong><span>{success} / {results.length} 已完成</span></div>
-     {mode==='publish'?publishEntries.map(entry=><PublishEntry key={entry.request.key} entry={entry} now={now}/>):acquisitions.map(entry=><div className="team-transfer-result" key={entry.item.id+':'+entry.item.version}><div><strong>{entry.item.name}</strong><span>团队固定版本 v{entry.item.version}</span>{entry.error&&<p className="team-error" role="alert">{entry.error}</p>}</div><Tag color={entry.status==='error'?'red':undefined} variant="filled">{entry.status==='success'?(entry.reused?'已复用既有副本':'已获取'):entry.status==='error'?'失败':entry.status==='running'?'获取中…':'待确认'}</Tag></div>)}
+     {mode==='publish'?publishEntries.map(entry=><PublishEntry key={entry.request.key} entry={entry} now={now}/>):acquisitions.map(entry=>{const link=entry.link,name=link&&(kind==='asset'?localNames[link.localId]:sessions.find(session=>session.id===link.localId)?.title),version=kind==='asset'?link?.localVersion:link?.sceneRevision;return <div className="team-transfer-result" key={entry.item.id+':'+entry.item.version}><div><strong>{entry.item.name}</strong><span>团队固定版本 v{entry.item.version}</span>{link&&<span>本机{kindLabel}库{name?`：${name}`:''}{version===undefined?'':` ${kind==='asset'?'v':'r'}${version}`}</span>}{entry.error&&<p className="team-error" role="alert">{entry.error}</p>}</div><Tag color={entry.status==='error'?'red':undefined} variant="filled">{entry.status==='success'?(entry.reused?'已复用既有副本':'已获取'):entry.status==='error'?'失败':entry.status==='running'?'获取中…':'待确认'}</Tag></div>;})}
     </section>}
     {mode==='acquire'&&<p className="team-transfer-safety">这是一次手动获取，不是自动同步。相同团队版本会复用已关联的副本，不重复创建。</p>}
     {mode==='publish'&&attempted&&failed>0&&<p className="team-transfer-safety">重试沿用本次发布内容与标识，已成功项不会重复发布。</p>}
     {error&&<p className="team-error" role="alert">{error}</p>}
-    {complete&&<p className="team-transfer-complete" role="status">{mode==='publish'?`已发布 ${success} 项，并记录本地关联。`:`已获取 ${success} 项，旧副本和本地修改均已保留。`}</p>}
+    {((mode==='publish'&&complete)||(mode==='acquire'&&success>0&&!busy))&&<p className="team-transfer-complete" role="status">{mode==='publish'?`已发布 ${success} 项，并记录本地关联。`:`已获取 ${success} 项，结果在本机${kindLabel}库。旧副本和本地修改均已保留。`}</p>}
+    {onLocate&&localIds.length>0&&!busy&&<AntButton type="primary" onClick={()=>{onClose();onLocate(localIds);}}>在{kindLabel}库中定位</AntButton>}
     <footer className="team-transfer-actions"><AntButton disabled={busy} onClick={onClose}>{attempted?'关闭':'取消'}</AntButton>{mode==='publish'&&!prepared?<AntButton disabled={busy||!selected.size||!available.length} onClick={()=>void run(async()=>{const chosen=[...(sources??available)].filter(source=>selected.has(source.id));if(chosen.some(source=>targets[source.id]==='__choose__'||targets[source.id]===undefined))throw Error('请为所选资源明确选择发布位置');const destinations=Object.fromEntries(chosen.map(source=>[source.id,remote.find(item=>item.id===targets[source.id])]));setOperation('preparing');await nextProgressPaint();setPrepared(await prepareTeamPublications(client,kind,chosen,destinations,progress=>{if(alive.current)setPreparation(progress);}));})}>{busy?'正在准备发布…':'准备发布'}</AntButton>:!complete&&<AntButton disabled={busy||!results.length||wrongService} onClick={()=>void run(execute)}>{mode==='publish'?<UploadIcon/>:<DownloadIcon/>}{busy?'正在逐项处理…':failed?`仅重试失败的 ${failed} 项`:mode==='publish'?'确认发布':'确认获取并保留旧副本'}</AntButton>}</footer>
    </>}
   </>}
