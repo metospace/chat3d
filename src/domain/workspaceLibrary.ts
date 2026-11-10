@@ -28,7 +28,6 @@ export async function saveLibraryProject(thumbnail?:(doc:import('./types').Scene
  if(options?.onProgress)await progress('workspace',4);await flushWorkspace();if(useWorkspaceStore.getState().error)throw Error(useWorkspaceStore.getState().error!);options?.onProgress?.({stage:'complete',completed:5,total:5});return '场景已保存到场景库。引用资产版本保持固定。';
  }
  if(!doc.nodes.length)throw Error('资产还是空的，请先生成或导入模型');
- if(doc.animation?.tracks.length)throw Error('资产库当前保存静态模型；此项目含动画，请保留为场景项目或导出项目备份');
  const source=session.assetSource,head=source?(await listModelAssets()).find(a=>a.id===source.id):undefined;
  if(source&&(!head||head.version!==source.version))throw Error('资产已有更新版本，请从资产库核对后再保存；当前草稿已保留');
  if(options?.metadataRevision!==undefined&&(head?.metadataRevision??0)!==options.metadataRevision)throw Error('资产信息已在其他页面更新，请重新打开保存窗口');

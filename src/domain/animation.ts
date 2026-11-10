@@ -2,7 +2,7 @@ import {Matrix4,Quaternion as Q,Vector3} from 'three';
 import type {SceneDocument,Transform,Vec3} from './types';
 export type MotionExpr=number|'t'|'pi'|{op:'add'|'sub'|'mul'|'div'|'mod'|'sin'|'cos'|'abs'|'min'|'max'|'clamp'|'gt'|'lt'|'if';args:MotionExpr[]};
 export type MotionValue=number|boolean|Vec3;
-export interface AnimationTrack {id:string;name:string;targetIds:string[];channel:'position'|'rotation'|'scale'|'visibility'|'follow';keyframes?:{time:number;value:MotionValue}[];expression?:MotionExpr|MotionExpr[];axis?:Vec3;pivot?:Vec3;sourceId?:string;start?:number;end?:number}
+export interface AnimationTrack {id:string;name:string;targetIds:string[];channel:'position'|'rotation'|'scale'|'visibility'|'follow';keyframes?:{time:number;value:MotionValue}[];expression?:MotionExpr|MotionExpr[];expressionYaw?:number;axis?:Vec3;pivot?:Vec3;sourceId?:string;start?:number;end?:number}
 export interface AnimationProgram {version:1;name:string;duration:number;loop:boolean;tracks:AnimationTrack[]}
 export interface AnimationPose {transform:Transform;visible:boolean}
 const finite=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v)&&Math.abs(v)<=1e6;
@@ -16,6 +16,7 @@ export function validateAnimation(raw:unknown,nodes:SceneDocument['nodes']):Erro
  const ids=new Set(nodes.map(n=>n.id)),trackIds=new Set<string>(),channels=new Set<string>(),follow=new Map<string,string>();let bindings=0;
  for(const tr of a.tracks){
   if(!tr||typeof tr.id!=='string'||!tr.id||tr.id.length>120||trackIds.has(tr.id)||typeof tr.name!=='string'||tr.name.length>120){fail('动画轨道名称或ID无效/重复');continue;}trackIds.add(tr.id);
+  if(tr.expressionYaw!==undefined&&(tr.channel!=='position'||tr.expression===undefined||typeof tr.expressionYaw!=='number'||!Number.isFinite(tr.expressionYaw)||Math.abs(tr.expressionYaw)>180))fail('表达式偏航仅支持位移表达式及-180–180度有限角度');
   if(!['position','rotation','scale','visibility','follow'].includes(tr.channel)||!Array.isArray(tr.targetIds)||!tr.targetIds.length||tr.targetIds.length>512||tr.targetIds.some(id=>!ids.has(id))||new Set(tr.targetIds).size!==tr.targetIds.length){fail(`轨道 ${tr.name} 类型或目标对象无效`);continue;}
   bindings+=tr.targetIds.length;
   for(const id of tr.targetIds){const key=id+':'+tr.channel;if(channels.has(key))fail('同一对象的同一动画通道只能有一条轨道，请合并关键帧');channels.add(key);}
@@ -78,13 +79,14 @@ const matrix=(t:Transform)=>new Matrix4().compose(new Vector3(...t.position),new
 export function createAnimationEvaluator(doc:SceneDocument){
  const program=doc.animation;const errors=validateAnimation(program,doc.nodes);if(errors.length)throw errors[0];
  const nodes=new Map(doc.nodes.map(n=>[n.id,n])),tracks=new Map<string,AnimationTrack[]>();for(const tr of program?.tracks??[])for(const id of tr.targetIds)tracks.set(id,[...(tracks.get(id)??[]),tr]);
+ const expressionRotations=new Map((program?.tracks??[]).filter(tr=>tr.expressionYaw).map(tr=>{const angle=tr.expressionYaw!*Math.PI/180;return [tr,{cos:Math.cos(angle),sin:Math.sin(angle)}] as const;}));
  return (time:number):Map<string,AnimationPose>=>{
   if(!finite(time))throw Error('动画时间无效');const t=Math.max(0,Math.min(time,program?.duration??0)),memo=new Map<string,AnimationPose>();let evaluations=0;
   const evaluate=(id:string,at:number):AnimationPose=>{
    if(++evaluations>20000)throw Error('动画计算超过预算');const key=id+':'+at;if(memo.has(key))return memo.get(key)!;
    const node=nodes.get(id);if(!node)throw Error('动画对象已不存在');const transform=structuredClone(node.transform);let visible=node.visible;const list=tracks.get(id)??[];
    const rotation=list.find(x=>x.channel==='rotation');if(rotation){const angle=sample(rotation,at) as number,q=new Q().setFromAxisAngle(new Vector3(...rotation.axis!).normalize(),angle*Math.PI/180);transform.position=new Vector3(...transform.position).sub(new Vector3(...rotation.pivot!)).applyQuaternion(q).add(new Vector3(...rotation.pivot!)).toArray() as Vec3;transform.rotationQuaternion=q.multiply(new Q(...transform.rotationQuaternion)).toArray();}
-   for(const tr of list){if(tr.channel==='position'){const offset=sample(tr,at) as Vec3;transform.position=transform.position.map((v,i)=>v+offset[i]) as Vec3;}if(tr.channel==='scale'){const scale=sample(tr,at) as Vec3;transform.scale=transform.scale.map((v,i)=>v*scale[i]) as Vec3;}if(tr.channel==='visibility')visible=sample(tr,at) as boolean;}
+   for(const tr of list){if(tr.channel==='position'){const offset=sample(tr,at) as Vec3,r=expressionRotations.get(tr);if(r){const [x,,z]=offset;offset[0]=r.cos*x+r.sin*z;offset[2]=-r.sin*x+r.cos*z;}transform.position=transform.position.map((v,i)=>v+offset[i]) as Vec3;}if(tr.channel==='scale'){const scale=sample(tr,at) as Vec3;transform.scale=transform.scale.map((v,i)=>v*scale[i]) as Vec3;}if(tr.channel==='visibility')visible=sample(tr,at) as boolean;}
    const binding=list.find(x=>x.channel==='follow');if(binding&&at>=binding.start!){const end=Math.min(at,binding.end!),delta=matrix(evaluate(binding.sourceId!,end).transform).multiply(matrix(evaluate(binding.sourceId!,binding.start!).transform).invert());const final=delta.multiply(matrix(transform)),p=new Vector3(),q=new Q(),s=new Vector3();final.decompose(p,q,s);transform.position=p.toArray();transform.rotationQuaternion=q.toArray();transform.scale=s.toArray();}
    if(!vector(transform.position)||!vector(transform.scale)||transform.scale.some(x=>x<=0)||!transform.rotationQuaternion.every(finite))throw Error('动画结果超出范围，已停止播放');const pose={transform,visible};memo.set(key,pose);return pose;
   };
