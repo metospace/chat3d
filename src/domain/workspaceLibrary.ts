@@ -40,7 +40,7 @@ export async function saveLibraryProject(thumbnail?:(doc:import('./types').Scene
  let preview:string|undefined;if(options?.onProgress)await progress('thumbnail',1);if(thumbnail)try{preview=await thumbnail(doc);}catch{/* Geometry can still be saved without a thumbnail. */}
  unchanged();if(options?.onProgress)await progress('validating',2);unchanged();
  const previous=source?await readModelAsset(source.id,source.version):undefined;
- const asset=createModelAsset(doc,doc.nodes.map(n=>n.id),{name:metadata.name,category:metadata.category!,front:previous?.front,...(source?{id:source.id,version:source.version+1}:{})});asset.description=metadata.description;if(preview)asset.thumbnail=preview;
+ const asset=createModelAsset(doc,doc.nodes.map(n=>n.id),{name:metadata.name,category:metadata.category!,front:previous?.front,previous,...(source?{id:source.id,version:source.version+1}:{})});asset.description=metadata.description;if(preview)asset.thumbnail=preview;
  if(options?.onProgress)await progress('writing',3);unchanged();await saveModelAsset(asset,source?.version??0,metadataRevision);id=asset.id;version=asset.version;metadataRevision=head?metadataRevision+1:0;
  }
  // The catalog write may finish after a switch. Update only the originating session;

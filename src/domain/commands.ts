@@ -3,7 +3,7 @@ import {PROJECT_SIZE_LIMIT,TEAM_SCENE_SIZE_LIMIT,serializeProject} from './proje
 import {duplicateSelectedNodes,layoutSelectedNodes,wholeObjectIds} from './manualComposition';
 import {editSelectedProperties,type SelectionChange} from './selectionProperties';
 import {persistFeatureBinding} from './structuredComponent';
-import {validateAnimation,remapAnimationForReplacement,type AnimationProgram} from './animation';
+import {validateAnimation,remapAnimationForReplacement,copyAnimationTracks,transformAnimation,type AnimationProgram} from './animation';
 
 const MANUAL_PLACEMENT_OVERFLOW = `本次手动放置将使项目文件超过 ${PROJECT_SIZE_LIMIT}，请简化模型或拆分场景；团队场景发布上限为 ${TEAM_SCENE_SIZE_LIMIT}`;
 // 命令系统（方案第 6 节）
@@ -333,17 +333,17 @@ function findNode(doc: SceneDocument, id: string): SceneNode | undefined {
 
 export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<string, string> = new Map()): { doc: SceneDocument; inverse?: CommandWithInverse['before']; createdIds?: string[]; error?: Error } {
   if(op.op==='layoutSelection'){
-    try{const next={...doc,nodes:layoutSelectedNodes(doc,op.targetIds,op.layout),revision:doc.revision+1};const errors=validateDocument(next);if(errors.length)return {doc,error:errors[0]};const {nodeIndices:_,...inverse}=snapshotAffected(doc,op);return {doc:next,inverse};}catch(e){return {doc,error:e instanceof Error?e:new Error('排列失败；尚未修改场景')};}
+    try{const nodes=layoutSelectedNodes(doc,op.targetIds,op.layout),next={...doc,nodes,animation:transformAnimation(doc.animation,doc.nodes,nodes),revision:doc.revision+1};const errors=validateDocument(next);if(errors.length)return {doc,error:errors[0]};const {nodeIndices:_,...inverse}=snapshotAffected(doc,op);return {doc:next,inverse:{...inverse,animation:structuredClone(doc.animation??null)}};}catch(e){return {doc,error:e instanceof Error?e:new Error('排列失败；尚未修改场景')};}
   }
   if(op.op==='duplicateSelection'){
-    try{const added=duplicateSelectedNodes(doc,op.targetIds,op.count,op.axis,op.gap),next={...doc,nodes:[...doc.nodes,...added],revision:doc.revision+1};const errors=validateDocument(next);if(errors.length)return {doc,error:errors[0]};return {doc:next,createdIds:added.map(n=>n.id),inverse:{nodes:[],materialIds:[]}};}catch(e){return {doc,error:e instanceof Error?e:new Error('复制失败；尚未修改场景')};}
+    try{const copied=duplicateSelectedNodes(doc,op.targetIds,op.count,op.axis,op.gap),next={...doc,nodes:[...doc.nodes,...copied.nodes],animation:copied.animation,revision:doc.revision+1};const errors=validateDocument(next);if(errors.length)return {doc,error:errors[0]};return {doc:next,createdIds:copied.nodes.map(n=>n.id),inverse:{nodes:[],materialIds:[],animation:structuredClone(doc.animation??null)}};}catch(e){return {doc,error:e instanceof Error?e:new Error('复制失败；尚未修改场景')};}
   }
   if(op.op==='editSelection'){
     try{
       const changed=editSelectedProperties(doc,op.targetIds,op.change);
-      const next={...doc,...changed,revision:doc.revision+1};
+      const next={...doc,...changed,animation:transformAnimation(doc.animation,doc.nodes,changed.nodes),revision:doc.revision+1};
       const errors=validateDocument(next);if(errors.length)return {doc,error:new Error('属性修改校验失败：'+errors.map(e=>e.message).join('；'))};
-      const {nodeIndices:_,...inverse}=snapshotAffected(doc,op);return {doc:next,inverse};
+      const {nodeIndices:_,...inverse}=snapshotAffected(doc,op);return {doc:next,inverse:{...inverse,animation:structuredClone(doc.animation??null)}};
     }catch(e){return {doc,error:e instanceof Error?e:new Error('属性修改失败；尚未修改任何对象。')};}
   }
   // tempId 解析：模型在同一批次里用 tempId 引用前面创建的节点，这里换成真实 ID
@@ -471,6 +471,7 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
       const anchor=findNode(doc,op.targetId)!;const members=anchor.assemblyId?doc.nodes.filter(n=>n.assemblyId===anchor.assemblyId):[anchor];
       if(members.length>2000||!Array.isArray(op.offset)||op.offset.length!==3||!op.offset.every(Number.isFinite))return {doc,error:new Error('复制数量或偏移无效')};
       const assemblyId=makeId(),instanceId=makeId();const name=op.name?.trim()||`${anchor.assemblyName??anchor.name} 副本`;const copiedIds=new Map(members.map((n,i)=>[n.id,i?makeId():assemblyId]));const copies=members.map(n=>({...cloneNode(n),...(n.modelAsset?{modelAsset:{...n.modelAsset,instanceId}}:{}),...(n.connection?{connection:{...structuredClone(n.connection),targetId:copiedIds.get(n.connection.targetId)??n.connection.targetId}}:{}),...(n.poseRig?{poseRig:remapPoseRig(n.poseRig,copiedIds)}:{}),id:copiedIds.get(n.id)!,assemblyId,assemblyName:name,name:`${name} · ${n.name.split(' · ').slice(1).join(' · ')||n.name}`,transform:{...structuredClone(n.transform),position:n.transform.position.map((v,k)=>v+op.offset[k]) as Vec3}}));
+      try{const tracks=copyAnimationTracks(animation,copiedIds,op.offset);if(animation&&tracks.length){beforeSnapshot.animation=structuredClone(animation);animation={...animation,tracks:[...animation.tracks,...tracks]};}}catch(e){return {doc,error:e instanceof Error?e:new Error('动画复制失败')};}
       createdIds=copies.map(n=>n.id);if(op.tempId)tempIdMap.set(op.tempId,copies[0].id);nodes.push(...copies);break;
     }
     case 'createTemplate': {
@@ -616,6 +617,9 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
     revision: doc.revision + 1,
   };
   if(animation)newDoc.animation=animation;else delete newDoc.animation;
+  if(['setTransform','translate','rotate','scale','translateAssembly','transformAssembly'].includes(op.op)){
+    try{newDoc.animation=transformAnimation(doc.animation,doc.nodes,nodes);if(newDoc.animation!==doc.animation)beforeSnapshot.animation=structuredClone(doc.animation??null);}catch(e){return {doc,error:e instanceof Error?e:new Error('动画变换失败')};}
+  }
   if(op.op==='importManualComponent'){try{serializeProject(newDoc,MANUAL_PLACEMENT_OVERFLOW);}catch(e){return {doc,error:e instanceof Error?e:new Error(MANUAL_PLACEMENT_OVERFLOW)};}}
   const errs = validateDocument(newDoc);
   if (errs.length > 0) {
