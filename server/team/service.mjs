@@ -186,6 +186,8 @@ export function teamMiddleware(team,validate,{origins=[]}={}){
    if(req.method==='POST'&&uploadAction)return send(200,uploadAction[2]==='complete'?await team.dashboards.completeUpload(user,uploadAction[1],token):await team.dashboards.cancelUpload(user,uploadAction[1]));
    const dashboardBinary=url.pathname.match(/^\/api\/team\/dashboards\/([a-zA-Z0-9-]+)\/(\d+)\/(files|source)$/);
    if(req.method==='GET'&&dashboardBinary)return await binary(dashboardBinary[3]==='files'?team.dashboards.file(user,dashboardBinary[1],Number(dashboardBinary[2]),url.searchParams.get('path')):await team.dashboards.source(user,dashboardBinary[1],Number(dashboardBinary[2])));
+   const dashboardThumbnail=url.pathname.match(/^\/api\/team\/dashboards\/([a-zA-Z0-9-]+)\/(\d+)\/thumbnail$/);
+   if(req.method==='GET'&&dashboardThumbnail)return await binary(team.dashboards.thumbnail(user,dashboardThumbnail[1],Number(dashboardThumbnail[2])));
    const dashboardArchive=url.pathname.match(/^\/api\/team\/dashboards\/([a-zA-Z0-9-]+)\/archive$/);
    if(req.method==='POST'&&dashboardArchive)return send(200,await team.dashboards.archive(user,dashboardArchive[1],body.archived,token));
    fail(404,'接口不存在');

@@ -43,9 +43,25 @@ try{
  const exported=unzipSync(new Uint8Array(await(await read('/source')).arrayBuffer()));assert.deepEqual(Buffer.from(exported['index.html']),html);assert.deepEqual(Buffer.from(exported['assets/main.css']),css);
  for(const [path,text] of Object.entries(ancillary))assert.equal(Buffer.from(exported[path]).toString(),text);
  assert.equal((await read('/files?path=../team.sqlite')).status,404);
+ assert.equal((await read('/thumbnail')).status,404);
  const stale=await post('dashboards/uploads',{...metadata,itemId:first.id,expectedVersion:0,key:crypto.randomUUID()});if(stale.status===200){const result=await post('dashboards/uploads/'+stale.body.uploadId+'/complete',{});assert.notEqual(result.status,200);}else assert.equal(stale.status,409);
  await post('dashboards/'+first.id+'/archive',{archived:true});assert.deepEqual(await(await fetch(base+'/api/team/dashboards',{headers:{Authorization:'Bearer '+member.token}})).json(),[]);assert.equal((await read('')).status,200);
  console.log('PASS custom system, chunk offset validation, incomplete files, admin enforcement, folder export, idempotency and immutable archived reads');
+ const publishImages=async files=>{
+  const initialized=await post('dashboards/uploads',{...metadata,key:crypto.randomUUID()});assert.equal(initialized.status,200,JSON.stringify(initialized.body));const uploadRoot='dashboards/uploads/'+initialized.body.uploadId;
+  for(const [path,bytes] of Object.entries({'index.html':html,...files})){
+   const registered=await post(uploadRoot+'/files',{path,size:bytes.length});assert.equal(registered.status,200,path);
+   const chunk=await post(uploadRoot+'/files/'+registered.body.fileId+'/chunks',{offset:0,base64:bytes.toString('base64')});assert.equal(chunk.status,200,path);
+  }
+  const completed=await post(uploadRoot+'/complete',{});assert.equal(completed.status,200,JSON.stringify(completed.body));return base+'/api/team/dashboards/'+completed.body.id+'/'+completed.body.version+'/thumbnail';
+ };
+ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=','base64'),gif=Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7','base64');
+ const thumbnailUrl=await publishImages({'assets/generic.gif':Buffer.concat([gif,gif,gif]),'assets/PrEvIeW/image.PnG':png,'assets/cover.svg':Buffer.alloc(512,32)});
+ const thumbnailResponse=await fetch(thumbnailUrl,{headers:{Authorization:'Bearer '+member.token}});assert.equal(thumbnailResponse.status,200);assert.equal(thumbnailResponse.headers.get('content-type'),'image/png');assert.equal(Number(thumbnailResponse.headers.get('content-length')),png.length);assert.deepEqual(Buffer.from(await thumbnailResponse.arrayBuffer()),png);
+ assert.equal((await fetch(thumbnailUrl)).status,401);assert.equal((await fetch(thumbnailUrl,{headers:{Authorization:'Bearer invalid'}})).status,401);
+ const largerGif=Buffer.concat([gif,gif]),fallbackUrl=await publishImages({'assets/small.PNG':png,'assets/b.GiF':largerGif,'assets/a.GIF':Buffer.concat([gif,Buffer.from(gif).fill(0)])});
+ const fallbackResponse=await fetch(fallbackUrl,{headers:{Authorization:'Bearer '+member.token}});assert.equal(fallbackResponse.status,200);assert.equal(fallbackResponse.headers.get('content-type'),'image/gif');assert.deepEqual(Buffer.from(await fallbackResponse.arrayBuffer()),Buffer.concat([gif,Buffer.from(gif).fill(0)]));
+ console.log('PASS authenticated thumbnail bytes and MIME, preferred case-insensitive image paths, largest fallback, deterministic ties and missing-image 404');
  const archiveBytes=Buffer.from(zipSync({'index.html':html,'assets/main.css':css,...Object.fromEntries(Object.entries(ancillary).map(([path,text])=>[path,Buffer.from(text)]))}));
  const archiveMeta={...metadata,name:'ZIP 大屏',system:'企业 ERP',sourceKind:'file',fileName:oldPack.fileName,key:crypto.randomUUID()};
  const archiveInit=await post('dashboards/uploads',archiveMeta),archiveRoot='dashboards/uploads/'+archiveInit.body.uploadId;

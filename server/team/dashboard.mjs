@@ -158,6 +158,17 @@ export function openDashboardStore(db,root){
   const found=manifest.files.find(file=>file.path===path);if(!found)fail(404,'看板资源不存在');
   return {path:join(directory,found.storage),bytes:found.bytes,type:contentType(found.path),fileName:found.path.split('/').at(-1)};
  }
+ function thumbnail(user,id,version){
+  const row=versionRow(user,id,version),directory=join(root,'versions',row.manifest),manifest=loadManifest(directory);
+  let selected,preferred=false;
+  for(const file of manifest.files){
+   if(!/\.(png|jpe?g|webp|gif)$/i.test(file.path))continue;
+   const candidatePreferred=/thumbnail|preview|cover|poster|reference-full/i.test(file.path);
+   if(!selected||(candidatePreferred&&!preferred)||(candidatePreferred===preferred&&(file.bytes>selected.bytes||(file.bytes===selected.bytes&&file.path<selected.path)))){selected=file;preferred=candidatePreferred;}
+  }
+  if(!selected)fail(404,'看板缩略图不存在');
+  return {path:join(directory,selected.storage),bytes:selected.bytes,type:contentType(selected.path),fileName:selected.path.split('/').at(-1)};
+ }
  async function source(user,id,version){
   const row=versionRow(user,id,version),directory=join(root,'versions',row.manifest),manifest=loadManifest(directory);
   if(manifest.sourceKind==='file')return {path:join(directory,manifest.source),bytes:manifest.bytes,type:extension(manifest.fileName)==='zip'?'application/zip':contentType(manifest.fileName),fileName:manifest.fileName};
@@ -165,5 +176,5 @@ export function openDashboardStore(db,root){
   try{const bytes=await folderZip(directory,manifest,path);return {path,bytes,type:'application/zip',fileName:/\.zip$/i.test(manifest.fileName)?manifest.fileName:`${manifest.fileName}.zip`,cleanup:()=>rm(path,{force:true})};}catch(error){await rm(path,{force:true});throw error;}
  }
  function archive(user,id,archived){admin(user);if(typeof id!=='string'||typeof archived!=='boolean')fail(400,'看板归档参数无效');return transaction(()=>{const result=db.prepare('UPDATE dashboard_items SET archived=? WHERE id=?').run(archived?1:0,id);if(!result.changes)fail(404,'看板原件不存在');return {id,archived};});}
- return {list,read,createUpload,registerFile,writeChunk,completeUpload,cancelUpload,file,source,archive};
+ return {list,read,createUpload,registerFile,writeChunk,completeUpload,cancelUpload,file,thumbnail,source,archive};
 }
