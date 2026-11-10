@@ -10,8 +10,8 @@ import {hasPendingAppUpdate,useAppUpdate} from '../../domain/appUpdateClient';
 import {TaskQueue} from '../TaskQueue';
 import './pro-v6.css';
 export type StudioNavPage='home'|'workbench'|'asset'|'scene'|'team'|'dashboards'|'tasks'|'settings';
-const NAV=[{page:'home',name:'项目工作台',label:'首页',icon:<HomeIcon/>},{page:'asset',name:'资产库',label:'资产库',icon:<CubeIcon/>},{page:'scene',name:'场景库',label:'场景库',icon:<LayersIcon/>},{page:'dashboards',name:'看板接入',label:'看板接入',icon:<LayersIcon/>},{page:'tasks',name:'任务中心',label:'任务记录',icon:<ClockIcon/>},{page:'team',name:'团队资源',label:'团队库',icon:<PersonIcon/>}] as const;
-const LABELS:Record<StudioNavPage,string>={home:'项目工作台',asset:'资产库',scene:'场景库',workbench:'工作台',team:'团队资源',dashboards:'看板接入',tasks:'任务中心',settings:'设置'};
+const NAV=[{page:'home',name:'项目工作台',label:'首页',icon:<HomeIcon/>},{page:'asset',name:'资产库',label:'资产库',icon:<CubeIcon/>},{page:'scene',name:'场景库',label:'场景库',icon:<LayersIcon/>},{page:'dashboards',name:'看板库',label:'看板库',icon:<LayersIcon/>},{page:'tasks',name:'任务中心',label:'任务记录',icon:<ClockIcon/>},{page:'team',name:'团队资源',label:'团队库',icon:<PersonIcon/>}] as const;
+const LABELS:Record<StudioNavPage,string>={home:'项目工作台',asset:'资产库',scene:'场景库',workbench:'工作台',team:'团队资源',dashboards:'看板库',tasks:'任务中心',settings:'设置'};
 export function StudioShell({activePage,onNavigate,disabled,taskQueueRequest,onTaskOpen,onTaskHistory,children}:{activePage:StudioNavPage;onNavigate:(page:StudioNavPage)=>void;disabled:boolean;taskQueueRequest:number;onTaskOpen:()=>void;onTaskHistory:()=>void;children?:(workbenchUtilities:ReactNode)=>ReactNode}){
  const client=useSyncExternalStore(subscribeTeamSession,getTeamSession,getTeamSession),sessionStatus=useSyncExternalStore(subscribeTeamSession,getTeamSessionStatus,getTeamSessionStatus);
  const updatePending=useAppUpdate(hasPendingAppUpdate),{resolved}=useAppearance();

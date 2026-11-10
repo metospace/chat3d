@@ -28,8 +28,20 @@ export async function readDashboard(client:TeamClient,id:string,version:number):
  for(let offset=0;offset<result.files.length;offset+=4)await Promise.all(result.files.slice(offset,offset+4).map(async file=>{dashboardPath(file.path);const response=await client.raw(`dashboards/${encodeURIComponent(id)}/${version}/files?path=${encodeURIComponent(file.path)}`);const bytes=new Uint8Array(await response.arrayBuffer());if(bytes.length!==file.bytes)throw Error('看板资源未完整返回：'+file.path);files[file.path]=bytes;}));
  return {...result,package:{fileName:result.fileName,entry:result.entry,files}};
 }
-export async function downloadDashboardSource(client:TeamClient,item:DashboardItem):Promise<string|null>{
- return exportFile(async()=>{const response=await client.raw(`dashboards/${encodeURIComponent(item.id)}/${item.version}/source`,undefined,new AbortController().signal);return response.arrayBuffer();},/\.zip$/i.test(item.fileName)?'zip':'html',item.fileName);
+export async function downloadDashboardSource(client:TeamClient,item:DashboardItem,onProgress?:(progress:{loaded:number;total?:number})=>void):Promise<string|null>{
+ return exportFile(async()=>{
+  onProgress?.({loaded:0});
+  const response=await client.raw(`dashboards/${encodeURIComponent(item.id)}/${item.version}/source`,undefined,new AbortController().signal);
+  const length=response.headers.get('content-length');
+  const total=length!==null&&/^\d+$/.test(length)&&Number.isSafeInteger(Number(length))?Number(length):undefined;
+  const report=(loaded:number)=>onProgress?.(total===undefined?{loaded}:{loaded,total});
+  report(0);
+  if(!response.body){const bytes=await response.arrayBuffer();report(bytes.byteLength);return bytes;}
+  const reader=response.body.getReader(),chunks:Uint8Array[]=[];let loaded=0;
+  try{while(true){const {done,value}=await reader.read();if(done)break;chunks.push(value);loaded+=value.byteLength;report(loaded);}}
+  finally{reader.releaseLock();}
+  const bytes=new Uint8Array(loaded);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}return bytes.buffer;
+ },/\.zip$/i.test(item.fileName)?'zip':'html',item.fileName);
 }
 /** Explicit local commands; arbitrary model prompts are never interpreted as bindings. */
 export function parseDashboardCommand(text:string):{name?:string;mode:DashboardMode;remove?:boolean}|undefined {
