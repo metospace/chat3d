@@ -1,5 +1,6 @@
 import {Matrix4,Quaternion as Q,Vector3} from 'three';
 import type {SceneDocument,Transform,Vec3} from './types';
+import {makeId} from '../util/ids';
 export type MotionExpr=number|'t'|'pi'|{op:'add'|'sub'|'mul'|'div'|'mod'|'sin'|'cos'|'abs'|'min'|'max'|'clamp'|'gt'|'lt'|'if';args:MotionExpr[]};
 export type MotionValue=number|boolean|Vec3;
 export interface AnimationTrack {id:string;name:string;targetIds:string[];channel:'position'|'rotation'|'scale'|'visibility'|'follow';keyframes?:{time:number;value:MotionValue}[];expression?:MotionExpr|MotionExpr[];expressionYaw?:number;axis?:Vec3;pivot?:Vec3;sourceId?:string;start?:number;end?:number}
@@ -68,6 +69,45 @@ export function remapAnimationForReplacement(program:AnimationProgram|undefined,
   changed=true;return {...track,targetIds,...(sourceId!==track.sourceId?{sourceId}:{})};
  });
  return changed?{...program,tracks}:program;
+}
+/** Copy only selected bindings; an external follow source cannot be copied implicitly. */
+export function copyAnimationTracks(program:AnimationProgram|undefined,ids:Map<string,string>,offset:Vec3):AnimationTrack[]{
+ return (program?.tracks??[]).filter(t=>t.targetIds.some(id=>ids.has(id))).map(t=>{
+  if(t.channel==='follow'&&!ids.has(t.sourceId!))throw Error('动画跟随源在复制范围之外，请一并选择跟随源');
+  const copy=structuredClone(t);copy.id=makeId();copy.targetIds=t.targetIds.filter(id=>ids.has(id)).map(id=>ids.get(id)!);
+  if(copy.sourceId)copy.sourceId=ids.get(copy.sourceId)!;
+  if(copy.pivot)copy.pivot=copy.pivot.map((v,i)=>v+offset[i]) as Vec3;
+  return copy;
+ });
+}
+
+/** Rebase world-space motion in the same transaction as the editable base geometry. */
+export function transformAnimation(program:AnimationProgram|undefined,before:SceneDocument['nodes'],after:SceneDocument['nodes']):AnimationProgram|undefined {
+ if(!program)return program;
+ const previous=new Map(before.map(n=>[n.id,n])),changes=new Map<string,Matrix4>();
+ for(const node of after){const old=previous.get(node.id);if(!old||old.transform===node.transform)continue;const delta=matrix(node.transform).multiply(matrix(old.transform).invert());if(delta.elements.some((v,i)=>Math.abs(v-(i%5===0?1:0))>1e-8))changes.set(node.id,delta);}
+ if(!changes.size)return program;
+ const tracks=program.tracks.map(track=>{
+  const selected=track.targetIds.filter(id=>changes.has(id));
+  if(track.channel==='follow'&&(selected.length||changes.has(track.sourceId!))&&(!selected.length||selected.length!==track.targetIds.length||!changes.has(track.sourceId!)))throw Error('动画跟随依赖在变换范围之外，请一并选择跟随源和目标');
+  if(!selected.length)return track;
+  const delta=changes.get(selected[0])!;
+  if(selected.length!==track.targetIds.length||selected.some(id=>changes.get(id)!.elements.some((v,i)=>Math.abs(v-delta.elements[i])>1e-7))||(track.channel==='follow'&&changes.get(track.sourceId!)!.elements.some((v,i)=>Math.abs(v-delta.elements[i])>1e-7)))throw Error('共享动画轨道的对象需整体变换，请一并选择关联对象');
+  const copy=structuredClone(track),position=new Vector3(),rotation=new Q(),scale=new Vector3();delta.decompose(position,rotation,scale);
+  if(copy.pivot)copy.pivot=new Vector3(...copy.pivot).applyMatrix4(delta).toArray() as Vec3;
+  if(copy.axis){if(Math.max(...scale.toArray())-Math.min(...scale.toArray())>1e-7)throw Error('旋转动画对象不支持非等比整体缩放，请使用等比缩放');copy.axis=new Vector3(...copy.axis).applyQuaternion(rotation).normalize().toArray() as Vec3;}
+  if(copy.channel==='position'){
+   const linear=delta.clone();linear.setPosition(0,0,0);
+   if(copy.keyframes)for(const key of copy.keyframes)key.value=new Vector3(...key.value as Vec3).applyMatrix4(linear).toArray() as Vec3;
+   if(copy.expression){
+    const yaw=new Matrix4().makeRotationY((copy.expressionYaw??0)*Math.PI/180);linear.multiply(yaw);delete copy.expressionYaw;
+    const original=copy.expression as MotionExpr[];
+    copy.expression=[0,1,2].map(row=>{const terms=original.flatMap((expr,col)=>{const coefficient=linear.elements[col*4+row];return Math.abs(coefficient)<1e-10?[]:[Math.abs(coefficient-1)<1e-10?expr:{op:'mul' as const,args:[coefficient,expr]}];});return terms.reduce<MotionExpr>((sum,term)=>sum===0?term:{op:'add',args:[sum,term]},0);});
+   }
+  }
+  return copy;
+ });
+ return {...program,tracks};
 }
 function sample(tr:AnimationTrack,time:number):MotionValue{
  if(tr.expression!==undefined)return Array.isArray(tr.expression)?tr.expression.map(x=>evaluateExpression(x,time)) as Vec3:evaluateExpression(tr.expression,time);

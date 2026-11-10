@@ -3,7 +3,7 @@ import {teamFetch} from './teamTransport';
 import {compressTeamPublication,sendTeamPublication,type TeamPublicationPackage,type TeamUploadProgress} from './teamPublish';
 import {localPublishedCategoryPath,publishedCategoryPath,acquirePublishedCategory} from './teamCategories';
 import {parseModelAsset} from './modelAssets';
-import {parseProject} from './project';
+import {parseProject,MAX_TEAM_SCENE_BYTES} from './project';
 import {saveModelAsset} from './modelAssetStorage';
 import {createSession,flushWorkspace,useWorkspaceStore} from '../workspace';
 import {assertLibraryReady} from './libraryNavigation';
@@ -237,8 +237,8 @@ export async function copyTeamVersion(item:TeamVersion){
   asset.category=await acquirePublishedCategory('asset',publishedCategoryPath(item))??'其他';
   await saveModelAsset(asset);return asset.id;
  }
- const doc=parseProject(buildTeamCopyExport({...item,kind:'scene'}));
- if(!createSession(doc,{moduleKind:'scene',title:item.name+' 副本',sceneCategory:await acquirePublishedCategory('scene',publishedCategoryPath(item)),libraryDescription:item.description,librarySavedAt:Date.now(),savedRevision:doc.revision}))throw Error('无法创建本地副本');
+ const doc=parseProject(buildTeamCopyExport({...item,kind:'scene'}),MAX_TEAM_SCENE_BYTES);
+ if(!createSession(doc,{moduleKind:'scene',title:item.name+' 副本',sceneCategory:await acquirePublishedCategory('scene',publishedCategoryPath(item)),libraryDescription:item.description,librarySavedAt:Date.now(),savedRevision:doc.revision},MAX_TEAM_SCENE_BYTES))throw Error('无法创建本地副本');
  await flushWorkspace();if(useWorkspaceStore.getState().error)throw Error('副本已创建，但本地保存失败，请先修复存储再继续');return doc.projectId;
 }
 
@@ -329,8 +329,8 @@ export function acquireLinkedTeamVersion(client:TeamClient,item:TeamVersion):Pro
   }else{
    let session=useWorkspaceStore.getState().sessions.find(x=>x.snapshot.doc.projectId===link.localProjectId);
    if(session?.deletedAt)throw Error('该版本已获取后移入回收站，请恢复旧副本');
-   if(!session){const doc=parseProject(buildTeamCopyExport({...item,kind:'scene'}));doc.projectId=link.localProjectId!;
-    if(!createSession(doc,{moduleKind:'scene',title:item.name.slice(0,76)+' 副本',sceneCategory:await acquirePublishedCategory('scene',publishedCategoryPath(item)),libraryDescription:item.description,librarySavedAt:Date.now(),savedRevision:doc.revision}))throw Error('无法创建本地副本');session=useWorkspaceStore.getState().sessions.find(x=>x.snapshot.doc.projectId===doc.projectId)!;}
+   if(!session){const doc=parseProject(buildTeamCopyExport({...item,kind:'scene'}),MAX_TEAM_SCENE_BYTES);doc.projectId=link.localProjectId!;
+    if(!createSession(doc,{moduleKind:'scene',title:item.name.slice(0,76)+' 副本',sceneCategory:await acquirePublishedCategory('scene',publishedCategoryPath(item)),libraryDescription:item.description,librarySavedAt:Date.now(),savedRevision:doc.revision},MAX_TEAM_SCENE_BYTES))throw Error('无法创建本地副本');session=useWorkspaceStore.getState().sessions.find(x=>x.snapshot.doc.projectId===doc.projectId)!;}
    await flushWorkspace();if(useWorkspaceStore.getState().error)throw Error('副本已创建，但本地保存失败；修复后重试同一项');
    link={...link,localId:session.id};payload=scenePublication(session.snapshot.doc);name=session.title;description=session.libraryDescription;category=session.sceneCategory;
   }

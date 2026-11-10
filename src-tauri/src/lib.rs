@@ -1,6 +1,7 @@
 use tauri::Manager;
 use std::io::Write;
 mod export_file;
+mod atomic_export;
 use export_file::{cancel_export_destination, commit_export_file, select_export_destination, PendingExports};
 #[cfg(desktop)]
 mod blender;
@@ -16,6 +17,8 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+mod support_json;
+use support_json::check_support_size;
 // Fixed-purpose exports only: no caller-supplied paths and no overwrites.
 #[tauri::command]
 async fn save_support_json(app: tauri::AppHandle, contents: String, kind: String) -> Result<String, String> {
@@ -25,7 +28,7 @@ async fn save_support_json(app: tauri::AppHandle, contents: String, kind: String
         "workspace" => ("scenivo-workspace", "chat3d-workspace-backup"),
         _ => return Err("不支持的导出类型".into()),
     };
-    if contents.len() > 50 * 1024 * 1024 { return Err("导出文件超过50MB".into()); }
+    check_support_size(&kind, contents.len())?;
     let value: serde_json::Value = serde_json::from_str(&contents).map_err(|_| "导出内容不是有效JSON")?;
     let actual_format = value.get("format").and_then(|v| v.as_str());
     if actual_format != Some(format) && !(kind == "diagnostics" && matches!(actual_format, Some("chat3d-full-diagnostics-v1" | "chat3d-diagnostics-v2"))) { return Err("导出格式不匹配".into()); }

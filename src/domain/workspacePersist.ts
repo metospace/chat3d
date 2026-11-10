@@ -50,13 +50,13 @@ function prepareSnapshot(
   const next: Record<string, unknown> = {
     doc: snapshot.doc,
     messages:
-      tier === 'strip-images'
+      tier !== 'normal'
         ? snapshot.messages.map(stripMessageImages)
         : snapshot.messages,
     selection: snapshot.selection,
     dirty: snapshot.dirty,
     composerText: snapshot.composerText,
-    composerImages: tier === 'strip-images' ? [] : snapshot.composerImages,
+    composerImages: tier !== 'normal' ? [] : snapshot.composerImages,
     lastRun: snapshot.lastRun,
     pendingBatch: snapshot.pendingBatch,
     pendingResult: snapshot.pendingResult,
@@ -89,7 +89,7 @@ export function storageReclaimNotice(tier: WorkspaceStorageTier): string | null 
     return '本地空间不足：已跳过参考图写入，文字与场景几何仍会保存。建议下载工作台备份。';
   }
   if (tier === 'omit-trashed') {
-    return '本地空间不足：已跳过回收站中的会话数据以释放空间。未删除的会话与场景仍会保存。建议下载工作台备份。';
+    return '本地空间不足：已跳过参考图及回收站中的会话数据以释放空间。未删除的会话文字与场景仍会保存。建议下载工作台备份。';
   }
   return null;
 }

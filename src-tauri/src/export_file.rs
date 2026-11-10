@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    io::Write,
     path::PathBuf,
     sync::Mutex,
     time::{Duration, Instant},
@@ -130,8 +129,7 @@ pub(crate) async fn commit_export_file(
 }
 
 fn write_export(path: &std::path::Path, contents: &[u8]) -> Result<(), String> {
-    let mut file = std::fs::File::create(path).map_err(|e| e.to_string())?;
-    file.write_all(contents).and_then(|_| file.sync_all()).map_err(|e| e.to_string())
+    crate::atomic_export::write_export(path, contents).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

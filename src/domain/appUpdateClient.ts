@@ -3,6 +3,8 @@ import {create} from 'zustand';
 import {APP_VERSION, classifyUpdaterError, deriveUpdateView, publicUpdateError, reduceUpdateProgress, type ReleaseNotice, type UpdateProgressEvent, type UpdateProgressState, type UpdateView} from './appUpdate';
 import {cleanNotes, isNewerVersion, parseVersion} from '../../shared/app-version.mjs';
 import {DOWNLOAD_PROBE_BYTES, candidateDownloadUrls, installerTotalBytes, platformMirrorList, sameDownloadUrl, selectFastestDownloadUrl, type DownloadProbeSample} from '../../shared/update-mirrors.mjs';
+import {relaunch} from '@tauri-apps/plugin-process';
+import {flushWorkspace,useWorkspaceStore,anySessionRunning} from '../workspace';
 
 const DISMISS_KEY = 'chat3d.update.dismissed';
 const REMIND_KEY = 'chat3d.update.remind';
@@ -260,9 +262,16 @@ async function installDesktopUpdate(onProgress: (progress: UpdateProgressState) 
 }
 
 export async function relaunchInstalledUpdate() {
-  if (useAppUpdate.getState().busy) return;
-  const {relaunch} = await import('@tauri-apps/plugin-process');
-  await relaunch();
+  if (useAppUpdate.getState().busy || anySessionRunning()) return;
+  try {
+    await flushWorkspace();
+    const workspace=useWorkspaceStore.getState();
+    if(!workspace.ready||workspace.saving||workspace.error)throw Error('工作区尚未保存成功，请先下载工作台备份并处理保存异常，再重启');
+    if(useAppUpdate.getState().busy||anySessionRunning())return;
+    await relaunch();
+  } catch(error) {
+    const message=publicUpdateError(error);useAppUpdate.setState({phase:'installed',progress:`已就绪，尚未重启。${message}`,error:message});
+  }
 }
 
 export async function applyAppUpdate() {

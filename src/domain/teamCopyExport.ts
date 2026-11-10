@@ -1,5 +1,5 @@
 import {ASSET_SIZE_ERROR,MAX_ASSET_BYTES,parseModelAsset} from './modelAssets';
-import {parseProject,serializeProject} from './project';
+import {parseProject,serializeProject,MAX_TEAM_SCENE_BYTES} from './project';
 import type {TeamVersion} from './teamLibrary';
 import {publishedCategoryPath} from './teamCategories';
 
@@ -17,10 +17,10 @@ export function buildTeamCopyExport(item:TeamVersion):string{
   if(text.length>MAX_ASSET_BYTES||new TextEncoder().encode(text).length>MAX_ASSET_BYTES)throw Error(ASSET_SIZE_ERROR);
   return text;
  }
- const doc=parseProject(JSON.stringify(item.payload));
+ const doc=parseProject(JSON.stringify(item.payload),MAX_TEAM_SCENE_BYTES);
  doc.projectId=crypto.randomUUID();
  doc.revision=0;
- return serializeProject(doc,undefined,undefined,teamCategoryPath);
+ return serializeProject(doc,undefined,MAX_TEAM_SCENE_BYTES,teamCategoryPath);
 }
 
 export function teamCopyFilename(item:TeamVersion):string{

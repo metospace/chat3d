@@ -1,8 +1,8 @@
 import {isThumbnailImage} from './thumbnailImage';
 import {validCategory} from './libraryMetadata';
 import {validPublishedCategoryPath} from './teamCategories';
-import {validateAssetContract,type AssetContract} from './assetContract';
-import {Euler,Matrix4,Quaternion,Vector3} from 'three';
+import {validateAssetContract,nodeMatrix,type AssetContract} from './assetContract';
+import {Box3,Euler,Matrix4,Quaternion,Vector3} from 'three';
 import {assemblyBounds} from './assemblyEditing';
 import {validateDocument,SCHEMA_VERSION,type SceneDocument,type SceneNode,type Material,type Vec3} from './types';
 import type {Command} from './commands';
@@ -23,7 +23,7 @@ const assetSizeError=(maxBytes:number)=>`资产超过${maxBytes/1024/1024} MiB�
 export const ASSET_SIZE_ERROR=assetSizeError(MAX_ASSET_BYTES);
 export function assetDocument(asset:ModelAssetVersion):SceneDocument{return {schemaVersion:SCHEMA_VERSION,projectId:asset.id,revision:0,unit:'m',upAxis:'Y',nodes:structuredClone(asset.nodes),materials:structuredClone(asset.materials),assets:[],...(asset.animation?{animation:structuredClone(asset.animation)}:{})};}
 export function selectedAssetNodes(doc:SceneDocument,selection:string[]):SceneNode[]{const ids=new Set(selection),groups=new Set(doc.nodes.filter(n=>ids.has(n.id)&&n.assemblyId).map(n=>n.assemblyId));return doc.nodes.filter(n=>ids.has(n.id)||(n.assemblyId&&groups.has(n.assemblyId)));}
-export function createModelAsset(doc:SceneDocument,selection:string[],details:{name:string;category:AssetCategory;front?:ModelAssetVersion['front'];id?:string;version?:number}):ModelAssetVersion{
+export function createModelAsset(doc:SceneDocument,selection:string[],details:{name:string;category:AssetCategory;front?:ModelAssetVersion['front'];id?:string;version?:number;previous?:ModelAssetVersion}):ModelAssetVersion{
  const picked=selectedAssetNodes(doc,selection);if(!picked.length)throw Error('请选择零件；选中组件中的一个零件会保存整个组件');
  if(picked.some(n=>!n.geometry||n.kind!=='primitive'||n.parentId!==null))throw Error('首版资产库只支持平级可编辑几何；请先转换层级或外部引用模型');
  if(doc.unit!=='m'||doc.upAxis!=='Y')throw Error('资产库使用米制、Y轴向上，请先统一坐标');
@@ -37,6 +37,16 @@ export function createModelAsset(doc:SceneDocument,selection:string[],details:{n
  if(animation){animation.tracks=animation.tracks.filter(t=>t.targetIds.some(id=>ids.has(id))).map(t=>{t.targetIds=t.targetIds.filter(id=>ids.has(id));if(t.channel==='follow'&&!ids.has(t.sourceId!))throw Error('动画跟随源在所选资产之外，请一并保存跟随源');if(t.pivot)t.pivot=new Vector3(...t.pivot).sub(origin).toArray() as Vec3;return t;});}
  const asset:ModelAssetVersion={format:'chat3d-model-asset',schemaVersion:1,id:details.id??makeId(),version:details.version??1,name:details.name.trim(),category:details.category,front:details.front??'+Z',createdAt:new Date().toISOString(),unit:'m',upAxis:'Y',quality:'unreviewed',size,nodes,materials,externalConnectionsRemoved:removed};
  if(animation?.tracks.length)asset.animation=animation;
+ if(details.previous?.contract){
+  const previous=details.previous,contract=structuredClone(previous.contract!),byId=new Map(nodes.map(n=>[n.id,n]));
+  for(const anchor of contract.anchors){const old=previous.nodes.find(n=>n.id===anchor.nodeId),current=byId.get(anchor.nodeId);if(!old||!current||JSON.stringify(old.geometry)!==JSON.stringify(current.geometry))throw Error(`连接点“${anchor.name}”的零件已删除或几何已变化，请先在资产详情调整连接点，再保存新版本`);}
+  if(contract.clearance){
+   const deltas=previous.nodes.map(old=>{const current=byId.get(old.id);if(!current)throw Error('维护空间关联零件已删除，请先在资产详情调整维护空间');return nodeMatrix(current).multiply(nodeMatrix(old).invert());});
+   const delta=deltas[0];if(deltas.some(m=>m.elements.some((v,i)=>Math.abs(v-delta.elements[i])>1e-7)))throw Error('零件相对位置已变化，无法迁移维护空间；请先在资产详情调整维护空间');
+   const bounds=new Box3(new Vector3(...contract.clearance.min),new Vector3(...contract.clearance.max)).applyMatrix4(delta);contract.clearance={min:bounds.min.toArray() as Vec3,max:bounds.max.toArray() as Vec3};
+  }
+  asset.contract=contract;
+ }
  validateModelAsset(asset);return asset;
 }
 export function validateModelAsset(asset:ModelAssetVersion):void{
