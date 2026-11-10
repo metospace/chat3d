@@ -11,7 +11,7 @@ This fix uses synthetic recipes, not a replay of the reported user task. The ori
 
 ## Limits retained
 
-Structured recipes still allow at most 100 distinct part definitions, 1,000 expanded parts, and 20 MiB of estimated expanded recipe data. The general assembly path retains its 2,000-total-part cap. Larger requests must be split along genuine component boundaries within existing scene/task budgets; the code neither truncates counts nor automatically fragments a continuous object. A single structured component beyond these limits remains unsupported.
+Structured recipes still allow at most 100 distinct part definitions, 1,000 expanded parts, and 100 MiB of estimated expanded recipe data. The general assembly path retains its 2,000-total-part cap. Larger requests must be split along genuine component boundaries within existing scene/task budgets; the code neither truncates counts nor automatically fragments a continuous object. A single structured component beyond these limits remains unsupported.
 
 Feature plans retain their existing 16-feature and 128-binding-object limits. Each feature binding still checks unique IDs belonging to the actual component. The per-feature node limit is now 1,000. Other unrelated limits, including pose-joint limits, are unchanged.
 
@@ -19,7 +19,7 @@ Two targeted retries per cached failure, cache size and patch-size limits, scene
 
 ## Verification
 
-Synthetic tests cover 160 repeated parts without count reduction; all feature IDs and restored metadata; local repair preserving other nodes; the wrong sweep field followed by a params-only correction; cumulative schema-to-domain recovery; the 1,000-part boundary and 20 MiB rejection; invalid retries leaving existing scenes untouched; and three unchanged failing turns stopping without edits. Existing tests cover stale scope/identity, retry exhaustion, cancellation, geometric rejection, and atomic rollback.
+Synthetic tests cover 160 repeated parts without count reduction; all feature IDs and restored metadata; local repair preserving other nodes; the wrong sweep field followed by a params-only correction; cumulative schema-to-domain recovery; the 1,000-part boundary and 100 MiB rejection; invalid retries leaving existing scenes untouched; and three unchanged failing turns stopping without edits. Existing tests cover stale scope/identity, retry exhaustion, cancellation, geometric rejection, and atomic rollback.
 
 Verified on 2026-10-26, Node 24.19.0, based on main `fd1487d86929abf6fc4fcd23f9649a218a406007`:
 

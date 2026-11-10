@@ -35,7 +35,10 @@ export function modelingProgramCommands(draft:SceneDocument,generated:SceneDocum
  if(draft.nodes.some(n=>n.connection&&removedIds.has(n.connection.targetId))||removed.some(n=>n.connection||n.poseRig||n.modelAsset))throw Error('目标有连接、关节或资产关联，请用局部编辑保留关系，不能整体重建');
  const imported=componentDraftCommand(doc,{name:args.name,brief:'参数化脚本生成，尚未视觉验收',position:args.position??[0,0,0]});
  if(imported.op!=='importComponentDraft')throw Error('参数化组件导入命令无效');
- serializeProject({...draft,nodes:[...draft.nodes.filter(n=>!removedIds.has(n.id)),...imported.nodes],materials:[...draft.materials,...imported.materials]},undefined,STRUCTURED_BYTES_LIMIT);
+ // STRUCTURED_BYTES_LIMIT (100 MiB) is the recipe budget for the NEW import only.
+ // The merged scene uses the real project cap (400 MiB) from serializeProject's default.
+ serializeProject({...doc,nodes:imported.nodes,materials:imported.materials,assets:[]},undefined,STRUCTURED_BYTES_LIMIT);
+ serializeProject({...draft,nodes:[...draft.nodes.filter(n=>!removedIds.has(n.id)),...imported.nodes],materials:[...draft.materials,...imported.materials]});
  return [...(removed.length?[{op:'delete' as const,targetIds:[...removedIds]}]:[]),imported];
 }
 

@@ -24,7 +24,7 @@ export function validateBlueprintDimensions(plan:ObjectBlueprint,nodes:SceneNode
  if(issues.length)throw new StructuredValidationError(issues,'dimensions',issues.length);
 }
 export function validateStructuredRecipe(plan:ObjectBlueprint,definition:AssemblyDefinition,features:FeatureParts[],requiredKeys?:string[]):void{
- validateBlueprints([plan]);if(!Array.isArray(definition.parts)||!definition.parts.length||definition.parts.length>100)throw Error('单体需1–100条部件定义');let expanded=0,bytes=0;for(const p of definition.parts){const n=p.repeat?.count??1;if(!Number.isSafeInteger(n)||n<1||n>STRUCTURED_PART_LIMIT)throw Error('repeat.count需为1–1000整数');expanded+=n;bytes+=new TextEncoder().encode(JSON.stringify(p)).length*n;if(expanded>STRUCTURED_PART_LIMIT||bytes>STRUCTURED_BYTES_LIMIT)throw Error('单体展开超过1000零件或20MB预算，保留要求的数量，按真实组件分批生成；不要截断或减少数量');}
+ validateBlueprints([plan]);if(!Array.isArray(definition.parts)||!definition.parts.length||definition.parts.length>100)throw Error('单体需1–100条部件定义');let expanded=0,bytes=0;for(const p of definition.parts){const n=p.repeat?.count??1;if(!Number.isSafeInteger(n)||n<1||n>STRUCTURED_PART_LIMIT)throw Error('repeat.count需为1–1000整数');expanded+=n;bytes+=new TextEncoder().encode(JSON.stringify(p)).length*n;if(expanded>STRUCTURED_PART_LIMIT||bytes>STRUCTURED_BYTES_LIMIT)throw Error(`单体展开超过1000零件或${STRUCTURED_BYTES_LIMIT/(1024*1024)}MB预算，保留要求的数量，按真实组件分批生成；不要截断或减少数量`);}
  const issues:string[]=[],partIssues:string[]=[],dimensionIssues:string[]=[];let localNodes:SceneNode[]|undefined;
  // Bindings and method compatibility do not depend on successful mesh construction.
  if(new Set(definition.parts.map(p=>p.name)).size!==definition.parts.length)issues.push('部件名称必须唯一，重复件请使用repeat');
