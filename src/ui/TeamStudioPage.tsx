@@ -6,12 +6,12 @@ import {TeamLibraryPane} from './TeamLibraryPane';
 import {StudioPage} from './studio/StudioPage';
 import {StudioPageHeader} from './studio/StudioPageHeader';
 
-export function TeamStudioPage({onCopied}:{onCopied?:()=>void}){
+export function TeamStudioPage({onLocate}:{onLocate?:(kind:'asset'|'scene',ids:string[])=>void}){
  const client=useSyncExternalStore(subscribeTeamSession,getTeamSession,getTeamSession),[kind,setKind]=useState<'asset'|'scene'>('asset');
- return <StudioPage className="resource-page team-studio-page" aria-label="团队共享">
+ return <StudioPage className="resource-page team-studio-page" aria-label="团队库">
  <StudioPageHeader eyebrow="协作资源" title="团队库" icon={<Share1Icon aria-hidden/>}/>
  {client&&<div className="resource-toolbar team-studio-toolbar"><div className="resource-segments" role="group" aria-label="团队库类型"><Button aria-pressed={kind==='asset'} onClick={()=>setKind('asset')}><CubeIcon/>团队资产</Button><Button aria-pressed={kind==='scene'} onClick={()=>setKind('scene')}><LayersIcon/>团队场景</Button></div></div>}
- <section className="team-studio-body"><TeamLibraryPane kind={kind} onCopied={onCopied}/></section>
+ <section className="team-studio-body"><TeamLibraryPane kind={kind} onLocate={onLocate}/></section>
  <footer className="resource-footer team-studio-footer"><span>团队原件保存在公司服务；本机保存独立副本与版本关联。所有发布和更新都需要手动确认。</span></footer>
  </StudioPage>;
 }

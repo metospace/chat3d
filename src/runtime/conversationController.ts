@@ -11,7 +11,7 @@ import {checkEditScope,type EditScope} from '../domain/editScope';
 import {continueDraft,type DraftBaseline} from '../domain/draftContinuation';
 import {userEditScope} from '../domain/conversationScope';
 import {evaluateDetailAcceptance} from '../domain/detailAcceptance';
-import {generationFailureMessage,sanitizeGenerationText} from '../domain/generationFailure';
+import {generationFailureMessage,generationStopMessage,sanitizeGenerationText,STOP_PREVIEW_NEXT,STOP_USAGE_NOTE,type StopResult} from '../domain/generationFailure';
 import {makeId} from '../util/ids';
 import {useEditorStore,type EditorStore} from '../store';
 import {captureIsolatedSceneEvidence,isIsolatedCaptureAvailable} from '../scene/capture';
@@ -85,7 +85,7 @@ function createConversationController(editor:EditorStore) {
   const release=()=>{reservations.delete(editor);ui.setState({running:false});useConversationRuns.setState({activeCount:reservations.size});};
   const markSteering=(id:string,status:'queued'|'received'|'interrupted')=>editor.setState(state=>({messages:state.messages.map(m=>m.id===id?{...m,steering:{runId:runMessageId.current??'',status}}:m)}));
   const clearControl=()=>{controlRef.current=null;setCanSteer(false);editor.setState(state=>({messages:state.messages.map(m=>m.steering?.runId===runMessageId.current&&m.steering.status==='queued'?{...m,steering:{...m.steering,status:'interrupted' as const}}:m)}));};
-  const finishRun=(status:'preview'|'completed'|'failed'|'stopped')=>{const id=runMessageId.current,current=queuedActivity??ui.getState().agentActivity??store().lastRun;const latest=current?{...current,diagnostics:(id?diagnosticRuns.get(id):undefined)??current.diagnostics}:undefined;if(latest)store().setLastRun(latest);if(id){store().updateMessageRun(id,{status,endedAt:Date.now(),activity:latest});diagnosticRuns.delete(id);}};
+  const finishRun=(status:'preview'|'completed'|'failed'|'stopped',stopResult?:StopResult)=>{const id=runMessageId.current,current=queuedActivity??ui.getState().agentActivity??store().lastRun;const latest=current?{...current,diagnostics:(id?diagnosticRuns.get(id):undefined)??current.diagnostics}:undefined;if(latest)store().setLastRun(latest);if(id){store().updateMessageRun(id,{status,endedAt:Date.now(),activity:latest,...(stopResult?{stopResult}:{})});diagnosticRuns.delete(id);}};
   const recordFailure=(reason:string)=>{
     const now=Date.now(),previous=queuedActivity??ui.getState().agentActivity;
     const activity:AgentActivity=previous??{title:'本次调整未完成',turn:0,toolCalls:0,characters:0,inputTokens:0,outputTokens:0,usageReported:false,lastEventAt:now,plan:[],events:[],timings:[]};
@@ -101,7 +101,7 @@ function createConversationController(editor:EditorStore) {
     const message=generationFailureMessage(reason);
     finishRun('failed');store().setPreviewDoc(null);store().setPendingBatch(null);store().setPendingResult(null);store().setAiError(message);store().setAiStatus('error');store().addAssistantMessage(message,undefined,reason);
   };
-  const finalize = (batch: CommandBatch, prepared?: ExecutionResult, blenderImport=false) => {
+  const finalize = (batch: CommandBatch, prepared?: ExecutionResult, blenderImport=false, stopResult?:StopResult) => {
     store().setAiStatus('validating');
     if (store().doc.revision !== batch.baseRevision || store().doc.projectId !== batch.projectId) { fail('场景已变化，本次结果未应用。请重新发送'); return; }
     const result = prepared ?? applyBatch(store().doc, {operations:batch.operations});
@@ -116,16 +116,19 @@ function createConversationController(editor:EditorStore) {
     batch={...batch,summary:sanitizeGenerationText(batch.summary,{previewRetained:true}),qualityIssues:batch.qualityIssues?.map(issue=>sanitizeGenerationText(issue,{fallback:'本次调整有未完成的内容，可继续描述要修改的地方。'})),continuation:batch.continuation?sanitizeGenerationText(batch.continuation,{fallback:'请继续调整当前预览，保留已完成的部分。'}):undefined};
     if(parentDraft.current&&batch.requestId!==parentDraft.current.batch.requestId){const priorId=parentDraft.current.batch.requestId;editor.setState(state=>({messages:state.messages.map(m=>m.batch?.requestId===priorId?{...m,outcome:'superseded' as const}:m)}));}
     store().setPendingBatch(batch); store().setPendingResult(result); store().setPreviewDoc(result.doc);
-    store().setAiStatus('previewing'); finishRun('preview'); store().addAssistantMessage(sanitizeGenerationText(batch.summary,{previewRetained:true}), batch);
+    store().setAiStatus('previewing'); finishRun(stopResult?'stopped':'preview',stopResult); store().addAssistantMessage(sanitizeGenerationText(batch.summary,{previewRetained:true}), batch);
   };
-  const preserveCheckpoint = (reason:string) => {
+  const preserveCheckpoint = (reason:string,stopped=false) => {
     const cp=restoringCheckpoint?null:checkpointRef.current;
-    if(!cp&&parentDraft.current&&parentDraft.current.batch.baseRevision===store().doc.revision&&parentDraft.current.batch.projectId===store().doc.projectId){const parent=parentDraft.current;store().setPendingBatch(parent.batch);store().setPendingResult(parent.result);store().setPreviewDoc(parent.result.doc);store().setAiStatus('previewing');store().setAiError(generationFailureMessage(reason,{previewRetained:true}));finishRun('stopped');store().addAssistantMessage(generationFailureMessage(reason,{previewRetained:true}),undefined,reason);return true;}
+    if(!cp&&parentDraft.current&&parentDraft.current.batch.baseRevision===store().doc.revision&&parentDraft.current.batch.projectId===store().doc.projectId){
+      const parent=parentDraft.current,message=stopped?generationStopMessage('previous')+STOP_PREVIEW_NEXT:generationFailureMessage(reason,{previewRetained:true});
+      store().setPendingBatch(parent.batch);store().setPendingResult(parent.result);store().setPreviewDoc(parent.result.doc);store().setAiStatus('previewing');store().setAiError(stopped?null:message);finishRun(stopped?'stopped':'failed',stopped?'previous':undefined);store().addAssistantMessage(message,undefined,stopped?undefined:reason);return true;
+    }
     if(!cp || cp.batch.baseRevision!==store().doc.revision || cp.batch.projectId!==store().doc.projectId)return false;
-    const message=generationFailureMessage(reason,{previewRetained:true});
+    const message=stopped?generationStopMessage('checkpoint')+STOP_PREVIEW_NEXT:generationFailureMessage(reason,{previewRetained:true});
     const batch={...cp.batch,summary:sanitizeGenerationText(cp.batch.summary,{previewRetained:true})+'\n'+message};
     restoringCheckpoint=true;
-    try{finalize(batch,cp.result);if(store().aiStatus==='previewing'){store().setAiError(message);editor.setState(state=>({messages:state.messages.map((m,index)=>index===state.messages.length-1?{...m,error:reason}:m)}));}}finally{restoringCheckpoint=false;}
+    try{finalize(batch,cp.result,false,stopped?'checkpoint':undefined);if(!stopped&&store().aiStatus==='previewing'){store().setAiError(message);editor.setState(state=>({messages:state.messages.map((m,index)=>index===state.messages.length-1?{...m,error:reason}:m)}));}}finally{restoringCheckpoint=false;}
     return true;
   };
   const send = async (sendMode:'guide'|'question'|'later'='guide',options:SendOptions={}) => {
@@ -134,7 +137,7 @@ function createConversationController(editor:EditorStore) {
     const text = input.trim();
     if (!text && !attachments.length) return;
     if(runningRef.current){
-      if(sendMode==='later'){const id=store().addUserMessage(text||'请根据参考附件建模',[...attachments]);editor.setState(state=>({messages:state.messages.map(m=>m.id===id?{...m,queuedTask:{status:'waiting' as const}}:m)}));setInput('');setAttachments([]);setNotice('');return;}
+      if(sendMode==='later'){const id=store().addUserMessage(text||'请根据参考附件建模',[...attachments]);editor.setState(state=>({messages:state.messages.map(m=>m.id===id?{...m,queuedTask:{status:'waiting' as const}}:m)}));setInput('');setAttachments([]);setNotice('已暂存，尚未送入当前任务。点击“引导”才会送入当前任务；不会自动发送。');return;}
       if(!controlRef.current){setNotice('当前请求暂不能接收引导，输入已保留；可停止后继续');return;}
       const id=store().addUserMessage(text||'请根据补充参考附件调整',[...attachments]);markSteering(id,'queued');
       try{if(!controlRef.current.steer(id,referenceText(text||'请根据补充参考附件调整',attachments),attachments.filter(isReferenceImage),sendMode)){editor.setState(state=>({messages:state.messages.filter(m=>m.id!==id)}));setNotice('当前任务已收尾，输入已保留，请直接发送下一条');return;}}catch{markSteering(id,'interrupted');setNotice('补充要求未送达，输入已保留');return;}
@@ -277,17 +280,16 @@ function createConversationController(editor:EditorStore) {
     setAgentActivity(a=>a?{...a,timings:a.timings.map(t=>t.endedAt===undefined?{...t,endedAt:Date.now(),failed:true,detail:'用户停止，操作未完成'}:t)}:a);
     runRef.current++; runningRef.current=false; clearControl();abortRef.current?.abort(); abortRef.current=null;
     if(timeoutRef.current) clearTimeout(timeoutRef.current);release();
-    if(preserveCheckpoint('你已停止生成；保留草稿不会继续调用模型')){setNotice('已停止，阶段草稿仍可查看。继续生成需另行发送描述');return;}
-    finishRun('stopped');
-    { store().setAiStatus('cancelled'); store().setPreviewDoc(null); } store().setAiError(null);
-    setNotice('已停止接收，场景未修改。服务端可能仍在处理，取消不保证退还用量');
-    
+    if(preserveCheckpoint('用户停止生成',true)){setNotice(STOP_USAGE_NOTE);return;}
+    finishRun('stopped','unchanged');
+    store().setPendingBatch(null);store().setPendingResult(null);store().setPreviewDoc(null);store().setAiError(null);store().setAiStatus('cancelled');
+    setNotice(generationStopMessage('unchanged')+STOP_USAGE_NOTE);
   };
   const promoteQueued=(id:string,mode:'guide'|'question')=>{
     const message=store().messages.find(m=>m.id===id&&m.queuedTask?.status==='waiting');
     if(!message||!controlRef.current||!runningRef.current)return;
     editor.setState(state=>({messages:state.messages.map(item=>{if(item.id!==id)return item;const {queuedTask,...rest}=item;return {...rest,steering:{runId:runMessageId.current??'',status:'queued' as const}};})}));
-    try{if(!controlRef.current.steer(id,referenceText(message.text,message.images??[]),(message.images??[]).filter(isReferenceImage),mode))throw Error('当前任务已收尾，请稍后发送');}
+    try{if(!controlRef.current.steer(id,referenceText(message.text,message.images??[]),(message.images??[]).filter(isReferenceImage),mode))throw Error('当前任务已收尾，请稍后发送');setNotice('补充要求已提交引导，等待当前任务接收。');}
     catch{editor.setState(state=>({messages:state.messages.map(item=>item.id===id?message:item)}));setNotice('引导未送达，消息仍在队列中，请稍后重新发送');}
   };
   const removeQueued=(id:string)=>{editor.setState(state=>({messages:state.messages.map(m=>m.id===id&&m.queuedTask?.status==='waiting'?{...m,queuedTask:{status:'cancelled' as const}}:m)}));ui.setState({removedQueueId:id});};

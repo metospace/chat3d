@@ -2,6 +2,13 @@ export interface GenerationFailureOptions {previewRetained?:boolean}
 const unchanged='本次调整未成功，场景未修改。';
 const retained='本次调整未成功，已保留之前的预览。';
 
+export type StopResult='unchanged'|'checkpoint'|'previous';
+export function generationStopMessage(result:StopResult){
+ return result==='checkpoint'?'已停止生成，已保留阶段草稿。':result==='previous'?'已停止本次调整，已保留之前的预览。':'已停止生成，场景未修改。';
+}
+export const STOP_PREVIEW_NEXT='可查看或放弃预览；不会自动继续生成。';
+export const STOP_USAGE_NOTE='服务端可能仍在处理，停止不保证退还用量。';
+
 /** Raw failures belong in task diagnostics, never in normal chat or preview text. */
 export function generationFailureMessage(error:unknown,options:GenerationFailureOptions={}):string {
  const raw=error instanceof Error?error.message:String(error??'');
@@ -25,7 +32,7 @@ export function generationFailureMessage(error:unknown,options:GenerationFailure
  if(/未接入模型代理|PROXY_UPSTREAM_DENIED|部署管理员|模型配置|baseURL|model.{0,10}(?:not found|does not exist)|\b404\b/i.test(raw))return outcome+'当前模型服务配置不可用，请检查模型配置或联系服务提供方后再发送。';
  if(/场景已变化/.test(raw))return '场景已变化，本次结果未应用。请根据当前场景重新描述要修改的地方。';
  if(/不允许新增|修改范围|范围外/.test(raw))return outcome+'本次修改超出了允许的范围，请调整修改范围或重新描述要修改的对象。';
- if(/已停止|用户停止|你已停止/.test(raw))return (options.previewRetained?'已停止本次调整，已保留之前的预览。':'已停止生成，场景未修改。')+'继续调整需由你重新发送描述，不会自动生成。';
+ if(/已停止|用户停止|你已停止/.test(raw))return generationStopMessage(options.previewRetained?'previous':'unchanged')+(options.previewRetained?STOP_PREVIEW_NEXT:'可恢复输入后手动发送。');
  return outcome+'本次请求在执行过程中出现错误，请展开“失败原因”查看具体信息；完整记录可在任务记录中导出。';
 }
 

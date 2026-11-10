@@ -6,11 +6,11 @@ import {PlusIcon,MagnifyingGlassIcon,DotsHorizontalIcon,Pencil1Icon,TrashIcon,Re
 import {useWorkspaceStore,createSession,switchSession,renameSession,trashSession,restoreSession,toggleSessionPinned,type WorkspaceSession} from '../workspace';
 import {useEditorStore} from '../store';
 import {sessionState,sessionStateLabel,sessionDateGroup} from './sessionPresentation';
-export function SessionSidebar({onClose}:{locked:boolean;onClose:()=>void}){
+export function SessionSidebar({onClose,initialTrash=false}:{locked:boolean;onClose:()=>void;initialTrash?:boolean}){
  const {sessions,activeId,error,ready}=useWorkspaceStore();
  const liveStatus=useEditorStore(s=>s.aiStatus);
  const [filter,setFilter]=useState<'all'|'review'|'draft'>('all');
- const [query,setQuery]=useState('');const [trash,setTrash]=useState(false);const [rename,setRename]=useState<WorkspaceSession|null>(null);const [name,setName]=useState('');const [remove,setRemove]=useState<WorkspaceSession|null>(null);
+ const [query,setQuery]=useState('');const [trash,setTrash]=useState(initialTrash);const [rename,setRename]=useState<WorkspaceSession|null>(null);const [name,setName]=useState('');const [remove,setRemove]=useState<WorkspaceSession|null>(null);
  const state=(s:WorkspaceSession)=>sessionState(s,s.id===activeId?liveStatus:undefined);
  const shown=sessions.filter(s=>!!s.deletedAt===trash&&s.title.toLowerCase().includes(query.toLowerCase())&&(trash||filter==='all'||state(s)===filter)).sort((a,b)=>Number(!!b.pinned)-Number(!!a.pinned)||b.updatedAt-a.updatedAt);
  return <>

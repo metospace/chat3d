@@ -23,7 +23,13 @@ try{
  const {ViewportPanel}=await server.ssrLoadModule('/src/ui/ViewportPanel.tsx');const {useEditorStore:editor,createInitialDoc}=await server.ssrLoadModule('/src/store.ts');
  const animation={version:1,name:'演示运动',duration:8,loop:true,tracks:[]};
  editor.setState({doc:{...createInitialDoc(),animation},selection:[],aiStatus:'idle',previewDoc:null});const ui=render(React.createElement(Theme,null,React.createElement(ViewportPanel)));
- fireEvent.click(ui.getByRole('button',{name:'播放动画'}));assert.ok(calls.includes('play'));fireEvent.click(ui.getByRole('button',{name:'暂停',exact:true}));assert.ok(calls.includes('pause'));fireEvent.change(ui.getByRole('slider',{name:'动画时间'}),{target:{value:'3'}});assert.deepEqual(calls.at(-1),['seek',3]);fireEvent.change(ui.getByRole('combobox',{name:'动画速度'}),{target:{value:'2'}});assert.deepEqual(calls.at(-1),['speed',2]);fireEvent.click(ui.getByRole('button',{name:'重置',exact:true}));assert.equal(calls.at(-1),'reset');console.log('PASS playback controls route play pause seek speed and reset to the viewport');passed++;
+ const original=editor.getState().doc;
+ fireEvent.click(ui.getByRole('button',{name:'播放动画'}));assert.equal(ui.getByRole('button',{name:'摆放工具'}).disabled,true);
+ fireEvent.click(ui.getByRole('button',{name:'暂停',exact:true}));
+ fireEvent.change(ui.getByRole('slider',{name:'动画时间'}),{target:{value:'3'}});
+ assert.equal(ui.getByRole('button',{name:'摆放工具'}).disabled,true);assert.match(ui.getByRole('note').textContent,/重置.*摆放/);assert.equal(globalThis.animationComposition,null);
+ fireEvent.click(ui.getByRole('button',{name:'重置后摆放'}));assert.equal(ui.getByRole('button',{name:'摆放工具'}).disabled,false);assert.equal(ui.queryByRole('note'),null);assert.equal(ui.getByRole('slider',{name:'动画时间'}).value,'0');assert.equal(editor.getState().doc,original);
+ console.log('PASS paused nonzero animation remains protected until adjacent reset restores placement without changing baseline');passed++;
  await act(async()=>editor.setState({aiStatus:'generating'}));assert.equal(ui.getByRole('button',{name:'播放动画'}).disabled,true);assert.equal(calls.at(-1),'reset');console.log('PASS generating resets playback and prevents concurrent manual animation preview');passed++;
  await act(async()=>editor.setState({aiStatus:'previewing',previewDoc:{...createInitialDoc(),animation}}));assert.ok(ui.getByText(/待确认动画/));assert.equal(ui.getByRole('button',{name:'播放动画'}).disabled,false);console.log('PASS pending animation preview can play before user confirmation');passed++;
  await act(async()=>editor.setState({aiStatus:'idle',previewDoc:null,doc:createInitialDoc()}));assert.equal(ui.queryByRole('button',{name:'播放动画'}),null);console.log('PASS clearing or switching to a static project removes stale playback controls');passed++;

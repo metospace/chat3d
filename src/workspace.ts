@@ -114,9 +114,11 @@ export function initializeWorkspace():Promise<void>{
     }catch(e){blocked=true;const first=record(snapshot(),'当前项目');useWorkspaceStore.setState({ready:true,activeId:first.id,sessions:[first],error:e instanceof Error?e.message:'会话恢复失败；已有存储不会被覆盖'});restore(first);}
   })();return initialized;
 }
-export function createSession(document?:EditorState['doc'],metadata:Partial<Pick<WorkspaceSession,'moduleKind'|'assetSource'|'assetCatalogVersion'|'assetCategory'|'title'|'sceneCategory'|'libraryDescription'|'libraryMetadataRevision'|'librarySavedAt'|'savedRevision'>>={}):boolean{
-  if(!useWorkspaceStore.getState().ready||blocked)return false;
-  capture();const next={...record(document?{...fresh(),doc:document}:fresh(),metadata.title??'新建会话'),...metadata};const w=useWorkspaceStore.getState();useWorkspaceStore.setState({sessions:[next,...w.sessions],activeId:next.id});restore(next);schedule();return true;
+export function createSession(document?:EditorState['doc'],metadata:Partial<Pick<WorkspaceSession,'moduleKind'|'assetSource'|'assetCatalogVersion'|'assetCategory'|'title'|'sceneCategory'|'libraryDescription'|'libraryMetadataRevision'|'librarySavedAt'|'savedRevision'>>={},options:{activate?:boolean}={}):boolean{
+  const w=useWorkspaceStore.getState();if(!w.ready||blocked)return false;
+  const next={...record(document?{...fresh(),doc:document}:fresh(),metadata.title??'新建会话'),...metadata};
+  if(options.activate===false&&w.activeId){track(next);useWorkspaceStore.setState({sessions:[next,...w.sessions]});schedule();return true;}
+  capture();useWorkspaceStore.setState(state=>({sessions:[next,...state.sessions],activeId:next.id}));restore(next);schedule();return true;
 }
 export function updateLibrarySession(id:string,metadata:Partial<Pick<WorkspaceSession,'moduleKind'|'assetSource'|'assetCatalogVersion'|'assetCategory'|'librarySavedAt'|'savedRevision'|'sceneThumbnail'|'title'|'autoTitle'|'sceneCategory'|'libraryDescription'|'libraryMetadataRevision'>>):void{
  if(blocked)throw Error('请先解决工作区保存错误');

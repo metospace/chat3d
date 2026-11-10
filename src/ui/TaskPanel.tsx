@@ -6,6 +6,7 @@ import {conversationController} from '../runtime/conversationController';
 import type {ActivityTiming} from '../ai/modelingAgent';
 import {activityProgress,customerText,progressSteps} from '../domain/customerProgress';
 import {RunTrace} from './RunTrace';
+import {generationStopMessage,STOP_PREVIEW_NEXT} from '../domain/generationFailure';
 import {useEffect,useRef,useState} from 'react';
 import {useEditorStore,type EditorStore} from '../store';
 import {useStore} from 'zustand';
@@ -31,8 +32,23 @@ export function TaskPanel({onConversation,editor}:{onConversation:()=>void;edito
  const failureTiming=failureActivity?.timings.reduce<ActivityTiming|undefined>((current,timing)=>
    timing.failed&&(!current||(timing.endedAt??timing.startedAt)>=(current.endedAt??current.startedAt))?timing:current,undefined);
  const hasFailureDetail=!!aiError||!!failureTiming||failureActivity?.outcome==='failed'||(!busy&&latest?.status==='failed');
- const title=busy?(lastRun?.phase?progress.label:customerText(lastRun?.title)):pending?(pendingBatch?.taskStatus==='partial'?'未完成，已保留阶段草稿':pendingBatch?.incomplete||pendingBatch?.qualityIssues?.length?'预览已生成，仍需核对':'模型已生成，请检查预览'):aiStatus==='error'||latest?.status==='failed'?'这次处理未完成':aiStatus==='cancelled'||latest?.status==='stopped'?'已停止，已生成的内容保留':outcome?.outcome==='applied'?'修改已应用到场景':outcome?.outcome==='discarded'?'这次预览已放弃':latest?.mode==='demo'?'历史模拟记录已结束 · 当前无运行任务':lastRun||latest?'本次处理已结束':manualHistory.length?(past.some(e=>e.source!=='ai')?'修改记录已更新':'修改已撤销'):'还没有建模任务';
- const next=busy?'正在继续处理，可返回对话补充要求或停止。':pending?(pendingBatch?.taskStatus==='partial'?'当前任务尚未完成，可继续处理剩余问题；也可保留或放弃阶段结果。':'检查模型后选择应用或放弃。应用不等于质量验收通过。'):aiStatus==='error'?'回到对话查看提示，确认后再继续。不会自动重试。':'可以继续提出修改要求，或保存当前模型。';
+ const stopped=latest?.status==='stopped',stopResult=latest?.stopResult;
+ const retainedStop=pending&&stopped&&stopResult&&stopResult!=='unchanged'?stopResult:undefined;
+ const unchangedStop=aiStatus==='cancelled'||stopped&&stopResult==='unchanged';
+ let title:string;
+ if(busy)title=lastRun?.phase?progress.label:customerText(lastRun?.title);
+ else if(retainedStop)title=generationStopMessage(retainedStop);
+ else if(pending)title=pendingBatch?.taskStatus==='partial'?'未完成，已保留阶段草稿':pendingBatch?.incomplete||pendingBatch?.qualityIssues?.length?'预览已生成，仍需核对':'模型已生成，请检查预览';
+ else if(aiStatus==='error'||latest?.status==='failed')title='这次处理未完成';
+ else if(unchangedStop)title=generationStopMessage('unchanged');
+ else if(outcome?.outcome==='applied')title='修改已应用到场景';
+ else if(outcome?.outcome==='discarded')title='这次预览已放弃';
+ else if(stopped)title='已停止';
+ else if(latest?.mode==='demo')title='历史模拟记录已结束 · 当前无运行任务';
+ else if(lastRun||latest)title='本次处理已结束';
+ else if(manualHistory.length)title=past.some(e=>e.source!=='ai')?'修改记录已更新':'修改已撤销';
+ else title='还没有建模任务';
+ const next=busy?'正在继续处理，可返回对话暂存补充要求或停止。':retainedStop?STOP_PREVIEW_NEXT:pending?(pendingBatch?.taskStatus==='partial'?'当前任务尚未完成，可继续处理剩余问题；也可保留或放弃阶段结果。':'检查模型后选择应用或放弃。应用不等于质量验收通过。'):unchangedStop?'可回到对话恢复本轮输入；不会自动继续生成。':aiStatus==='error'?'回到对话查看提示，确认后再继续。不会自动重试。':'可以继续提出修改要求，或保存当前模型。';
  const cancelDiagnosticExport=()=>{exportController.current?.abort();exportController.current=null;setPreparing(false);setExporting(false);setExportNotice('已取消诊断准备；模型任务不受影响。');};
  const exportDiagnostics=async()=>{
   if(exportController.current)return;
@@ -51,10 +67,10 @@ export function TaskPanel({onConversation,editor}:{onConversation:()=>void;edito
   }finally{if(exportController.current===controller){exportController.current=null;setPreparing(false);setExporting(false);}}
  };
  return <section className="task-panel customer-task-panel" aria-label="任务记录">
- <header className="task-panel-intro"><ActivityLogIcon/><h2>任务与执行记录</h2><p>当前进展、处理结果和接下来要做的事。</p></header>
+ <header className="task-panel-intro"><ActivityLogIcon/><h2>任务记录</h2><p>当前进展、处理结果和接下来要做的事。</p></header>
  <section className={`customer-current ${busy?'is-running':''}`} aria-label="当前任务状态" data-phase={progress.phase} data-model-state={progress.modelState}><span className="customer-status">{busy?progress.label:pending?'等待应用':'当前状态'}</span><h3>{title}</h3>{progress.modelEditAgeSeconds!==undefined&&<p aria-label="距上次模型修改">距上次模型修改 {progress.modelEditAgeSeconds} 秒</p>}{progress.reviewNote&&<p>{progress.reviewNote}</p>}<p>{next}</p><button onClick={onConversation}>{pending?'查看预览':busy?'返回对话':'前往对话'}</button></section>
  {(lastRun||latest)&&<div className="customer-facts"><div><strong>{elapsed}</strong><span>本次用时</span></div><div><strong>{done}</strong><span>已完成步骤</span></div></div>}
- {(aiError||failed>0)&&<section className="customer-notice" aria-label="需要留意"><h3>需要留意</h3><p>{aiError?customerText(aiError,'处理遇到问题，请返回对话查看'): `${failed} 个处理步骤没有完成${busy?'，当前仍在继续处理':'，请检查保留结果'}。`}</p></section>}
+ {(aiError||failed>0&&!stopped)&&<section className="customer-notice" aria-label="需要留意"><h3>需要留意</h3><p>{aiError?customerText(aiError,'处理遇到问题，请返回对话查看'): `${failed} 个处理步骤没有完成${busy?'，当前仍在继续处理':pending?'，请检查保留结果':''}。`}</p></section>}
  {hasFailureDetail&&<details className="customer-section"><summary>技术失败详情</summary><p className="task-footnote">界面仅显示错误与最近 4 条事件摘要（各最多 500 字）；完整结构化记录请下载诊断文件，可能包含模型内容或脚本。</p><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{sanitizeDiagnostic([aiError?.slice(0,500),failureTiming?.detail?.slice(0,500),...(failureActivity?.events??[]).slice(-4).map(event=>event.slice(0,500))].filter(Boolean).join('\n'),targetEditor.getState().aiConfig?.apiKey)}</pre></details>}
  {pending&&<p className="task-footnote">当前展示的是预览；尚未写入正式场景。</p>}
  {lastRun?.requirements&&<section className="customer-section"><RequirementList report={lastRun.requirements}/></section>}

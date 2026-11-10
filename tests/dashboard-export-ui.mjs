@@ -11,23 +11,24 @@ globalThis.getComputedStyle=dom.window.getComputedStyle;
 globalThis.ResizeObserver=class{observe(){}unobserve(){}disconnect(){}};
 globalThis.IntersectionObserver=class{observe(){}disconnect(){}};
 HTMLElement.prototype.scrollIntoView=()=>{};
-const {render,fireEvent,waitFor,cleanup,act}=await import('@testing-library/react');
+const {render,fireEvent,waitFor,cleanup,act,within}=await import('@testing-library/react');
 let finish,fail;
 globalThis.dashboardExportGate=()=>new Promise((resolve,reject)=>{finish=resolve;fail=reject;});
 const server=await createServer({server:{middlewareMode:true,hmr:false},appType:'custom',plugins:[{name:'dashboard-export-fixtures',enforce:'pre',transform(code,id){
  if(id.endsWith('/src/util/exportFile.ts'))return 'export async function exportFile(contents){await contents();return globalThis.dashboardExportGate();}';
  if(id.endsWith('/src/scene/exportHtml.ts'))return 'export async function exportHtml(){return "<html>scene</html>";} export function withHtmlViewerView(html){return html;}';
  if(id.endsWith('/src/ui/DashboardPresentation.tsx'))return 'export function DashboardPresentation(){return null;}';
- if(id.endsWith('/src/scene/dashboardRuntime.ts'))return 'export function buildDashboardExport(){return "<html>combined</html>";} export function inspectDashboardPlacement(){}';
+ if(id.endsWith('/src/scene/dashboardRuntime.ts'))return 'export function buildDashboardExport(){return "<html>combined</html>";} export function inspectDashboardPlacement(){return {description:"已检查布局"}}';
 }}]});
 const originalFetch=globalThis.fetch;
 const item={id:'board',version:1,name:'MES',description:'',system:'MES',archived:false,fileName:'board.html',entry:'index.html',created:''};
+let head=1;
 globalThis.fetch=async url=>{
  if(String(url).endsWith('/login'))return Response.json({token:'test',user:{id:'member',name:'Member',role:'member'}});
  if(String(url).endsWith('/source'))return new Response('source',{headers:{'Content-Length':'6'}});
  if(String(url).includes('/files?'))return new Response('html');
  if(String(url).endsWith('/board/1'))return Response.json({...item,files:[{path:'index.html',bytes:4}]});
- if(String(url).endsWith('/dashboards'))return Response.json([item]);
+ if(String(url).endsWith('/dashboards'))return Response.json([{...item,version:head}]);
  throw Error('Unexpected URL '+url);
 };
 try{
@@ -62,5 +63,17 @@ try{
  ui=render(React.createElement(DashboardSceneView,{onClose(){}}));
  await waitFor(()=>assert.equal(ui.getByRole('button',{name:'导出组合大屏 HTML'}).disabled,false));
  await exercise('导出组合大屏 HTML');cleanup();
+ const w=await server.ssrLoadModule('/src/workspace.ts'),{applyBatch}=await server.ssrLoadModule('/src/domain/commands.ts'),{createInitialDoc}=await server.ssrLoadModule('/src/store.ts');
+ await w.initializeWorkspace();const doc=applyBatch(createInitialDoc(),{operations:[{op:'createPrimitive',name:'模型',parentId:null,geometry:{type:'box',params:{width:1,height:1,depth:1}},materialId:'mat_blue',transform:{position:[0,0,0],scale:[1,1,1],rotationQuaternion:[0,0,0,1]}}]}).doc;
+ w.createSession(doc,{moduleKind:'asset',title:'不能接入的资产'});let navigated=0;
+ ui=render(React.createElement(DashboardPage,{onSceneLibrary:()=>navigated++}));fireEvent.click(await waitFor(()=>ui.getByRole('button',{name:'查看模板'})));
+ const attach=()=>ui.getByRole('button',{name:'接入当前场景'});await waitFor(()=>assert.equal(attach().disabled,true));fireEvent.click(ui.getByRole('button',{name:'创建/打开场景'}));assert.equal(navigated,1);
+ await act(async()=>w.createSession(doc,{moduleKind:'scene',title:'测试场景'}));const original=w.useWorkspaceStore.getState().activeId;
+ fireEvent.click(attach());let confirmation=ui.getByRole('dialog',{name:'接入当前场景'});assert.match(confirmation.textContent,/MES.*v1.*测试场景/);
+ await act(async()=>w.createSession(doc,{moduleKind:'scene',title:'另一个场景'}));fireEvent.click(within(confirmation).getByRole('button',{name:'确认接入'}));await waitFor(()=>assert.match(within(confirmation).getByRole('alert').textContent,/当前场景或模板预览已变化/));assert.equal(useEditorStore.getState().doc.dashboard,undefined);
+ fireEvent.click(within(confirmation).getByRole('button',{name:/取\s*消/}));await act(async()=>w.switchSession(original));
+ await act(async()=>useEditorStore.getState().setComposerText('未发送草稿'));fireEvent.click(attach());confirmation=ui.getByRole('dialog',{name:'接入当前场景'});head=2;fireEvent.click(within(confirmation).getByRole('button',{name:/确认接入$/}));
+ await waitFor(()=>assert.deepEqual(useEditorStore.getState().doc.dashboard,binding));assert.equal(useEditorStore.getState().composerText,'未发送草稿');await act(async()=>useEditorStore.getState().undo());assert.equal(useEditorStore.getState().doc.dashboard,undefined);await w.flushWorkspace();cleanup();
+ console.log('PASS preview rejects assets and stale scenes, binds the confirmed fixed version without touching the composer, and is undoable');
  console.log('PASS library title/stats/binding and source + HTML running, success, failure, cancel states');
 }finally{cleanup();globalThis.fetch=originalFetch;delete globalThis.dashboardExportGate;await server.close();dom.window.close();}

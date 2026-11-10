@@ -19,7 +19,7 @@ export function StudioAccount({disabled,loginOpen,onLoginOpenChange,onTeam}:{dis
  // receives the avatar, the copy and the chevron as an array of siblings.
  const identity=[
   <span key="avatar" className={`studio-account-avatar${user?' is-connected':''}`} aria-hidden="true">{user?Array.from(user.name.trim())[0]||<PersonIcon/>:<PersonIcon/>}</span>,
-  <span key="copy" className="studio-account-copy"><strong>{user?.name||(sessionStatus==='restoring'?'正在恢复账户':sessionStatus==='expired'?'登录已过期':'登录账户')}</strong><small>{user?`${role} · 已登录`:'访问团队资源'}</small></span>,
+  <span key="copy" className="studio-account-copy"><strong>{user?.name||(sessionStatus==='restoring'?'正在恢复账户':sessionStatus==='expired'?'登录已过期':'登录账户')}</strong><small>{user?`${role} · 已登录`:'访问团队库'}</small></span>,
   user?<ChevronUpIcon key="chevron" className="studio-account-chevron"/>:<ArrowRightIcon key="chevron" className="studio-account-chevron"/>,
  ];
  // antd menus render their own role=menuitem list; this popup carries the menu itself so it
@@ -30,7 +30,7 @@ export function StudioAccount({disabled,loginOpen,onLoginOpenChange,onTeam}:{dis
      <PopoverPanel anchor={triggerRef} open={menuOpen} onClose={()=>setMenuOpen(false)} label="账户菜单">
       <div className="studio-account-menu" role="menu" aria-label="账户菜单">
        <p className="studio-account-menu-label">{user.name} · {role}</p>
-       <button type="button" role="menuitem" className="studio-account-menu-item" onClick={()=>{setMenuOpen(false);onTeam();}}><PersonIcon/>查看团队资源</button>
+       <button type="button" role="menuitem" className="studio-account-menu-item" onClick={()=>{setMenuOpen(false);onTeam();}}><PersonIcon/>查看团队库</button>
        <div className="studio-account-menu-divider" role="separator"/>
        <button type="button" role="menuitem" className="studio-account-menu-item" disabled={busy} onClick={()=>void signOut()}><ExitIcon/>退出登录</button>
       </div>
@@ -43,7 +43,7 @@ export function StudioAccount({disabled,loginOpen,onLoginOpenChange,onTeam}:{dis
    <p className="app-modal-description">访问所属团队的资产与场景，让创作成果与同事共享。</p>
    {sessionStatus==='expired'&&<p className="studio-login-expired" role="status">团队登录已过期，请重新授权。本地项目与未发送内容均已保留。</p>}
    <TeamSessionLogin/>
-   <p className="studio-login-scope">账户登录用于访问团队资源。AI 模型服务在「设置 → 模型与执行」中单独配置。</p>
+   <p className="studio-login-scope">账户登录用于访问团队库和看板库。AI 模型服务在「设置 → 模型与执行」中单独配置。</p>
    <div className="studio-login-local"><strong>本地创作始终可用</strong><p>无需登录即可创建、编辑和保存本地项目。登录不会自动上传你的内容。</p><Button type="text" onClick={()=>onLoginOpenChange(false)}>继续使用本地资源<ArrowRightIcon/></Button></div>
   </PortalDialog>}
  </>;

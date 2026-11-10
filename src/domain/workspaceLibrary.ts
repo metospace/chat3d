@@ -1,15 +1,18 @@
 import {useEditorStore} from '../store';
 import {flushWorkspace,updateLibrarySession,useWorkspaceStore,syncAssetCatalogMetadata} from '../workspace';
 import {createModelAsset} from './modelAssets';
-import {saveModelAsset,readModelAsset,listModelAssets,updateModelAssetMetadata} from './modelAssetStorage';
+import {saveModelAsset,readModelAsset,listModelAssets,updateModelAssetMetadata,readAssetQuality} from './modelAssetStorage';
 import {normalizeLibraryMetadata,type LibraryMetadata} from './libraryMetadata';
+import {assetQualityStatus,validateAssetQuality} from './assetQuality';
+import {assertLibraryReady} from './libraryNavigation';
+import type {SceneDocument} from './types';
 const locked=()=>['capturing','context','generating','validating','previewing','applying'].includes(useEditorStore.getState().aiStatus);
 const inFlight=new Set<string>();
 export interface LibrarySaveProgress {stage:'preparing'|'thumbnail'|'validating'|'writing'|'workspace'|'complete';completed:number;total:number}
 export interface LibrarySaveOptions {metadata:LibraryMetadata;sessionId:string;projectId:string;metadataRevision?:number;onProgress?:(progress:LibrarySaveProgress)=>void}
-export async function saveLibraryProject(thumbnail?:(doc:import('./types').SceneDocument)=>Promise<string>,options?:LibrarySaveOptions):Promise<string>{
+export async function saveLibraryProject(thumbnail?:(doc:SceneDocument)=>Promise<string>,options?:LibrarySaveOptions):Promise<string>{
  const w=useWorkspaceStore.getState(),s=useEditorStore.getState(),session=w.sessions.find(x=>x.id===w.activeId&&!x.deletedAt);
- if(!session||!w.ready||w.error)throw Error('工作区尚未就绪或存在保存错误');
+ assertLibraryReady();if(!session)throw Error('没有可保存的当前项目');
  if(locked())throw Error('请先结束生成并应用或放弃预览');
  if(options&&(options.sessionId!==session.id||options.projectId!==s.doc.projectId))throw Error('当前项目已切换，请重新打开保存窗口');
  if(inFlight.has(session.id))throw Error('项目正在保存，请勿重复提交');
@@ -25,7 +28,7 @@ export async function saveLibraryProject(thumbnail?:(doc:import('./types').Scene
  let sceneThumbnail=session.sceneThumbnail;if(options?.onProgress)await progress('thumbnail',1);if(thumbnail&&doc.nodes.length)try{sceneThumbnail=await thumbnail(doc);}catch{}
  unchanged();if((useWorkspaceStore.getState().sessions.find(x=>x.id===session.id)?.libraryMetadataRevision??0)!==metadataRevision)throw Error('保存期间项目信息发生变化，请重新保存');
  if(options?.onProgress)await progress('writing',3);unchanged();updateLibrarySession(session.id,{moduleKind:'scene',title:metadata.name,autoTitle:false,sceneCategory:metadata.category,libraryDescription:metadata.description,libraryMetadataRevision:metadataRevision+1,sceneThumbnail,librarySavedAt:Date.now(),savedRevision:doc.revision});
- if(options?.onProgress)await progress('workspace',4);await flushWorkspace();if(useWorkspaceStore.getState().error)throw Error(useWorkspaceStore.getState().error!);options?.onProgress?.({stage:'complete',completed:5,total:5});return '场景已保存到场景库。引用资产版本保持固定。';
+ if(options?.onProgress)await progress('workspace',4);await flushWorkspace();assertLibraryReady();options?.onProgress?.({stage:'complete',completed:5,total:5});return `场景已保存到场景库：${metadata.name} r${doc.revision}。引用资产版本保持固定。`;
  }
  if(!doc.nodes.length)throw Error('资产还是空的，请先生成或导入模型');
  const source=session.assetSource,head=source?(await listModelAssets()).find(a=>a.id===source.id):undefined;
@@ -33,8 +36,9 @@ export async function saveLibraryProject(thumbnail?:(doc:import('./types').Scene
  if(options?.metadataRevision!==undefined&&(head?.metadataRevision??0)!==options.metadataRevision)throw Error('资产信息已在其他页面更新，请重新打开保存窗口');
  // A reopened/stale editing session must never replace newer catalog metadata implicitly.
  const metadata=normalizeLibraryMetadata(options?.metadata??(head?{name:head.name,category:head.category,description:head.description}:{name:session.title,category:session.assetCategory,description:session.libraryDescription}),kind);
- let version=source?.version??0,id=source?.id,metadataRevision=head?.metadataRevision??0;
+ let version=source?.version??0,id=source?.id,metadataRevision=head?.metadataRevision??0,qualityNotice='质量仍待验收。';
  if(head&&session.savedRevision===doc.revision&&session.librarySavedAt){
+ try{const record=await readAssetQuality(head.id,head.version);if(record)await validateAssetQuality(await readModelAsset(head.id,head.version),record);qualityNotice={unreviewed:'质量仍待验收。',pending:'质量仍有待验项。',needs_work:'本版验收记录有待修正项。',user_reviewed:'本版已记录人工复核。'}[assetQualityStatus(record)];}catch{qualityNotice='暂无法读取本版验收记录。';}
  if(options?.onProgress)await progress('writing',3);unchanged();const result=await updateModelAssetMetadata(head.id,metadata,head);metadataRevision=result.metadataRevision!;
  }else{
  let preview:string|undefined;if(options?.onProgress)await progress('thumbnail',1);if(thumbnail)try{preview=await thumbnail(doc);}catch{/* Geometry can still be saved without a thumbnail. */}
@@ -49,6 +53,6 @@ export async function saveLibraryProject(thumbnail?:(doc:import('./types').Scene
  await syncAssetCatalogMetadata({id:id!,name:metadata.name,category:metadata.category!,description:metadata.description,metadataRevision});
  updateLibrarySession(session.id,{moduleKind:'asset',title:metadata.name,autoTitle:false,assetSource:{id:id!,version},assetCatalogVersion:version,assetCategory:metadata.category,libraryDescription:metadata.description,libraryMetadataRevision:metadataRevision,librarySavedAt:Date.now(),savedRevision:doc.revision});
  await flushWorkspace();if(useWorkspaceStore.getState().error)throw Error('资产版本已保存，但编辑项目的状态保存失败，请到资产库重新打开，避免重复保存');
- options?.onProgress?.({stage:'complete',completed:5,total:5});return `资产已保存到资产库：${metadata.name} v${version}。质量仍待验收。`;
+ options?.onProgress?.({stage:'complete',completed:5,total:5});return `资产已保存到资产库：${metadata.name} v${version}。${qualityNotice}`;
  }finally{inFlight.delete(session.id);}
 }
