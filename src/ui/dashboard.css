@@ -211,14 +211,12 @@
 
 .dashboard-card-cover { position: relative; aspect-ratio: 16/9; margin: -20px -20px 18px; overflow: hidden; border-radius: 9px 9px 0 0; background: #071426; border-bottom: 1px solid var(--sc-border-subtle); }
 .dashboard-card-cover-button { display: block; position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; background: transparent; cursor: pointer; overflow: hidden; }
-.dashboard-card-cover-frame { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; border: 0; transform: scale(var(--dashboard-cover-scale)); transform-origin: left top; pointer-events: none; }
+.dashboard-card-cover-image { display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
 .dashboard-card-cover-status { position: absolute; inset: 0; display: grid; place-items: center; color: #a9b9ce; font: 12px var(--sc-font); }
 .dashboard-card-cover-open { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); padding: 8px 14px; border: 1px solid #ffffff55; border-radius: 6px; background: #071426cc; color: #fff; font: 13px var(--sc-font); opacity: 0; transition: opacity .16s; }
 .dashboard-card-cover-button:hover .dashboard-card-cover-open,.dashboard-card-cover-button:focus-visible .dashboard-card-cover-open { opacity: 1; }
 .dashboard-card-cover-button:focus-visible { outline: 2px solid var(--sc-focus); outline-offset: -3px; }
 .dashboard-card-cover-button:disabled { cursor: wait; }
-.dashboard-card-cover-error { position: absolute; inset: auto 0 0; display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 7px 10px; background: #071426e8; color: #a9b9ce; font-size: 11px; }
-.dashboard-card-cover-error button { display: inline-flex; align-items: center; gap: 4px; padding: 3px 6px; border: 0; background: transparent; color: #fff; cursor: pointer; }
 
 .dashboard-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 300px; padding: 40px 24px; border: 1px dashed var(--sc-border); border-radius: 10px; background: var(--sc-surface-elevated); text-align: center; }
 .dashboard-empty-symbol { width: 54px; height: 54px; margin-bottom: 4px; }
