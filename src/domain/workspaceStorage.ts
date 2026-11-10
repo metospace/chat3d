@@ -2,10 +2,10 @@ import {encodeIdbValue,decodeIdbValue,type IdbGraphRoot,type IdbGraphRecord} fro
 // Browser-local workspace data only. Credentials are intentionally never part of this payload.
 const DB_NAME='chat3d.workspace.v1';
 const STORE='workspace';
-export interface WorkspaceEnvelope { version:1; revision:number; activeId:string; sessions:unknown[] }
+export interface WorkspaceEnvelope { version:1; revision:number; activeId:string; sessions:unknown[];recoverySessions?:{data:unknown;error:string}[] }
 interface SessionRecord {id:string;snapshot:Record<string,unknown>;[key:string]:unknown}
 interface LegacyManifest {storageVersion:2;version:1;revision:number;activeId:string;sessions:{metadata:Record<string,unknown>;fields:string[]}[]}
-interface Manifest {storageVersion:3;version:1;revision:number;activeId:string;sessions:{id:string;metadata:IdbGraphRoot;fields:{name:string;root:IdbGraphRoot}[]}[]}
+interface Manifest {storageVersion:3;version:1;revision:number;activeId:string;recoveryRoot?:IdbGraphRoot;sessions:{id:string;metadata:IdbGraphRoot;fields:{name:string;root:IdbGraphRoot}[]}[]}
 // Identity is used only for objects previously committed/read at the exact revision.
 // Editor snapshots are immutable; a failed transaction must never advance this cache.
 let committedRevision=-1;
@@ -26,39 +26,45 @@ export async function readWorkspace():Promise<WorkspaceEnvelope|null>{
  const db=await openDb(),{promise,resolve,reject}=Promise.withResolvers<WorkspaceEnvelope|null>();
   const tx=db.transaction(STORE,'readonly'),target=tx.objectStore(STORE);let result:WorkspaceEnvelope|null=null;let invalid=false;
   const hydrate:(()=>void)[]=[];
-  const readGraph=(id:string,field:string|null,root:IdbGraphRoot,assign:(value:unknown)=>void)=>{
-   if(!root||root.format!=='idb-graph'||root.version!==1||!Number.isSafeInteger(root.recordCount)||root.recordCount<0)throw Error('invalid root');
+  const readGraph=(id:string,field:string|null,root:IdbGraphRoot,assign:(value:unknown)=>void,onFailure?:(error:unknown,records:Map<number,IdbGraphRecord>)=>void)=>{
    const records=new Map<number,IdbGraphRecord>();
+   if(!root||root.format!=='idb-graph'||root.version!==1||!Number.isSafeInteger(root.recordCount)||root.recordCount<0){if(onFailure){onFailure(Error('invalid root'),records);return;}throw Error('invalid root');}
+   let missing=false;
    for(let index=0;index<root.recordCount;index++){
-    const get=target.get(chunkKey(id,field,index));get.onsuccess=()=>{if(!get.result){invalid=true;tx.abort();return;}records.set(index,get.result as IdbGraphRecord);};
+    const get=target.get(chunkKey(id,field,index));get.onsuccess=()=>{if(get.result===undefined){missing=true;return;}records.set(index,get.result as IdbGraphRecord);};
    }
-   hydrate.push(()=>assign(decodeIdbValue(root,records)));
+   hydrate.push(()=>{try{if(missing)throw Error('missing chunk');assign(decodeIdbValue(root,records));}catch(error){if(onFailure)onFailure(error,records);else throw error;}});
   };
   const r=target.get('current');r.onsuccess=()=>{try{
    const value=r.result as Manifest|LegacyManifest|WorkspaceEnvelope|undefined;if(!value)return;
    if(!('storageVersion' in value)){result=value;return;}
    if(value.storageVersion===2){
     const sessions=value.sessions.map(entry=>({...entry.metadata,snapshot:{}} as SessionRecord));
-    result={version:value.version,revision:value.revision,activeId:value.activeId,sessions};
-    value.sessions.forEach((entry,i)=>{for(const field of entry.fields){const get=target.get(fieldKey(sessions[i].id,field));get.onsuccess=()=>{
-     // Undefined fields are stored inside a wrapper, so missing records are detectable.
-     if(!get.result||!Object.prototype.hasOwnProperty.call(get.result,'value')){invalid=true;tx.abort();return;}
-     Object.defineProperty(sessions[i].snapshot,field,{value:get.result.value,enumerable:true,writable:true,configurable:true});
-    };}});
+    result={version:value.version,revision:value.revision,activeId:value.activeId,sessions,recoverySessions:[]};
+    value.sessions.forEach((entry,i)=>{const session=sessions[i];let failed=false;for(const field of entry.fields){const get=target.get(fieldKey(session.id,field));get.onsuccess=()=>{
+     // A missing legacy wrapper isolates this session, not every other session.
+     if(!get.result||!Object.prototype.hasOwnProperty.call(get.result,'value')){failed=true;return;}
+     Object.defineProperty(session.snapshot,field,{value:get.result.value,enumerable:true,writable:true,configurable:true});
+    };}hydrate.push(()=>{if(failed){sessions.splice(sessions.indexOf(session),1);result!.recoverySessions!.push({data:{session,manifest:entry},error:'旧会话字段不完整，已保留可读取的原始数据'});}});});
    }else if(value.storageVersion===3){
-    const sessions:SessionRecord[]=[];result={version:value.version,revision:value.revision,activeId:value.activeId,sessions};
+    const sessions:SessionRecord[]=[];result={version:value.version,revision:value.revision,activeId:value.activeId,sessions,recoverySessions:[]};
+    if(value.recoveryRoot)readGraph('__workspace_recovery__',null,value.recoveryRoot,items=>{result!.recoverySessions!.push(...items as NonNullable<WorkspaceEnvelope['recoverySessions']>);});
     for(const entry of value.sessions){
      const session={id:entry.id,snapshot:{}} as SessionRecord;sessions.push(session);
-     readGraph(entry.id,null,entry.metadata,metadata=>{
+     const fragments:{field:string|null;root:IdbGraphRoot;records:[number,IdbGraphRecord][]}[]=[];let failed=false;
+     const graph=(field:string|null,root:IdbGraphRoot,assign:(value:unknown)=>void)=>readGraph(entry.id,field,root,assign,(_error,records)=>{failed=true;fragments.push({field,root,records:[...records]});});
+     graph(null,entry.metadata,metadata=>{
       if(!metadata||typeof metadata!=='object'||Array.isArray(metadata)||(metadata as Record<string,unknown>).id!==entry.id)throw Error('invalid metadata');
       for(const [key,item] of Object.entries(metadata))Object.defineProperty(session,key,{value:item,enumerable:true,writable:true,configurable:true});
      });
-     for(const field of entry.fields)readGraph(entry.id,field.name,field.root,item=>Object.defineProperty(session.snapshot,field.name,{value:item,enumerable:true,writable:true,configurable:true}));
+     for(const field of entry.fields)graph(field.name,field.root,item=>Object.defineProperty(session.snapshot,field.name,{value:item,enumerable:true,writable:true,configurable:true}));
+     hydrate.push(()=>{if(failed){sessions.splice(sessions.indexOf(session),1);result!.recoverySessions!.push({data:{session,manifest:entry,fragments},error:'会话分块不完整，已保留可读取的原始数据'});}});
     }
    }else throw Error('invalid storage version');
   }catch{invalid=true;tx.abort();}};
   tx.oncomplete=()=>{db.close();try{
    for(const finish of hydrate)finish();
+   if(result?.recoverySessions&&!result.recoverySessions.length)delete result.recoverySessions;
    if(result){committedRevision=result.revision;committed=new Map((result.sessions as SessionRecord[]).map(s=>[s.id,{...s.snapshot}]));}resolve(result);
   }catch{reject(new Error('会话数据不完整，已有数据不会被覆盖，请从项目备份恢复。'));}};
   tx.onabort=()=>{db.close();reject(new Error(invalid?'会话数据不完整，已有数据不会被覆盖，请从项目备份恢复。':'会话读取失败'));};
@@ -85,6 +91,7 @@ export async function writeWorkspace(data:Omit<WorkspaceEnvelope,'revision'>,exp
     const manifest:Manifest={storageVersion:3,version:1,revision:expectedRevision+1,activeId:data.activeId,sessions:[]};
     const referenced=new Set<string>();
     const encode=(id:string,field:string|null,value:unknown)=>encodeIdbValue(value,(index,record)=>{const key=chunkKey(id,field,index);referenced.add(key);target.put(record,key);});
+    if(data.recoverySessions?.length)manifest.recoveryRoot=encode('__workspace_recovery__',null,data.recoverySessions);
     for(const session of sessions){
      const {snapshot,...metadata}=session,previous=reuse?committed.get(session.id):undefined;
      const fields:{name:string;root:IdbGraphRoot}[]=[],previousRoots=new Map(previousSessions.get(session.id)?.fields.map(field=>[field.name,field.root] as const));

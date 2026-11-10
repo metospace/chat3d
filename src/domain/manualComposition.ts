@@ -6,6 +6,7 @@ import {instantiateAsset,type ModelAssetVersion} from './modelAssets';
 import {makeId} from '../util/ids';
 import type {Command} from './commands';
 import type {SceneDocument,SceneNode,Vec3} from './types';
+import {copyAnimationTracks,type AnimationProgram} from './animation';
 
 export const manualEditLocked=(status:string)=>['capturing','context','generating','validating','previewing','applying'].includes(status);
 export function compositionGroup(node:SceneNode):string{return node.modelAsset?.instanceId??node.assemblyId??node.id;}
@@ -57,13 +58,14 @@ export function arraySelectionCommands(doc:SceneDocument,ids:string[],count:numb
 const MANUAL_ARRAY_OVERFLOW = `本次排列将使项目文件超过 ${PROJECT_SIZE_LIMIT}，请减少本次复制数量或简化模型；没有场景对象总数上限，团队场景发布上限为 ${TEAM_SCENE_SIZE_LIMIT}`;
 function validateArray(count:number,axis:'x'|'z',gap:number){if(!Number.isSafeInteger(count)||count<2||!['x','z'].includes(axis)||!Number.isFinite(gap)||gap<0)throw Error('排列总数量需为至少 2 的整数，净间距需为非负米数');}
 /** Manual aggregate path: preserve source metadata and internal references without per-import part caps. */
-export function duplicateSelectedNodes(doc:SceneDocument,ids:string[],count:number,axis:'x'|'z',gap:number):SceneNode[]{
+export function duplicateSelectedNodes(doc:SceneDocument,ids:string[],count:number,axis:'x'|'z',gap:number):{nodes:SceneNode[];animation?:AnimationProgram}{
  validateArray(count,axis,gap);const nodes=groups(doc,ids).flat(),included=new Set(nodes.map(n=>n.id)),size=assemblyBounds(nodes).getSize(new Vector3());
  const bytes=new TextEncoder().encode(JSON.stringify(nodes)).length,baseBytes=new TextEncoder().encode(JSON.stringify(doc)).length;
  if(baseBytes+bytes*(count-1)>MAX_PROJECT_BYTES)throw new Error(MANUAL_ARRAY_OVERFLOW);
- const added:SceneNode[]=[];
+ const added:SceneNode[]=[],tracks=[...(doc.animation?.tracks??[])];
  for(let i=1;i<count;i++){
   const instances=new Map<string,string>(),assemblies=new Map<string,string>(),idMap=new Map(nodes.map(n=>[n.id,makeId()]));
+  const offset:Vec3=[0,0,0];offset[axis==='x'?0:2]=(size[axis]+gap)*i;tracks.push(...copyAnimationTracks(doc.animation,idMap,offset));
   for(const n of nodes){const copy=structuredClone(n),key=compositionGroup(n),assembly=n.assemblyId??n.id;
    if(!instances.has(key))instances.set(key,makeId());if(!assemblies.has(assembly))assemblies.set(assembly,makeId());
    if(n.poseRig){const rig=remapPoseRig(n.poseRig,idMap);if(rig)copy.poseRig=rig;else delete copy.poseRig;}copy.id=idMap.get(n.id)!;copy.assemblyId=assemblies.get(assembly)!;
@@ -73,5 +75,5 @@ export function duplicateSelectedNodes(doc:SceneDocument,ids:string[],count:numb
    copy.transform.position[axis==='x'?0:2]+=(size[axis]+gap)*i;added.push(copy);
   }
  }
- serializeProject({...doc,nodes:[...doc.nodes,...added]},MANUAL_ARRAY_OVERFLOW);return added;
+ const animation=doc.animation?{...doc.animation,tracks}:undefined;serializeProject({...doc,nodes:[...doc.nodes,...added],animation},MANUAL_ARRAY_OVERFLOW);return {nodes:added,animation};
 }

@@ -32,7 +32,11 @@ export function parseProjectFile(text: string, maxBytes = MAX_PROJECT_BYTES): Pa
   const pack = value as { format?: unknown; version?: unknown; scene?: SceneDocument; teamCategoryPath?: unknown } | null;
   if (!pack || pack.format !== 'chat3d-project' || pack.version !== 1 || !pack.scene) throw new Error('不支持的项目文件格式或版本');
   if (pack.teamCategoryPath !== undefined && !validPublishedCategoryPath(pack.teamCategoryPath)) throw new Error('团队分类路径无效');
-  const doc = pack.scene;
+  return {doc:withStockMaterials(structuredClone(validateProjectDocument(pack.scene))),...(pack.teamCategoryPath !== undefined ? {teamCategoryPath:[...pack.teamCategoryPath]} : {})};
+}
+
+/** Durable documents are not portable files: validate without JSON roundtrips or file byte limits. */
+export function validateProjectDocument(doc:SceneDocument):SceneDocument {
   if (doc.schemaVersion !== SCHEMA_VERSION || typeof doc.projectId !== 'string' || !doc.projectId || !Number.isSafeInteger(doc.revision) || doc.revision < 0 || doc.unit !== 'm' || doc.upAxis !== 'Y') throw new Error('项目标识、版本、单位或坐标系无效');
   if (!Array.isArray(doc.nodes) || !Array.isArray(doc.materials) || !Array.isArray(doc.assets)) throw new Error('项目列表结构无效');
   if (doc.assets.length) throw new Error('此版本尚不支持导入外部模型资产');
@@ -47,7 +51,7 @@ export function parseProjectFile(text: string, maxBytes = MAX_PROJECT_BYTES): Pa
     const errors = validateDocument(doc);
     if (errors.length) throw new Error(errors.map((e) => e.message).join('；'));
   } catch (e) { throw new Error(`项目校验失败：${e instanceof Error ? e.message : '数据结构无效'}`); }
-  return {doc:withStockMaterials(structuredClone(doc)),...(pack.teamCategoryPath !== undefined ? {teamCategoryPath:[...pack.teamCategoryPath]} : {})};
+  return doc;
 }
 
 export function parseProject(text: string, maxBytes = MAX_PROJECT_BYTES): SceneDocument {

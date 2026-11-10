@@ -90,9 +90,9 @@ try{
   // Do not read before retry: the failed write must not cache these new identities.
   const revision=await storage.writeWorkspace(next,pack.revision);pack=await storage.readWorkspace();assert.equal(pack.revision,revision);assert.deepEqual(pack.sessions,next.sessions);
  });
- await test('missing graph fragments fail closed without replacing committed workspace',async()=>{
+ await test('missing graph fragments isolate the failed session and retain readable rescue fragments',async()=>{
   const before=await records(),chunk=before.find(([key])=>key!=='current'&&JSON.parse(key)[2]==='doc'&&JSON.parse(key)[3]==='chunk');assert.ok(chunk);
-  await withStore('readwrite',store=>store.delete(chunk[0]));await assert.rejects(()=>storage.readWorkspace(),/数据不完整/);
+  await withStore('readwrite',store=>store.delete(chunk[0]));const rescued=await storage.readWorkspace();assert.equal(rescued.sessions.length,0);assert.equal(rescued.recoverySessions[0].data.session.id,pack.sessions[0].id);assert.equal(rescued.recoverySessions[0].data.fragments[0].field,'doc');assert.ok(rescued.recoverySessions[0].data.fragments[0].records.every(([index])=>index!==JSON.parse(chunk[0])[4]));
   await withStore('readwrite',store=>store.put(chunk[1],chunk[0]));assert.deepEqual(await storage.readWorkspace(),pack);
  });
  console.log(`${count} workspace storage checks passed`);

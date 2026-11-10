@@ -6,6 +6,7 @@ import {validateDocument} from '../domain/types';
 import {makeId} from '../util/ids';
 import {withStockMaterials} from '../domain/materials';
 import {PHYSICAL_MATERIAL_KEYS} from '../domain/physicalMaterial';
+import {serializeProject} from '../domain/project';
 
 export const MAX_GLB_BYTES=512*1024*1024;
 export const GLB_SIZE_ERROR=`GLB文件不能超过${MAX_GLB_BYTES/1024/1024} MiB`;
@@ -49,6 +50,6 @@ export async function importGlb(data:ArrayBuffer,name:string,onStage?:(stage:Glb
   if(bake){p.set(0,0,0);q.identity();s.set(1,1,1);}
   for(const group of groups){const m=mats[group.materialIndex??0] as MeshStandardMaterial;if(!m)throw Error('网格材质索引无效');const id=makeId();doc.nodes.push({id,parentId:null,kind:'primitive',assemblyId,assemblyName:groupName,name:o.name||`网格部件${doc.nodes.length+1}`,visible:true,materialId:materialId(m),geometry:{type:'mesh',params:{positions:pos,indices:indices.slice(group.start,group.start+group.count),...(attr?{normals:normal}:{}),...(uv?{uvs}:{}),...(color?{colors,colorItemSize:color.itemSize as 3|4}:{})}},transform:{position:p.toArray() as Vec3,rotationQuaternion:q.normalize().toArray() as Q,scale:s.toArray() as Vec3}});
   }
- });if(!doc.nodes.length)throw Error('模型没有可导入的三角网格');await onStage?.('validating');const errors=validateDocument(doc);if(errors.length)throw errors[0];return {doc:withStockMaterials(doc),warnings:['导入单位按米处理，请核对尺寸；保留网格部件、第一套UV与内嵌PNG/JPEG贴图，未将模型认定为工程精确尺寸。',...(singularMeshes?[`已保留并烘焙 ${singularMeshes} 个含零缩放等退化变换的网格；法线按烘焙后的几何重算，压成线或点的三角形没有可见面积，未恢复原厚度。`]:[]),...(info.hasAnimation?['原GLB动画未导入；可在工作台重新设置部件运动。']:[])]};}
+ });if(!doc.nodes.length)throw Error('模型没有可导入的三角网格');await onStage?.('validating');const errors=validateDocument(doc);if(errors.length)throw errors[0];const ready=withStockMaterials(doc);serializeProject(ready,'GLB 转换后的项目超过 400 MiB，请精简贴图或拆分模型后重新导入');return {doc:ready,warnings:['导入单位按米处理，请核对尺寸；保留网格部件、第一套UV与内嵌PNG/JPEG贴图，未将模型认定为工程精确尺寸。',...(singularMeshes?[`已保留并烘焙 ${singularMeshes} 个含零缩放等退化变换的网格；法线按烘焙后的几何重算，压成线或点的三角形没有可见面积，未恢复原厚度。`]:[]),...(info.hasAnimation?['原GLB动画未导入；可在工作台重新设置部件运动。']:[])]};}
  finally{gltf.scene.traverse(o=>{if(o instanceof Mesh){o.geometry.dispose();for(const m of Array.isArray(o.material)?o.material:[o.material])m.dispose();}});}
 }

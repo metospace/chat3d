@@ -11,6 +11,8 @@ Animation is a program attached to the editable scene, not a preset workshop. As
 
 Playback is local deterministic math with no per-frame model/token calls. It never writes animated poses into base scene transforms. Geometry edits, session changes and generation reset/pause playback to prevent stale-state editing. Project JSON, autosave and sessions preserve animation programs. GLB currently exports static geometry only; it does not contain these animation tracks.
 
+Manual copies/arrays and assembly copies include animation in the same undoable transaction: track IDs, target IDs and internal follow sources are remapped; rotation pivots follow the copy offset. An external follow source must be selected too. Moving, rotating and uniformly scaling animated objects rebase pivots, axes and displacement keyframes/expressions. Partial shared-track transforms and external follow dependencies reject the entire edit rather than silently altering other objects. Nonuniform scaling of rotation animation is rejected. Existing expression/track/binding budgets still apply after transformation.
+
 ## Generic supported channels
 
 - `position`: world-space offset from each target's original position, keyframed vector values
