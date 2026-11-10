@@ -488,7 +488,7 @@ dependencies = [
 
 [[package]]
 name = "chat3d"
-version = "0.2.42"
+version = "0.2.43"
 dependencies = [
  "bytes",
  "futures-util",
