@@ -6,6 +6,7 @@ import {Euler,Matrix4,Quaternion,Vector3} from 'three';
 import {assemblyBounds} from './assemblyEditing';
 import {validateDocument,SCHEMA_VERSION,type SceneDocument,type SceneNode,type Material,type Vec3} from './types';
 import type {Command} from './commands';
+import type {AnimationProgram} from './animation';
 import {makeId} from '../util/ids';
 export const ASSET_CATEGORIES=['设备','人员','工位','仓储','物料','其他'] as const;
 export type AssetCategory=string;
@@ -13,13 +14,14 @@ export interface ModelAssetVersion {
  format:'chat3d-model-asset';schemaVersion:1;id:string;version:number;name:string;category:AssetCategory;description?:string;
  createdAt:string;unit:'m';upAxis:'Y';front:'+Z'|'-Z'|'+X'|'-X';quality:'unreviewed';contract?:AssetContract;
  size:Vec3;nodes:SceneNode[];materials:Material[];thumbnail?:string;externalConnectionsRemoved:number;
+ animation?:AnimationProgram;
 }
 export interface ModelAssetSummary {id:string;version:number;name:string;category:AssetCategory;createdAt:string;size:Vec3;parts:number;thumbnail?:string;quality:'unreviewed';purpose?:string;anchorCount?:number;description?:string;metadataRevision?:number}
 export const MAX_ASSET_BYTES=500*1024*1024;
 export const MAX_TEAM_ASSET_BYTES=MAX_ASSET_BYTES;
 const assetSizeError=(maxBytes:number)=>`资产超过${maxBytes/1024/1024} MiB，请精简或分拆模型`;
 export const ASSET_SIZE_ERROR=assetSizeError(MAX_ASSET_BYTES);
-export function assetDocument(asset:ModelAssetVersion):SceneDocument{return {schemaVersion:SCHEMA_VERSION,projectId:asset.id,revision:0,unit:'m',upAxis:'Y',nodes:structuredClone(asset.nodes),materials:structuredClone(asset.materials),assets:[]};}
+export function assetDocument(asset:ModelAssetVersion):SceneDocument{return {schemaVersion:SCHEMA_VERSION,projectId:asset.id,revision:0,unit:'m',upAxis:'Y',nodes:structuredClone(asset.nodes),materials:structuredClone(asset.materials),assets:[],...(asset.animation?{animation:structuredClone(asset.animation)}:{})};}
 export function selectedAssetNodes(doc:SceneDocument,selection:string[]):SceneNode[]{const ids=new Set(selection),groups=new Set(doc.nodes.filter(n=>ids.has(n.id)&&n.assemblyId).map(n=>n.assemblyId));return doc.nodes.filter(n=>ids.has(n.id)||(n.assemblyId&&groups.has(n.assemblyId)));}
 export function createModelAsset(doc:SceneDocument,selection:string[],details:{name:string;category:AssetCategory;front?:ModelAssetVersion['front'];id?:string;version?:number}):ModelAssetVersion{
  const picked=selectedAssetNodes(doc,selection);if(!picked.length)throw Error('请选择零件；选中组件中的一个零件会保存整个组件');
@@ -31,7 +33,10 @@ export function createModelAsset(doc:SceneDocument,selection:string[],details:{n
  const ids=new Set(picked.map(n=>n.id));let removed=0;
  const nodes=structuredClone(picked).map(n=>{delete n.modelAsset;delete n.planKey;delete n.zone;n.transform.position=new Vector3(...n.transform.position).sub(origin).toArray() as Vec3;if(n.connection&&!ids.has(n.connection.targetId)){delete n.connection;removed++;}return n;});
  const materials=structuredClone(doc.materials.filter(m=>nodes.some(n=>n.materialId===m.id)));
+ const animation=doc.animation?structuredClone(doc.animation):undefined;
+ if(animation){animation.tracks=animation.tracks.filter(t=>t.targetIds.some(id=>ids.has(id))).map(t=>{t.targetIds=t.targetIds.filter(id=>ids.has(id));if(t.channel==='follow'&&!ids.has(t.sourceId!))throw Error('动画跟随源在所选资产之外，请一并保存跟随源');if(t.pivot)t.pivot=new Vector3(...t.pivot).sub(origin).toArray() as Vec3;return t;});}
  const asset:ModelAssetVersion={format:'chat3d-model-asset',schemaVersion:1,id:details.id??makeId(),version:details.version??1,name:details.name.trim(),category:details.category,front:details.front??'+Z',createdAt:new Date().toISOString(),unit:'m',upAxis:'Y',quality:'unreviewed',size,nodes,materials,externalConnectionsRemoved:removed};
+ if(animation?.tracks.length)asset.animation=animation;
  validateModelAsset(asset);return asset;
 }
 export function validateModelAsset(asset:ModelAssetVersion):void{
@@ -40,7 +45,7 @@ export function validateModelAsset(asset:ModelAssetVersion):void{
  if(!Number.isSafeInteger(asset.externalConnectionsRemoved)||asset.externalConnectionsRemoved<0)throw Error('资产连接元数据无效');
  if(asset.thumbnail&&!isThumbnailImage(asset.thumbnail))throw Error('缩略图无效或过大');
  if(asset.contract)validateAssetContract(asset.contract,asset.nodes);
- const errors=validateDocument({schemaVersion:SCHEMA_VERSION,projectId:asset.id,revision:0,unit:'m',upAxis:'Y',nodes:asset.nodes,materials:asset.materials,assets:[]});if(errors.length)throw errors[0];
+ const errors=validateDocument({schemaVersion:SCHEMA_VERSION,projectId:asset.id,revision:0,unit:'m',upAxis:'Y',nodes:asset.nodes,materials:asset.materials,assets:[],animation:asset.animation});if(errors.length)throw errors[0];
  const actual=assemblyBounds(asset.nodes).getSize(new Vector3()).toArray();if(!Array.isArray(asset.size)||asset.size.length!==3||asset.size.some((n,i)=>!Number.isFinite(n)||Math.abs(n-actual[i])>1e-5))throw Error('资产尺寸与几何不一致');
  if(new TextEncoder().encode(JSON.stringify(asset)).length>MAX_ASSET_BYTES)throw Error(ASSET_SIZE_ERROR);
 }
@@ -50,7 +55,17 @@ export function instantiateAsset(a:ModelAssetVersion,position:Vec3,yaw=0):Comman
  const rotation=new Quaternion().setFromEuler(new Euler(0,yaw*Math.PI/180,0)),matrix=new Matrix4().compose(new Vector3(...position),rotation,new Vector3(1,1,1)),instanceId=makeId();
  const singleGroup=new Set(a.nodes.map(n=>n.assemblyId??n.id)).size===1;
  const nodes=structuredClone(a.nodes).map(n=>{n.assemblyName=singleGroup?a.name:(a.name+' / '+(n.assemblyName??n.name)).slice(0,200);const p=new Vector3(),q=new Quaternion(),s=new Vector3();new Matrix4().compose(new Vector3(...n.transform.position),new Quaternion(...n.transform.rotationQuaternion),new Vector3(...n.transform.scale)).premultiply(matrix).decompose(p,q,s);n.transform={position:p.toArray() as Vec3,rotationQuaternion:q.toArray() as [number,number,number,number],scale:s.toArray() as Vec3};n.modelAsset={id:a.id,version:a.version,instanceId,sourceNodeId:n.id};return n;});
- return {op:'importComponentDraft',nodes,materials:structuredClone(a.materials)};
+ const animation=a.animation?structuredClone(a.animation):undefined;
+ if(animation)for(const track of animation.tracks){
+  if(track.pivot)track.pivot=new Vector3(...track.pivot).applyMatrix4(matrix).toArray() as Vec3;
+  if(track.axis)track.axis=new Vector3(...track.axis).applyQuaternion(rotation).toArray() as Vec3;
+  if(track.channel==='position'){
+   if(track.keyframes)for(const key of track.keyframes)key.value=new Vector3(...key.value as Vec3).applyQuaternion(rotation).toArray() as Vec3;
+   // Compose placement outside the AST: valid expressions keep their original budgets.
+   if(track.expression&&yaw!==0){const angle=(((track.expressionYaw??0)+yaw)%360+540)%360-180;if(angle===0)delete track.expressionYaw;else track.expressionYaw=angle;}
+  }
+ }
+ return {op:'importComponentDraft',nodes,materials:structuredClone(a.materials),...(animation?{animation}:{})};
 }
 export interface ParsedModelAssetFile {asset:ModelAssetVersion;teamCategoryPath?:string[]}
 export function parseModelAssetFile(text:string,maxBytes=MAX_ASSET_BYTES):ParsedModelAssetFile{

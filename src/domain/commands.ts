@@ -176,7 +176,7 @@ export type Command =
   | {op:'layoutSelection';targetIds:string[];layout:'ground'|'x'|'z'}
   | {op:'setSurface';targetId:string;scope?:'assembly';sourceMaterialIds?:string[];surface:import('./textures').SurfaceDetail|null}
   | {op:'setConnection';targetId:string;connection:import('./connections').Connection|null}
-  | {op:'importMeshComponent'|'importComponentDraft'|'importManualComponent';nodes:SceneNode[];materials:Material[]}
+  | {op:'importMeshComponent'|'importComponentDraft'|'importManualComponent';nodes:SceneNode[];materials:Material[];animation?:AnimationProgram}
   | {op:'setAnimation';animation:AnimationProgram}
   | {op:'clearAnimation'}
   | {op:'transformAssembly';targetId:string;rotationDegrees?:Vec3;scaleFactor?:number;pivot?:Vec3}
@@ -452,10 +452,16 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
     case 'importMeshComponent': {
       if(!Array.isArray(op.nodes)||!op.nodes.length||(op.op!=='importManualComponent'&&op.nodes.length>1000)||!Array.isArray(op.materials)||(op.op!=='importManualComponent'&&op.materials.length>100))return {doc,error:new Error('网格组件数量或材质数量无效')};
       if(op.op==='importManualComponent'){try{serializeProject({...doc,nodes:[...doc.nodes,...op.nodes],materials:[...doc.materials,...op.materials]},MANUAL_PLACEMENT_OVERFLOW);}catch(e){return {doc,error:e instanceof Error?e:new Error(MANUAL_PLACEMENT_OVERFLOW)};}}
-      const imported:SceneDocument={...doc,nodes:op.nodes,materials:op.materials,assets:[]};delete imported.animation;
+      const imported:SceneDocument={...doc,nodes:op.nodes,materials:op.materials,assets:[],animation:op.animation};
       const errors=validateDocument(imported);if(errors.length||op.nodes.some(n=>!n.geometry||n.kind!=='primitive'||(op.op==='importMeshComponent'&&n.geometry.type!=='mesh')||n.parentId!==null))return {doc,error:errors[0]??new Error('网格组件只能包含平级三角网格')};
       const materialMap=new Map(op.materials.map(m=>[m.id,makeId()]));materials=[...materials,...op.materials.map(m=>({...m,id:materialMap.get(m.id)!}))];
       const groupMap=new Map<string,string>(),nodeMap=new Map<string,string>();for(const n of op.nodes){const old=n.assemblyId??'component';if(!groupMap.has(old))groupMap.set(old,makeId());nodeMap.set(n.id,nodeMap.size===0?groupMap.get(old)!:makeId());}const copies=op.nodes.map(n=>({...cloneNode(n),...(n.poseRig?{poseRig:remapPoseRig(n.poseRig,nodeMap)}:{}),id:nodeMap.get(n.id)!,assemblyId:groupMap.get(n.assemblyId??'component')!,materialId:materialMap.get(n.materialId!),...(n.connection?{connection:{...n.connection,targetId:nodeMap.get(n.connection.targetId)!}}:{})}));
+      if(op.animation){
+       beforeSnapshot.animation=structuredClone(animation??null);
+       if(animation&&(animation.loop!==op.animation.loop||animation.duration!==op.animation.duration))return {doc,error:new Error('资产与场景动画的时长或循环设置不同，请先统一动画时间轴再插入')};
+       const tracks=structuredClone(op.animation.tracks).map(track=>({...track,id:makeId(),targetIds:track.targetIds.map(id=>nodeMap.get(id)!),...(track.sourceId?{sourceId:nodeMap.get(track.sourceId)!}:{})}));
+       animation=animation?{...animation,duration:Math.max(animation.duration,op.animation.duration),tracks:[...animation.tracks,...tracks]}:{...structuredClone(op.animation),tracks};
+      }
       createdIds=copies.map(n=>n.id);nodes.push(...copies);break;
     }
     case 'createAssembly': {
