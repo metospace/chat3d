@@ -36,6 +36,8 @@ try{
  const visited=[];
  const ui=render(React.createElement(Theme,null,React.createElement(StudioShell,{activePage:'home',disabled:false,taskQueueRequest:0,onNavigate:page=>visited.push(page),onTaskOpen:()=>{},onTaskHistory:()=>{}})));
  assert.ok(ui.getByRole('button',{name:'登录账户',exact:true}));
+ assert.ok(ui.getByRole('button',{name:'看板库',exact:true}));
+ assert.equal(ui.queryByRole('button',{name:'看板接入',exact:true}),null);
  fireEvent.click(ui.getByRole('button',{name:'资产库',exact:true}));
  ui.rerender(React.createElement(Theme,null,React.createElement(StudioShell,{activePage:'asset',disabled:false,taskQueueRequest:0,onNavigate:page=>visited.push(page),onTaskOpen:()=>{},onTaskHistory:()=>{}})));
  fireEvent.click(ui.getByRole('button',{name:'场景库',exact:true}));

@@ -82,6 +82,45 @@ try{
  const {createEditorStore}=await server.ssrLoadModule('/src/store.ts'),{serializeProject,parseProject}=await server.ssrLoadModule('/src/domain/project.ts'),{dashboardBinding}=await server.ssrLoadModule('/src/domain/dashboard.ts');
  const {selectDashboardFiles}=await server.ssrLoadModule('/src/domain/dashboardUpload.ts');
  const {parseDashboardCommand}=await server.ssrLoadModule('/src/domain/dashboard.ts');
+ const {downloadDashboardSource}=await server.ssrLoadModule('/src/domain/dashboard.ts');
+ // Destination selection must precede both network activity and source progress.
+ const savedWindow=globalThis.window,savedTauri=globalThis.isTauri;
+ globalThis.window=dom.window;globalThis.isTauri=true;
+ try{
+  const sourceItem={id:'source id',version:3,fileName:'源码.zip'},events=[],progress=[];let resolvePicker,committed;
+  dom.window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
+   events.push(command);
+   if(command==='select_export_destination'){assert.deepEqual(args,{kind:'zip',filename:sourceItem.fileName});return new Promise(resolve=>{resolvePicker=resolve;});}
+   if(command==='commit_export_file'){committed=args;return '/saved/source.zip';}
+  }};
+  const client={raw:async(path,options,signal)=>{
+   events.push('fetch');assert.equal(path,'dashboards/source%20id/3/source');assert.equal(options,undefined);assert.ok(signal instanceof AbortSignal);
+   return new Response(new ReadableStream({start(controller){controller.enqueue(new Uint8Array([1,2]));controller.enqueue(new Uint8Array([3]));controller.close();}}),{headers:{'Content-Length':'3'}});
+  }};
+  const pending=downloadDashboardSource(client,sourceItem,value=>progress.push(value));
+  assert.deepEqual(events,['select_export_destination']);assert.deepEqual(progress,[]);
+  resolvePicker('source-token');assert.equal(await pending,'已保存到：/saved/source.zip');
+  assert.deepEqual(events,['select_export_destination','fetch','commit_export_file']);assert.deepEqual(new Uint8Array(committed),new Uint8Array([1,2,3]));
+  assert.deepEqual(progress,[{loaded:0},{loaded:0,total:3},{loaded:2,total:3},{loaded:3,total:3}]);
+  const cancelled=downloadDashboardSource(client,sourceItem,value=>progress.push(value));resolvePicker(null);assert.equal(await cancelled,null);assert.equal(progress.length,4);assert.equal(events.filter(event=>event==='fetch').length,1);
+  dom.window.__TAURI_INTERNALS__.invoke=async(command,args)=>{events.push(command);if(command==='select_export_destination')return 'fallback-token';if(command==='commit_export_file'){committed=args;return '/saved/source.html';}};
+  const unknownProgress=[];
+  await downloadDashboardSource({raw:async()=>new Response(new ReadableStream({start(controller){controller.enqueue(new Uint8Array([4,5]));controller.close();}}))},sourceItem,value=>unknownProgress.push(value));
+  assert.deepEqual(unknownProgress,[{loaded:0},{loaded:0},{loaded:2}]);assert.deepEqual(new Uint8Array(committed),new Uint8Array([4,5]));
+  for(const length of [null,'','-1','1.5','Infinity','9007199254740992','3junk','0','3']){
+   const updates=[],headers=new Headers();if(length!==null)headers.set('content-length',length);
+   const response={headers,body:null,arrayBuffer:async()=>new Uint8Array([7,8,9]).buffer};
+   await downloadDashboardSource({raw:async()=>response},{...sourceItem,fileName:'source.html'},value=>updates.push(value));
+   const total=length==='0'?0:length==='3'?3:undefined;
+   assert.deepEqual(updates,[{loaded:0},total===undefined?{loaded:0}:{loaded:0,total},total===undefined?{loaded:3}:{loaded:3,total}]);assert.deepEqual(new Uint8Array(committed),new Uint8Array([7,8,9]));
+  }
+  const failure=Error('source stream failed');let released=false;
+  const failedResponse={headers:new Headers(),body:{getReader:()=>({read:async()=>{throw failure;},releaseLock:()=>{released=true;}})}};
+  const beforeFailure=events.length;
+  await assert.rejects(downloadDashboardSource({raw:async()=>failedResponse},sourceItem),error=>error===failure);assert.equal(released,true);assert.deepEqual(events.slice(beforeFailure),['select_export_destination','cancel_export_destination']);
+  await assert.rejects(downloadDashboardSource({raw:async()=>{throw failure;}},sourceItem),error=>error===failure);
+  console.log('PASS source progress starts after picker, counts streamed bytes, handles length and fallback, and preserves cancellation and failures');
+ }finally{delete dom.window.__TAURI_INTERNALS__;if(savedWindow===undefined)delete globalThis.window;else globalThis.window=savedWindow;if(savedTauri===undefined)delete globalThis.isTauri;else globalThis.isTauri=savedTauri;}
  assert.deepEqual(parseDashboardCommand('/看板'),{mode:'dashboard',name:undefined});assert.deepEqual(parseDashboardCommand('/看板 蓝光车间生产'),{mode:'dashboard',name:'蓝光车间生产'});assert.deepEqual(parseDashboardCommand('/看板 叠加 MES'),{mode:'overlay',name:'MES'});assert.deepEqual(parseDashboardCommand('/看板 移除'),{mode:'dashboard',remove:true});assert.equal(parseDashboardCommand('说明看板如何接入'),undefined);
  const index=new File(['<h1>MES</h1>'],'index.html'),style=new File(['body{}'],'main.css');Object.defineProperty(index,'webkitRelativePath',{value:'my-screen/dist/index.html'});Object.defineProperty(style,'webkitRelativePath',{value:'my-screen/dist/assets/main.css'});
  const selection=await selectDashboardFiles([index,style],'folder');assert.equal(selection.name,'my-screen');assert.deepEqual(selection.entries,['dist/index.html']);assert.deepEqual(selection.files.map(f=>f.path),['dist/assets/main.css','dist/index.html']);
