@@ -3,6 +3,8 @@ import {encodeIdbValue,decodeIdbValue,type IdbGraphRoot,type IdbGraphRecord} fro
 const DB_NAME='chat3d.workspace.v1';
 const STORE='workspace';
 export interface WorkspaceEnvelope { version:1; revision:number; activeId:string; sessions:unknown[];recoverySessions?:{data:unknown;error:string}[] }
+// Read-only signal: decoding isolated damaged records that must be made durable.
+type WorkspaceReadResult=WorkspaceEnvelope & {needsRepair?:boolean};
 interface SessionRecord {id:string;snapshot:Record<string,unknown>;[key:string]:unknown}
 interface LegacyManifest {storageVersion:2;version:1;revision:number;activeId:string;sessions:{metadata:Record<string,unknown>;fields:string[]}[]}
 interface Manifest {storageVersion:3;version:1;revision:number;activeId:string;recoveryRoot?:IdbGraphRoot;sessions:{id:string;metadata:IdbGraphRoot;fields:{name:string;root:IdbGraphRoot}[]}[]}
@@ -22,18 +24,18 @@ const openDb=():Promise<IDBDatabase>=>{
  request.onblocked=()=>reject(new Error('会话数据库被其他页面占用，请关闭旧页面重试'));
  return promise;
 };
-export async function readWorkspace():Promise<WorkspaceEnvelope|null>{
- const db=await openDb(),{promise,resolve,reject}=Promise.withResolvers<WorkspaceEnvelope|null>();
-  const tx=db.transaction(STORE,'readonly'),target=tx.objectStore(STORE);let result:WorkspaceEnvelope|null=null;let invalid=false;
-  const hydrate:(()=>void)[]=[];
-  const readGraph=(id:string,field:string|null,root:IdbGraphRoot,assign:(value:unknown)=>void,onFailure?:(error:unknown,records:Map<number,IdbGraphRecord>)=>void)=>{
+export async function readWorkspace():Promise<WorkspaceReadResult|null>{
+ const db=await openDb(),{promise,resolve,reject}=Promise.withResolvers<WorkspaceReadResult|null>();
+  const tx=db.transaction(STORE,'readonly'),target=tx.objectStore(STORE);let result:WorkspaceReadResult|null=null;let invalid=false;
+  const hydrate:(()=>void)[][]=[];
+  const readGraph=(finish:(()=>void)[],id:string,field:string|null,root:IdbGraphRoot,assign:(value:unknown)=>void,onFailure?:(error:unknown,records:Map<number,IdbGraphRecord>)=>void)=>{
    const records=new Map<number,IdbGraphRecord>();
    if(!root||root.format!=='idb-graph'||root.version!==1||!Number.isSafeInteger(root.recordCount)||root.recordCount<0){if(onFailure){onFailure(Error('invalid root'),records);return;}throw Error('invalid root');}
    let missing=false;
    for(let index=0;index<root.recordCount;index++){
     const get=target.get(chunkKey(id,field,index));get.onsuccess=()=>{if(get.result===undefined){missing=true;return;}records.set(index,get.result as IdbGraphRecord);};
    }
-   hydrate.push(()=>{try{if(missing)throw Error('missing chunk');assign(decodeIdbValue(root,records));}catch(error){if(onFailure)onFailure(error,records);else throw error;}});
+   finish.push(()=>{try{if(missing)throw Error('missing chunk');assign(decodeIdbValue(root,records));}catch(error){if(onFailure)onFailure(error,records);else throw error;}finally{records.clear();}});
   };
   const r=target.get('current');r.onsuccess=()=>{try{
    const value=r.result as Manifest|LegacyManifest|WorkspaceEnvelope|undefined;if(!value)return;
@@ -45,30 +47,37 @@ export async function readWorkspace():Promise<WorkspaceEnvelope|null>{
      // A missing legacy wrapper isolates this session, not every other session.
      if(!get.result||!Object.prototype.hasOwnProperty.call(get.result,'value')){failed=true;return;}
      Object.defineProperty(session.snapshot,field,{value:get.result.value,enumerable:true,writable:true,configurable:true});
-    };}hydrate.push(()=>{if(failed){sessions.splice(sessions.indexOf(session),1);result!.recoverySessions!.push({data:{session,manifest:entry},error:'旧会话字段不完整，已保留可读取的原始数据'});}});});
+    };}hydrate.push([()=>{if(failed){sessions.splice(sessions.indexOf(session),1);result!.needsRepair=true;result!.recoverySessions!.push({data:{session,manifest:entry},error:'旧会话字段不完整，已保留可读取的原始数据'});}}]);});
    }else if(value.storageVersion===3){
     const sessions:SessionRecord[]=[];result={version:value.version,revision:value.revision,activeId:value.activeId,sessions,recoverySessions:[]};
-    if(value.recoveryRoot)readGraph('__workspace_recovery__',null,value.recoveryRoot,items=>{result!.recoverySessions!.push(...items as NonNullable<WorkspaceEnvelope['recoverySessions']>);});
+    if(value.recoveryRoot){const finish:(()=>void)[]=[];hydrate.push(finish);readGraph(finish,'__workspace_recovery__',null,value.recoveryRoot,items=>{result!.recoverySessions!.push(...items as NonNullable<WorkspaceEnvelope['recoverySessions']>);});}
     for(const entry of value.sessions){
      const session={id:entry.id,snapshot:{}} as SessionRecord;sessions.push(session);
+     const finish:(()=>void)[]=[];hydrate.push(finish);
      const fragments:{field:string|null;root:IdbGraphRoot;records:[number,IdbGraphRecord][]}[]=[];let failed=false;
-     const graph=(field:string|null,root:IdbGraphRoot,assign:(value:unknown)=>void)=>readGraph(entry.id,field,root,assign,(_error,records)=>{failed=true;fragments.push({field,root,records:[...records]});});
+     const graph=(field:string|null,root:IdbGraphRoot,assign:(value:unknown)=>void)=>readGraph(finish,entry.id,field,root,assign,(_error,records)=>{failed=true;fragments.push({field,root,records:[...records]});});
      graph(null,entry.metadata,metadata=>{
       if(!metadata||typeof metadata!=='object'||Array.isArray(metadata)||(metadata as Record<string,unknown>).id!==entry.id)throw Error('invalid metadata');
       for(const [key,item] of Object.entries(metadata))Object.defineProperty(session,key,{value:item,enumerable:true,writable:true,configurable:true});
      });
      for(const field of entry.fields)graph(field.name,field.root,item=>Object.defineProperty(session.snapshot,field.name,{value:item,enumerable:true,writable:true,configurable:true}));
-     hydrate.push(()=>{if(failed){sessions.splice(sessions.indexOf(session),1);result!.recoverySessions!.push({data:{session,manifest:entry,fragments},error:'会话分块不完整，已保留可读取的原始数据'});}});
+     finish.push(()=>{if(failed){sessions.splice(sessions.indexOf(session),1);result!.needsRepair=true;result!.recoverySessions!.push({data:{session,manifest:entry,fragments},error:'会话分块不完整，已保留可读取的原始数据'});}});
     }
    }else throw Error('invalid storage version');
   }catch{invalid=true;tx.abort();}};
-  tx.oncomplete=()=>{db.close();try{
-   for(const finish of hydrate)finish();
-   if(result?.recoverySessions&&!result.recoverySessions.length)delete result.recoverySessions;
-   if(result){committedRevision=result.revision;committed=new Map((result.sessions as SessionRecord[]).map(s=>[s.id,{...s.snapshot}]));}resolve(result);
-  }catch{reject(new Error('会话数据不完整，已有数据不会被覆盖，请从项目备份恢复。'));}};
+  tx.oncomplete=()=>{db.close();resolve(result);};
   tx.onabort=()=>{db.close();reject(new Error(invalid?'会话数据不完整，已有数据不会被覆盖，请从项目备份恢复。':'会话读取失败'));};
- return promise;
+ const loaded=await promise;
+ try{
+  for(const finish of hydrate){
+   const {promise:yielded,resolve:resume}=Promise.withResolvers<void>();setTimeout(resume,0);await yielded;
+   for(const decode of finish)decode();
+   finish.length=0;
+  }
+  if(loaded?.recoverySessions&&!loaded.recoverySessions.length)delete loaded.recoverySessions;
+  if(loaded){committedRevision=loaded.revision;committed=new Map((loaded.sessions as SessionRecord[]).map(s=>[s.id,{...s.snapshot}]));}
+  return loaded;
+ }catch{throw new Error('会话数据不完整，已有数据不会被覆盖，请从项目备份恢复。');}
 }
 function storageFailureMessage(error:DOMException|Error|null,conflict:boolean):string{
  if(conflict)return '另一个标签页已更新会话，本页不会覆盖其他标签页的数据。';

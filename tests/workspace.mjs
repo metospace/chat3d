@@ -35,6 +35,52 @@ try{
  });
  await test('stored data can hydrate in a fresh manager without losing references or draft',async()=>{await w.flushWorkspace();const fresh=await server.ssrLoadModule('/src/workspace.ts?reload-test');editor.setState({doc:createInitialDoc(),messages:[],composerText:'',composerImages:[]});await fresh.initializeWorkspace();assert.equal(editor.getState().messages[0].text,'第一台设备');assert.equal(editor.getState().composerText,'继续修改轮子');assert.equal(editor.getState().doc.nodes.length,1);assert.equal(editor.getState().aiStatus,'previewing');assert.equal(editor.getState().previewDoc.nodes.length,2);assert.equal(editor.getState().pendingBatch.incomplete,true);assert.match(editor.getState().messages.at(-1).text,/阶段草稿/);assert.equal(editor.getState().messages.find(m=>m.text==='继续调整').run.status,'stopped');assert.equal(editor.getState().messages.find(m=>m.id==='queued-guide').steering.status,'interrupted');editor.getState().discardPending();await fresh.flushWorkspace()});
  await test('atomic revision guard rejects stale tab writes instead of overwriting newer workspace',async()=>{const current=await storage.readWorkspace();await assert.rejects(()=>storage.writeWorkspace({version:1,activeId:current.activeId,sessions:[]},current.revision-1),/另一个标签页/);assert.equal((await storage.readWorkspace()).sessions.length,current.sessions.length)});
+ await test('unchanged multi-session startup does not write and tracks editors only on navigation',async()=>{
+  const before=await storage.readWorkspace(),fresh=await server.ssrLoadModule('/src/workspace.ts?idle-startup');
+  assert.ok(before.sessions.length>1);
+  const {IDBObjectStore}=await import('fake-indexeddb'),put=IDBObjectStore.prototype.put,writes=[];
+  IDBObjectStore.prototype.put=function(value,key){writes.push(key);return put.call(this,value,key)};
+  try{
+   await fresh.initializeWorkspace();await fresh.flushWorkspace();
+   assert.deepEqual(writes,[]);assert.equal((await storage.readWorkspace()).revision,before.revision);
+   const state=fresh.useWorkspaceStore.getState(),other=state.sessions.find(s=>s.id!==state.activeId&&!s.deletedAt);
+   assert.ok(fresh.getSessionEditor(state.activeId));
+   for(const session of state.sessions)if(session.id!==state.activeId){assert.equal(fresh.getSessionEditor(session.id),undefined);assert.equal(fresh.sessionIsRunning(session.id),false)}
+   assert.equal(fresh.anySessionRunning(),false);
+   const backup=JSON.parse(fresh.exportWorkspaceBackup());assert.ok(backup.sessions.some(s=>s.title===other.title));assert.equal(fresh.getSessionEditor(other.id),undefined);
+   // A new read resets the IDB identity cache; reload before testing reference reuse.
+   const next=await server.ssrLoadModule('/src/workspace.ts?idle-startup-reuse');await next.initializeWorkspace();
+   next.getSessionEditor(next.useWorkspaceStore.getState().activeId).getState().setComposerText('after recovery');await next.flushWorkspace();
+   for(const key of writes){if(key==='current')continue;const tuple=JSON.parse(key);assert.ok(tuple[2]===null||tuple[2]==='composerText',`unchanged snapshot rewritten: ${key}`)}
+   assert.equal(next.switchSession(other.id),true);assert.ok(next.getSessionEditor(other.id));await next.flushWorkspace();
+   const saved=await storage.readWorkspace();assert.equal(saved.sessions.find(s=>s.id===other.id).snapshot.doc.projectId,other.snapshot.doc.projectId);
+  }finally{IDBObjectStore.prototype.put=put}
+ });
+ await test('normal persistence reuses durable sessions while dropping history and oversized thumbnails',async()=>{
+  const {prepareSessionsForStorage}=await server.ssrLoadModule('/src/domain/workspacePersist.ts');
+  const session=w.useWorkspaceStore.getState().sessions[0],{past,future,...snapshot}=session.snapshot;
+  const durable={...session,snapshot},sessions=[durable];assert.equal(prepareSessionsForStorage(sessions,'normal'),sessions);
+  const withHistory={...durable,snapshot:{...snapshot,past:[snapshot.doc],future:[]}},oversized={...durable,sceneThumbnail:'x'.repeat(160001)};
+  const prepared=prepareSessionsForStorage([withHistory,oversized],'normal');
+  assert.equal('past' in prepared[0].snapshot,false);assert.equal('future' in prepared[0].snapshot,false);assert.equal(prepared[1].sceneThumbnail,undefined);
+  for(const field of Object.keys(snapshot))assert.equal(prepared[0].snapshot[field],snapshot[field]);assert.equal(prepared[1].snapshot,snapshot);
+ });
+ await test('recovery preserves idle identity and only replaces interrupted snapshot fields',()=>{
+  const session=w.useWorkspaceStore.getState().sessions[0],idle={...session,snapshot:{...session.snapshot,wasRunning:false,messages:[{id:'done',role:'assistant',text:'done',createdAt:1}]}};
+  assert.equal(w.recoverSession(idle),idle);
+  for(const patch of [
+   {wasRunning:true},
+   {messages:[{...idle.snapshot.messages[0],run:{status:'running',startedAt:1,activity:{lastEventAt:2}}}]},
+   {messages:[{...idle.snapshot.messages[0],steering:{status:'queued',runId:'old'}}]},
+  ]){
+   const source={...idle,snapshot:{...idle.snapshot,...patch}},recovered=w.recoverSession(source);
+   assert.notEqual(recovered,source);assert.equal(recovered.snapshot.wasRunning,false);
+   for(const field of Object.keys(source.snapshot))if(field!=='messages'&&field!=='wasRunning')assert.equal(recovered.snapshot[field],source.snapshot[field]);
+   assert.equal(w.recoverSession(recovered),recovered);
+   if(patch.messages?.[0].steering){assert.equal(recovered.snapshot.messages[0].steering.status,'interrupted');assert.equal(recovered.snapshot.messages.length,1)}
+   else assert.match(recovered.snapshot.messages.at(-1).text,/不会自动继续调用模型/);
+  }
+ });
  await test('built-in module registry rejects duplicates and unknown module IDs',async()=>{const {createModuleRegistry}=await server.ssrLoadModule('/src/modules/registry.ts');const registry=createModuleRegistry();const module={id:'modeling',title:'建模',version:1,Viewport:()=>null,Objects:()=>null,Properties:()=>null,documentFormat:'chat3d-project'};registry.register(module);assert.equal(registry.get('modeling'),module);assert.throws(()=>registry.register(module));assert.throws(()=>registry.get('unknown'));assert.equal(registry.list().length,1)});
  await test('failed stale-tab flush blocks navigation but keeps idle workspace backup available',async()=>{
   for(const session of w.useWorkspaceStore.getState().sessions)w.getSessionEditor(session.id)?.setState({aiStatus:'idle',pendingBatch:null,pendingResult:null});

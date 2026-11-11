@@ -90,9 +90,19 @@ try{
   // Do not read before retry: the failed write must not cache these new identities.
   const revision=await storage.writeWorkspace(next,pack.revision);pack=await storage.readWorkspace();assert.equal(pack.revision,revision);assert.deepEqual(pack.sessions,next.sessions);
  });
+ await test('hydration yields to timers after the read transaction and between sessions',async()=>{
+  const {IDBDatabase}=await import('fake-indexeddb'),transaction=IDBDatabase.prototype.transaction;
+  const sessions=[pack.sessions[0],{...pack.sessions[0],id:'second-graph'}];
+  await storage.writeWorkspace({...pack,sessions},pack.revision);
+  let ticks=0,timer;
+  const tick=()=>{ticks++;timer=setTimeout(tick,0)};
+  IDBDatabase.prototype.transaction=function(...args){const tx=transaction.apply(this,args);if(args[1]==='readonly')tx.addEventListener('complete',()=>{timer=setTimeout(tick,0)},{once:true});return tx};
+  try{pack=await storage.readWorkspace();assert.deepEqual(pack.sessions,sessions);assert.ok(ticks>=sessions.length,`only ${ticks} timer opportunities while hydrating ${sessions.length} sessions`)}
+  finally{clearTimeout(timer);IDBDatabase.prototype.transaction=transaction}
+ });
  await test('missing graph fragments isolate the failed session and retain readable rescue fragments',async()=>{
   const before=await records(),chunk=before.find(([key])=>key!=='current'&&JSON.parse(key)[2]==='doc'&&JSON.parse(key)[3]==='chunk');assert.ok(chunk);
-  await withStore('readwrite',store=>store.delete(chunk[0]));const rescued=await storage.readWorkspace();assert.equal(rescued.sessions.length,0);assert.equal(rescued.recoverySessions[0].data.session.id,pack.sessions[0].id);assert.equal(rescued.recoverySessions[0].data.fragments[0].field,'doc');assert.ok(rescued.recoverySessions[0].data.fragments[0].records.every(([index])=>index!==JSON.parse(chunk[0])[4]));
+  await withStore('readwrite',store=>store.delete(chunk[0]));const rescued=await storage.readWorkspace();assert.deepEqual(rescued.sessions,[pack.sessions[1]]);assert.equal(rescued.needsRepair,true);assert.equal(rescued.recoverySessions[0].data.session.id,pack.sessions[0].id);assert.equal(rescued.recoverySessions[0].data.fragments[0].field,'doc');assert.ok(rescued.recoverySessions[0].data.fragments[0].records.every(([index])=>index!==JSON.parse(chunk[0])[4]));
   await withStore('readwrite',store=>store.put(chunk[1],chunk[0]));assert.deepEqual(await storage.readWorkspace(),pack);
  });
  console.log(`${count} workspace storage checks passed`);

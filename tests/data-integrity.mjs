@@ -80,5 +80,23 @@ try {
   const current=await ws.readWorkspace(),good=current.sessions[0],bad={...structuredClone(good),id:'broken',snapshot:{...good.snapshot,doc:{schemaVersion:99}}};await ws.writeWorkspace({version:1,activeId:'broken',sessions:[bad,...current.sessions]},current.revision);
   const fresh=await server.ssrLoadModule('/src/workspace.ts?integrity-recovery');await fresh.initializeWorkspace();assert.equal(fresh.useWorkspaceStore.getState().error,null);assert.equal(fresh.useWorkspaceStore.getState().sessions.some(s=>s.id===good.id),true);assert.equal(fresh.switchSession(good.id),true);assert.deepEqual(JSON.parse(fresh.exportRecoverySession(0)).data,JSON.parse(JSON.stringify(bad)));await fresh.flushWorkspace();assert.deepEqual((await ws.readWorkspace()).recoverySessions[0].data,bad);
  });
+ await test('startup persists chunk isolation once and retains healthy untracked sessions',async()=>{
+  const current=await ws.readWorkspace(),good=current.sessions[0],broken={...structuredClone(good),id:'broken-chunks'};
+  const seededRevision=await ws.writeWorkspace({...current,sessions:[broken,...current.sessions]},current.revision);
+  const {promise,resolve,reject}=Promise.withResolvers();const request=indexedDB.open('chat3d.workspace.v1',2);
+  request.onerror=()=>reject(request.error);request.onsuccess=()=>{const db=request.result,tx=db.transaction('workspace','readwrite');tx.objectStore('workspace').delete(JSON.stringify(['session',broken.id,'doc','chunk',0]));tx.oncomplete=()=>{db.close();resolve()};tx.onabort=()=>{db.close();reject(tx.error)}};await promise;
+  const fresh=await server.ssrLoadModule('/src/workspace.ts?chunk-isolation');await fresh.initializeWorkspace();
+  assert.equal(fresh.useWorkspaceStore.getState().error,null);const saved=await ws.readWorkspace();assert.equal(saved.revision,seededRevision+1);
+  assert.deepEqual(saved.sessions,current.sessions);assert.equal(saved.recoverySessions.at(-1).data.session.id,broken.id);
+  const next=await server.ssrLoadModule('/src/workspace.ts?chunk-isolation-reload');await next.initializeWorkspace();await next.flushWorkspace();assert.equal((await ws.readWorkspace()).revision,saved.revision);
+ });
+ await test('untracked recovered previews still reject metadata edits',async()=>{
+  const current=await ws.readWorkspace(),good=current.sessions[0],doc=good.snapshot.doc;
+  const preview={...structuredClone(good),id:'idle-preview',snapshot:{...good.snapshot,wasRunning:false,pendingBatch:{projectId:doc.projectId,baseRevision:doc.revision,operations:[]},pendingResult:{doc,errors:[]}}};
+  await ws.writeWorkspace({...current,sessions:[...current.sessions,preview]},current.revision);
+  const fresh=await server.ssrLoadModule('/src/workspace.ts?untracked-preview');await fresh.initializeWorkspace();assert.equal(fresh.getSessionEditor(preview.id),undefined);
+  await assert.rejects(()=>fresh.editLibrarySessionMetadata(preview.id,{name:'must not change'},preview.libraryMetadataRevision??0),/预览/);
+  assert.equal(fresh.useWorkspaceStore.getState().sessions.find(s=>s.id===preview.id).title,preview.title);
+ });
  console.log(`${count} data integrity checks passed`);
 } finally {await server.close();}
