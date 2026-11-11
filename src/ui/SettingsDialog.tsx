@@ -52,8 +52,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       const r = await fetchModels({baseURL:baseURL.trim(),apiKey:apiKey.trim(),model:'',useMock:false}, c.signal);
       if (id !== sequence.current) return;
       setModels(r.models);
+      setManual(!!model.trim()&&!r.models.includes(model));
       if (r.error) { setError(c.signal.aborted ? '获取模型超时，请检查接口或稍后重试' : r.error); }
-      else { setManual(false); setModel((previous) => r.models.includes(previous) ? previous : (r.models.length === 1 ? r.models[0] : '')); }
+      else { setModel((previous) => previous || (r.models.length === 1 ? r.models[0] : '')); }
     } catch (e) { if (id === sequence.current) setError(e instanceof Error ? e.message : '获取模型失败'); }
     finally { window.clearTimeout(timeout); if (id === sequence.current) setFetching(false); }
   };
