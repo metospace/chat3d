@@ -22,12 +22,13 @@ const server=await createServer({server:{middlewareMode:true,hmr:false},appType:
 }}]});
 const originalFetch=globalThis.fetch;
 const item={id:'board',version:1,name:'MES',description:'',system:'MES',archived:false,fileName:'board.html',entry:'index.html',created:''};
-let head=1;
-globalThis.fetch=async url=>{
+let head=1,packageGate;const requests=[];
+globalThis.fetch=async (url,init)=>{
+ requests.push({url:String(url),signal:init?.signal});
  if(String(url).endsWith('/login'))return Response.json({token:'test',user:{id:'member',name:'Member',role:'member'}});
  if(String(url).endsWith('/source'))return new Response('source',{headers:{'Content-Length':'6'}});
  if(String(url).includes('/files?'))return new Response('html');
- if(String(url).endsWith('/board/1'))return Response.json({...item,files:[{path:'index.html',bytes:4}]});
+ if(String(url).endsWith('/board/1'))return packageGate??Response.json({...item,files:[{path:'index.html',bytes:4}]});
  if(String(url).endsWith('/dashboards'))return Response.json([{...item,version:head}]);
  throw Error('Unexpected URL '+url);
 };
@@ -41,8 +42,7 @@ try{
  useEditorStore.setState(state=>({doc:{...state.doc,dashboard:binding}}));
  let ui=render(React.createElement(DashboardPage));
  await waitFor(()=>assert.ok(ui.getByRole('button',{name:'导出源码'})));
- assert.equal(ui.getByRole('heading',{level:1}).textContent,'看板库');
- assert.equal(ui.queryByLabelText('看板概览'),null);assert.equal(ui.container.querySelector('.dashboard-stats'),null);assert.equal(ui.queryByText('可用模板'),null);
+ assert.deepEqual(requests.map(request=>request.url.split('/api/team/')[1]),['login','dashboards']);assert.equal(ui.container.querySelector('iframe'),null);
  assert.ok(ui.getByRole('region',{name:'当前场景已接入'}));
  async function exercise(button){
   fireEvent.click(ui.getByRole('button',{name:new RegExp(button)}));
@@ -67,13 +67,19 @@ try{
  await w.initializeWorkspace();const doc=applyBatch(createInitialDoc(),{operations:[{op:'createPrimitive',name:'模型',parentId:null,geometry:{type:'box',params:{width:1,height:1,depth:1}},materialId:'mat_blue',transform:{position:[0,0,0],scale:[1,1,1],rotationQuaternion:[0,0,0,1]}}]}).doc;
  w.createSession(doc,{moduleKind:'asset',title:'不能接入的资产'});let navigated=0;
  ui=render(React.createElement(DashboardPage,{onSceneLibrary:()=>navigated++}));fireEvent.click(await waitFor(()=>ui.getByRole('button',{name:'查看模板'})));
+ assert.equal(requests.some(request=>request.url.includes('/files?')||/\/board\/1$/.test(request.url)),true); // Earlier explicit composition exercised package reads.
+ requests.length=0;fireEvent.click(ui.getByRole('button',{name:'关闭预览'}));fireEvent.click(ui.getByRole('button',{name:'查看模板'}));
+ assert.equal(requests.length,0);assert.equal(ui.container.querySelector('iframe'),null);assert.ok(ui.getAllByText('暂无截图').length>=1);
  const attach=()=>ui.getByRole('button',{name:'接入当前场景'});await waitFor(()=>assert.equal(attach().disabled,true));fireEvent.click(ui.getByRole('button',{name:'创建/打开场景'}));assert.equal(navigated,1);
  await act(async()=>w.createSession(doc,{moduleKind:'scene',title:'测试场景'}));const original=w.useWorkspaceStore.getState().activeId;
  fireEvent.click(attach());let confirmation=ui.getByRole('dialog',{name:'接入当前场景'});assert.match(confirmation.textContent,/MES.*v1.*测试场景/);
  await act(async()=>w.createSession(doc,{moduleKind:'scene',title:'另一个场景'}));fireEvent.click(within(confirmation).getByRole('button',{name:'确认接入'}));await waitFor(()=>assert.match(within(confirmation).getByRole('alert').textContent,/当前场景或模板预览已变化/));assert.equal(useEditorStore.getState().doc.dashboard,undefined);
  fireEvent.click(within(confirmation).getByRole('button',{name:/取\s*消/}));await act(async()=>w.switchSession(original));
+ let release;packageGate=new Promise(resolve=>{release=resolve;});fireEvent.click(attach());confirmation=ui.getByRole('dialog',{name:'接入当前场景'});fireEvent.click(within(confirmation).getByRole('button',{name:/确认接入$/}));
+ await waitFor(()=>assert.ok(ui.getByText('正在按需读取固定版本并检查场景区域…')));await waitFor(()=>assert.match(requests.at(-1).url,/\/board\/1$/));const pendingSignal=requests.at(-1).signal;
+ fireEvent.click(within(confirmation).getByRole('button',{name:'取消接入'}));assert.equal(pendingSignal.aborted,true);await act(async()=>release(Response.json({...item,files:[{path:'index.html',bytes:4}]})));assert.equal(useEditorStore.getState().doc.dashboard,undefined);assert.equal(requests.at(-1).url.endsWith('/board/1'),true);packageGate=undefined;
  await act(async()=>useEditorStore.getState().setComposerText('未发送草稿'));fireEvent.click(attach());confirmation=ui.getByRole('dialog',{name:'接入当前场景'});head=2;fireEvent.click(within(confirmation).getByRole('button',{name:/确认接入$/}));
  await waitFor(()=>assert.deepEqual(useEditorStore.getState().doc.dashboard,binding));assert.equal(useEditorStore.getState().composerText,'未发送草稿');await act(async()=>useEditorStore.getState().undo());assert.equal(useEditorStore.getState().doc.dashboard,undefined);await w.flushWorkspace();cleanup();
  console.log('PASS preview rejects assets and stale scenes, binds the confirmed fixed version without touching the composer, and is undoable');
- console.log('PASS library title/stats/binding and source + HTML running, success, failure, cancel states');
+ console.log('PASS library/preview zero package requests, connection cancellation and source + HTML running, success, failure, cancel states');
 }finally{cleanup();globalThis.fetch=originalFetch;delete globalThis.dashboardExportGate;await server.close();dom.window.close();}

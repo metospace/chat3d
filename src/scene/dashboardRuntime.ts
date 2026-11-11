@@ -253,7 +253,8 @@ export async function buildDashboardPreview(pack:DashboardPackage,composition?:D
 }
 
 /** Measure the actual rendered package in an opaque frame before mutating a model. */
-export async function inspectDashboardPlacement(pack:DashboardPackage):Promise<{description:string;region:DashboardRegion}> {
+export async function inspectDashboardPlacement(pack:DashboardPackage,signal?:AbortSignal):Promise<{description:string;region:DashboardRegion}> {
+  signal?.throwIfAborted();
   const nonce=crypto.randomUUID();
   const html=previewHtml(prepareDashboard(pack),undefined,{nonce});
   const {promise,resolve,reject}=Promise.withResolvers<{description:string;region:DashboardRegion}>();
@@ -263,7 +264,8 @@ export async function inspectDashboardPlacement(pack:DashboardPackage):Promise<{
   iframe.setAttribute('aria-hidden','true');
   // Keep the logical probe onscreen: Chromium throttles offscreen paint callbacks.
   iframe.style.cssText='position:fixed;left:0;top:0;width:1920px;height:1080px;border:0;pointer-events:none;opacity:0.001;z-index:2147483646';
-  const finish=(error?:Error,result?:{description:string;region:DashboardRegion})=>{clearTimeout(timer);window.removeEventListener('message',receive);iframe.remove();if(error)reject(error);else resolve(result!);};
+  const finish=(error?:Error,result?:{description:string;region:DashboardRegion})=>{clearTimeout(timer);signal?.removeEventListener('abort',abort);window.removeEventListener('message',receive);iframe.remove();if(error)reject(error);else resolve(result!);};
+  const abort=()=>finish(new DOMException('已取消接入','AbortError'));
   const receive=(event:MessageEvent)=>{
     if(event.source!==iframe.contentWindow||event.origin!=='null')return;
     const data:unknown=event.data;
@@ -279,6 +281,7 @@ export async function inspectDashboardPlacement(pack:DashboardPackage):Promise<{
   };
   const timer=setTimeout(()=>finish(new Error('看板场景区域检测超时，未接入模型；请检查模板能否完整离线渲染')),18000);
   window.addEventListener('message',receive);
+  signal?.addEventListener('abort',abort,{once:true});
   iframe.srcdoc=html;
   document.body.append(iframe);
   return promise;

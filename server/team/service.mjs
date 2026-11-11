@@ -157,7 +157,7 @@ export function teamMiddleware(team,validate,{origins=[]}={}){
    if(req.method==='OPTIONS'){res.setHeader('Access-Control-Allow-Methods','GET,POST,OPTIONS');res.setHeader('Access-Control-Allow-Headers','Content-Type,Authorization');res.writeHead(204).end();return;}
    let body;if(req.method==='POST'){
     if(!req.headers['content-type']?.startsWith('application/json'))fail(415,'需要JSON');
-    const bodyLimit=url.pathname.startsWith('/api/team/dashboards/uploads')||url.pathname.startsWith('/api/team/publish-uploads')?2*1024*1024:MAX_HTTP_BODY_BYTES;
+    const bodyLimit=/^\/api\/team\/dashboards\/[a-zA-Z0-9-]+\/\d+\/screenshot$/.test(url.pathname)?12*1024*1024:url.pathname.startsWith('/api/team/dashboards/uploads')||url.pathname.startsWith('/api/team/publish-uploads')?2*1024*1024:MAX_HTTP_BODY_BYTES;
     let size=0;const parts=[];for await(const chunk of req.iterator({destroyOnReturn:false})){size+=chunk.length;if(size>bodyLimit){res.setHeader('Connection','close');fail(413,`HTTP 请求体超过 ${bodyLimit/(1024*1024)} MiB 上限`);}parts.push(chunk);}try{body=JSON.parse(Buffer.concat(parts).toString());}catch{fail(400,'JSON无效');}if(!body||typeof body!=='object')fail(400,'请求无效');
    }
    if(req.method==='POST'&&url.pathname==='/api/team/login')return send(200,team.login(body.name,body.password));
@@ -186,8 +186,14 @@ export function teamMiddleware(team,validate,{origins=[]}={}){
    if(req.method==='POST'&&uploadAction)return send(200,uploadAction[2]==='complete'?await team.dashboards.completeUpload(user,uploadAction[1],token):await team.dashboards.cancelUpload(user,uploadAction[1]));
    const dashboardBinary=url.pathname.match(/^\/api\/team\/dashboards\/([a-zA-Z0-9-]+)\/(\d+)\/(files|source)$/);
    if(req.method==='GET'&&dashboardBinary)return await binary(dashboardBinary[3]==='files'?team.dashboards.file(user,dashboardBinary[1],Number(dashboardBinary[2]),url.searchParams.get('path')):await team.dashboards.source(user,dashboardBinary[1],Number(dashboardBinary[2])));
-   const dashboardThumbnail=url.pathname.match(/^\/api\/team\/dashboards\/([a-zA-Z0-9-]+)\/(\d+)\/thumbnail$/);
-   if(req.method==='GET'&&dashboardThumbnail)return await binary(team.dashboards.thumbnail(user,dashboardThumbnail[1],Number(dashboardThumbnail[2])));
+   const dashboardScreenshot=url.pathname.match(/^\/api\/team\/dashboards\/([a-zA-Z0-9-]+)\/(\d+)\/screenshot(?:\/(info|unbind|[a-zA-Z0-9-]+))?$/);
+   if(dashboardScreenshot){
+    const [,id,version,operation]=dashboardScreenshot;
+    if(req.method==='GET'&&operation==='info')return send(200,await team.dashboards.screenshotInfo(user,id,Number(version)));
+    if(req.method==='GET'&&operation&&operation!=='unbind')return await binary(team.dashboards.screenshot(user,id,Number(version),operation));
+    if(req.method==='POST'&&!operation)return send(200,await team.dashboards.bindScreenshot(await team.authenticate(token,{force:true}),id,Number(version),body));
+    if(req.method==='POST'&&operation==='unbind')return send(200,team.dashboards.unbindScreenshot(await team.authenticate(token,{force:true}),id,Number(version),body));
+   }
    const dashboardArchive=url.pathname.match(/^\/api\/team\/dashboards\/([a-zA-Z0-9-]+)\/archive$/);
    if(req.method==='POST'&&dashboardArchive)return send(200,await team.dashboards.archive(user,dashboardArchive[1],body.archived,token));
    fail(404,'接口不存在');
