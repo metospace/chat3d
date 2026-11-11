@@ -33,7 +33,12 @@ let waiters:(()=>void)[]=[];
 export function recoverSession(session:WorkspaceSession):WorkspaceSession {
   const s=session.snapshot;
   const interrupted=s.wasRunning||s.messages.some(m=>m.run?.status==='running');
-  const recoveredMessages=s.messages.map(m=>m.steering?.status==='queued'?{...m,steering:{...m.steering,status:'interrupted' as const}}:m).map(m=>m.run?.status==='running'?{...m,run:{...m.run,status:'stopped' as const,endedAt:m.run.activity?.lastEventAt??m.createdAt}}:m);
+  if(!interrupted&&!s.messages.some(m=>m.steering?.status==='queued'))return session;
+  const recoveredMessages=s.messages.map(m=>{
+    if(m.steering?.status==='queued')m={...m,steering:{...m.steering,status:'interrupted'}};
+    if(m.run?.status==='running')m={...m,run:{...m.run,status:'stopped',endedAt:m.run.activity?.lastEventAt??m.createdAt}};
+    return m;
+  });
   const messages=interrupted?[...recoveredMessages,{id:makeId(),role:'assistant' as const,text:s.pendingBatch?'上次生成中断，已恢复最近保存的阶段草稿（未完成复核），原场景未修改。不会自动继续调用模型。':'上次生成因页面关闭或刷新中断，尚无可恢复的阶段草稿；已恢复原场景和聊天。不会自动继续调用模型。',createdAt:Date.now()}]:recoveredMessages;
   return {...session,snapshot:{...s,messages,wasRunning:false}};
 }
@@ -97,7 +102,10 @@ function validate(raw:unknown):WorkspaceSession{
   if(snap.messages.some(m=>!m||typeof m.id!=='string'||typeof m.text!=='string'||!['user','assistant','system'].includes(m.role)||(m.images!==undefined&&(!Array.isArray(m.images)||m.images.some(i=>typeof i!=='string')))))throw new Error('会话消息格式无效，已有存储不会被覆盖');
   const doc=validateProjectDocument(snap.doc);
   if(snap.pendingResult){validateProjectDocument(snap.pendingResult.doc);if(snap.pendingBatch?.baseRevision!==doc.revision||snap.pendingBatch.projectId!==doc.projectId||snap.pendingResult.doc.projectId!==doc.projectId)throw new Error('会话预览基线无效');}
-  return {...s,title:s.title.slice(0,80),snapshot:{...snap,doc,composerText:snap.composerText??'',composerImages:snap.composerImages??[],lastRun:snap.lastRun??null,past:snap.past??[],future:snap.future??[]}};
+  const title=s.title.slice(0,80);
+  const needsDefaults=snap.composerText==null||snap.composerImages==null||snap.lastRun===undefined||snap.past==null||snap.future==null;
+  if(title===s.title&&!needsDefaults)return s;
+  return {...s,title,snapshot:needsDefaults?{...snap,doc,composerText:snap.composerText??'',composerImages:snap.composerImages??[],lastRun:snap.lastRun??null,past:snap.past??[],future:snap.future??[]}:snap};
 }
 export function initializeWorkspace():Promise<void>{
   if(initialized)return initialized;
@@ -105,15 +113,21 @@ export function initializeWorkspace():Promise<void>{
     try{
       await requestDurableBrowserStorage();
       const stored=await readWorkspace();
+      let changed=!stored;
       if(stored){
         if(stored.version!==1||!Array.isArray(stored.sessions))throw new Error('会话数据版本不受支持，请先备份本页项目');
         const sessions:WorkspaceSession[]=[],recoverySessions:RecoverySession[]=[...(stored.recoverySessions??[])];
-        for(const raw of stored.sessions){try{sessions.push(recoverSession(validate(raw)));}catch(e){recoverySessions.push({data:raw,error:e instanceof Error?e.message:'会话数据损坏'});}}
+        changed=!!stored.needsRepair;
+        for(const raw of stored.sessions){
+          const {promise:yielded,resolve:resume}=Promise.withResolvers<void>();setTimeout(resume,0);await yielded;
+          try{const valid=validate(raw),recovered=recoverSession(valid);sessions.push(recovered);if(recovered!==valid)changed=true;}
+          catch(e){changed=true;recoverySessions.push({data:raw,error:e instanceof Error?e.message:'会话数据损坏'});}
+        }
         let active=sessions.find(s=>s.id===stored.activeId&&!s.deletedAt)??sessions.find(s=>!s.deletedAt);
-        if(!active){active=record(fresh());sessions.push(active);}
-        setWorkspacePersistenceActive(true);revision=stored.revision;useWorkspaceStore.setState({sessions,recoverySessions,activeId:active.id,ready:true});sessions.forEach(track);restore(active);
+        if(!active){active=record(fresh());sessions.push(active);changed=true;}
+        setWorkspacePersistenceActive(true);revision=stored.revision;useWorkspaceStore.setState({sessions,recoverySessions,activeId:active.id,ready:true});restore(active);
       }else{const first=record(snapshot(),useEditorStore.getState().doc.nodes.length?'恢复的项目':'新建会话');useWorkspaceStore.setState({sessions:[first],activeId:first.id,ready:true});restore(first);}
-      schedule();await flushWorkspace();
+      if(changed){schedule();await flushWorkspace();}
     }catch(e){blocked=true;const first=record(snapshot(),'当前项目');useWorkspaceStore.setState({ready:true,activeId:first.id,sessions:[first],error:e instanceof Error?e.message:'会话恢复失败；已有存储不会被覆盖'});restore(first);}
   })();return initialized;
 }
@@ -205,7 +219,7 @@ export function importWorkspaceBackup(text:string):number{
 
 export async function editLibrarySessionMetadata(id:string,details:LibraryMetadata,expectedRevision=0):Promise<void>{
  const target=useWorkspaceStore.getState().sessions.find(s=>s.id===id&&!s.deletedAt);if(!target)throw Error('项目不存在');
- if(!useWorkspaceStore.getState().ready||useWorkspaceStore.getState().error||sessionIsRunning(id)||stores.get(id)?.getState().aiStatus==='previewing')throw Error('请先处理当前任务、预览或保存异常');
+ if(!useWorkspaceStore.getState().ready||useWorkspaceStore.getState().error||sessionIsRunning(id)||stores.get(id)?.getState().aiStatus==='previewing'||(target.snapshot.pendingBatch&&target.snapshot.pendingResult))throw Error('请先处理当前任务、预览或保存异常');
  if((target.libraryMetadataRevision??0)!==expectedRevision)throw Error('项目信息已更新，请关闭后重新打开');
  const detailsSafe=normalizeLibraryMetadata(details,target.moduleKind??'scene');
  updateLibrarySession(id,{title:detailsSafe.name,autoTitle:false,...(target.moduleKind==='asset'?{assetCategory:detailsSafe.category}:{sceneCategory:detailsSafe.category}),libraryDescription:detailsSafe.description,libraryMetadataRevision:expectedRevision+1});

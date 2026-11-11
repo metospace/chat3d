@@ -47,16 +47,20 @@ function prepareSnapshot(
   snapshot: PersistedSnapshot,
   tier: WorkspaceStorageTier,
 ): Record<string, unknown> {
+  const messages=tier!=='normal'&&snapshot.messages.some(message=>message.images?.length)
+    ?snapshot.messages.map(stripMessageImages):snapshot.messages;
+  const composerImages=tier!=='normal'&&snapshot.composerImages.length?[]:snapshot.composerImages;
+  // Hydrated snapshots may already contain only durable fields. Never persist undo stacks.
+  const fields=Object.keys(snapshot);
+  if(messages===snapshot.messages&&composerImages===snapshot.composerImages&&
+    fields.length===PERSISTED_SNAPSHOT_FIELDS.length&&fields.every(field=>PERSISTED_SNAPSHOT_FIELDS.some(name=>name===field)))return snapshot as unknown as Record<string,unknown>;
   const next: Record<string, unknown> = {
     doc: snapshot.doc,
-    messages:
-      tier !== 'normal'
-        ? snapshot.messages.map(stripMessageImages)
-        : snapshot.messages,
+    messages,
     selection: snapshot.selection,
     dirty: snapshot.dirty,
     composerText: snapshot.composerText,
-    composerImages: tier !== 'normal' ? [] : snapshot.composerImages,
+    composerImages,
     lastRun: snapshot.lastRun,
     pendingBatch: snapshot.pendingBatch,
     pendingResult: snapshot.pendingResult,
@@ -73,15 +77,15 @@ export function prepareSessionsForStorage<T extends PersistableWorkspaceSession>
     tier === 'omit-trashed'
       ? sessions.filter((session) => !session.deletedAt)
       : sessions;
-  return kept.map((session) => ({
-    ...session,
-    sceneThumbnail:
-      typeof session.sceneThumbnail === 'string' &&
-      session.sceneThumbnail.length > 160_000
-        ? undefined
-        : session.sceneThumbnail,
-    snapshot: prepareSnapshot(session.snapshot, tier) as unknown as T['snapshot'],
-  }));
+  let result=kept;
+  kept.forEach((session,index)=>{
+    const snapshot=prepareSnapshot(session.snapshot,tier) as unknown as T['snapshot'];
+    const oversized=typeof session.sceneThumbnail==='string'&&session.sceneThumbnail.length>160_000;
+    if(snapshot===session.snapshot&&!oversized)return;
+    if(result===kept)result=kept.slice();
+    result[index]={...session,...(oversized?{sceneThumbnail:undefined}:{}),snapshot};
+  });
+  return result;
 }
 
 export function storageReclaimNotice(tier: WorkspaceStorageTier): string | null {
