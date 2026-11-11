@@ -43,25 +43,59 @@ try{
  const exported=unzipSync(new Uint8Array(await(await read('/source')).arrayBuffer()));assert.deepEqual(Buffer.from(exported['index.html']),html);assert.deepEqual(Buffer.from(exported['assets/main.css']),css);
  for(const [path,text] of Object.entries(ancillary))assert.equal(Buffer.from(exported[path]).toString(),text);
  assert.equal((await read('/files?path=../team.sqlite')).status,404);
- assert.equal((await read('/thumbnail')).status,404);
  const stale=await post('dashboards/uploads',{...metadata,itemId:first.id,expectedVersion:0,key:crypto.randomUUID()});if(stale.status===200){const result=await post('dashboards/uploads/'+stale.body.uploadId+'/complete',{});assert.notEqual(result.status,200);}else assert.equal(stale.status,409);
  await post('dashboards/'+first.id+'/archive',{archived:true});assert.deepEqual(await(await fetch(base+'/api/team/dashboards',{headers:{Authorization:'Bearer '+member.token}})).json(),[]);assert.equal((await read('')).status,200);
  console.log('PASS custom system, chunk offset validation, incomplete files, admin enforcement, folder export, idempotency and immutable archived reads');
- const publishImages=async files=>{
-  const initialized=await post('dashboards/uploads',{...metadata,key:crypto.randomUUID()});assert.equal(initialized.status,200,JSON.stringify(initialized.body));const uploadRoot='dashboards/uploads/'+initialized.body.uploadId;
+ const publishImages=async(files,extra={})=>{
+  const initialized=await post('dashboards/uploads',{...metadata,...extra,key:crypto.randomUUID()});assert.equal(initialized.status,200,JSON.stringify(initialized.body));const uploadRoot='dashboards/uploads/'+initialized.body.uploadId;
   for(const [path,bytes] of Object.entries({'index.html':html,...files})){
    const registered=await post(uploadRoot+'/files',{path,size:bytes.length});assert.equal(registered.status,200,path);
    const chunk=await post(uploadRoot+'/files/'+registered.body.fileId+'/chunks',{offset:0,base64:bytes.toString('base64')});assert.equal(chunk.status,200,path);
   }
-  const completed=await post(uploadRoot+'/complete',{});assert.equal(completed.status,200,JSON.stringify(completed.body));return base+'/api/team/dashboards/'+completed.body.id+'/'+completed.body.version+'/thumbnail';
+  const completed=await post(uploadRoot+'/complete',{});assert.equal(completed.status,200,JSON.stringify(completed.body));return completed.body;
  };
- const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=','base64'),gif=Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7','base64');
- const thumbnailUrl=await publishImages({'assets/generic.gif':Buffer.concat([gif,gif,gif]),'assets/PrEvIeW/image.PnG':png,'assets/cover.svg':Buffer.alloc(512,32)});
- const thumbnailResponse=await fetch(thumbnailUrl,{headers:{Authorization:'Bearer '+member.token}});assert.equal(thumbnailResponse.status,200);assert.equal(thumbnailResponse.headers.get('content-type'),'image/png');assert.equal(Number(thumbnailResponse.headers.get('content-length')),png.length);assert.deepEqual(Buffer.from(await thumbnailResponse.arrayBuffer()),png);
- assert.equal((await fetch(thumbnailUrl)).status,401);assert.equal((await fetch(thumbnailUrl,{headers:{Authorization:'Bearer invalid'}})).status,401);
- const largerGif=Buffer.concat([gif,gif]),fallbackUrl=await publishImages({'assets/small.PNG':png,'assets/b.GiF':largerGif,'assets/a.GIF':Buffer.concat([gif,Buffer.from(gif).fill(0)])});
- const fallbackResponse=await fetch(fallbackUrl,{headers:{Authorization:'Bearer '+member.token}});assert.equal(fallbackResponse.status,200);assert.equal(fallbackResponse.headers.get('content-type'),'image/gif');assert.deepEqual(Buffer.from(await fallbackResponse.arrayBuffer()),Buffer.concat([gif,Buffer.from(gif).fill(0)]));
- console.log('PASS authenticated thumbnail bytes and MIME, preferred case-insensitive image paths, largest fallback, deterministic ties and missing-image 404');
+ const images=await publishImages({'assets/reference-full.png':Buffer.from('not actual render'),'cover.svg':Buffer.from('<svg onload="alert(1)"/>')});
+ const imageRoot='dashboards/'+images.id+'/1',get=async(path,token=member.token)=>fetch(base+'/api/team/'+path,{headers:{Authorization:'Bearer '+token}});
+ assert.equal((await get(imageRoot+'/screenshot/not-bound')).status,404);
+ const {encode}=await import('fast-png');const pixels=new Uint8Array(320*180*4);pixels.fill(180);const png=Buffer.from(encode({width:320,height:180,data:pixels,channels:4,depth:8}));
+ const {screenshotPng}=await import('../server/team/dashboard-screenshot.mjs'),{crc32,deflateSync}=await import('node:zlib'),{decode}=await import('fast-png');
+ const chunk=(type,data)=>{const bytes=Buffer.alloc(data.length+12);bytes.writeUInt32BE(data.length);bytes.write(type,4);data.copy(bytes,8);bytes.writeUInt32BE(crc32(bytes.subarray(4,-4)),bytes.length-4);return bytes;};
+ for(const [color,channels] of [[0,1],[2,3],[4,2],[6,4]]){
+  const width=320,height=180,stride=width*channels,raw=Buffer.alloc(stride*height),filtered=Buffer.alloc((stride+1)*height),header=Buffer.alloc(13);header.writeUInt32BE(width);header.writeUInt32BE(height,4);header[8]=8;header[9]=color;
+  for(let index=0;index<raw.length;index++)raw[index]=(index*37+Math.floor(index/stride)*19)%256;
+  for(let y=0;y<height;y++){
+   const filter=y%5;filtered[y*(stride+1)]=filter;
+   for(let x=0;x<stride;x++){
+    const index=y*stride+x,left=x>=channels?raw[index-channels]:0,up=y?raw[index-stride]:0,corner=y&&x>=channels?raw[index-stride-channels]:0;
+    const p=left+up-corner,a=Math.abs(p-left),b=Math.abs(p-up),c=Math.abs(p-corner),predictor=filter===0?0:filter===1?left:filter===2?up:filter===3?(left+up)>>>1:a<=b&&a<=c?left:b<=c?up:corner;
+    filtered[y*(stride+1)+1+x]=(raw[index]-predictor)&255;
+   }
+  }
+  const input=Buffer.concat([png.subarray(0,8),chunk('IHDR',header),chunk('tEXt',Buffer.from('source\0<script>not retained</script>')),chunk('IDAT',deflateSync(filtered)),chunk('IEND',Buffer.alloc(0))]),clean=screenshotPng(input.toString('base64'));
+  assert.deepEqual(Buffer.from(decode(clean.bytes).data),raw);assert.equal(clean.bytes.includes(Buffer.from('<script>')),false);
+  filtered[0]=5;const invalid=Buffer.concat([png.subarray(0,8),chunk('IHDR',header),chunk('IDAT',deflateSync(filtered)),chunk('IEND',Buffer.alloc(0))]);assert.throws(()=>screenshotPng(invalid.toString('base64')),/过滤器/);
+  const bomb=Buffer.concat([png.subarray(0,8),chunk('IHDR',header),chunk('IDAT',deflateSync(Buffer.alloc(filtered.length+1))),chunk('IEND',Buffer.alloc(0))]);assert.throws(()=>screenshotPng(bomb.toString('base64')),/解码/);
+ }
+ console.log('PASS all PNG filters and supported channels preserve decoded pixels; metadata removed, invalid filters and excess inflation rejected');
+ const identity=await(await get(imageRoot+'/screenshot/info')).json();assert.match(identity.packageHash,/^[a-f0-9]{64}$/);
+ const shotBody={packageHash:identity.packageHash,expectedScreenshotId:null,base64:png.toString('base64'),source:'受控桌面实际渲染 index.html，人工核对固定版本',capturedAt:new Date().toISOString(),confirmed:true};
+ assert.equal((await post(imageRoot+'/screenshot',shotBody,member.token)).status,403);
+ assert.equal((await get(imageRoot+'/screenshot/info','invalid')).status,401);
+ for(const changed of [{confirmed:false},{packageHash:'0'.repeat(64)},{source:'https://evil.invalid\nscript'},{base64:Buffer.from('<svg onload="alert(1)"/>').toString('base64')},{base64:Buffer.from('<script>alert(1)</script>').toString('base64')},{base64:png.subarray(0,50).toString('base64')},{base64:Buffer.concat([png,Buffer.from('<script>')]).toString('base64')},{base64:'A'.repeat(12*1024*1024)}])assert.notEqual((await post(imageRoot+'/screenshot',{...shotBody,...changed})).status,200);
+ const tiny=Buffer.from(encode({width:1,height:1,data:new Uint8Array(4),channels:4,depth:8}));assert.equal((await post(imageRoot+'/screenshot',{...shotBody,base64:tiny.toString('base64')})).status,400);
+ const broken=Buffer.from(png);broken[broken.length-1]^=1;assert.equal((await post(imageRoot+'/screenshot',{...shotBody,base64:broken.toString('base64')})).status,400);
+ const saved=await post(imageRoot+'/screenshot',shotBody);assert.equal(saved.status,200,JSON.stringify(saved.body));assert.equal(saved.body.templateId,images.id);assert.equal(saved.body.version,1);assert.equal(saved.body.width,320);assert.equal(saved.body.height,180);assert.equal(saved.body.provenance,'admin-confirmed-local-render');
+ const picture=await get(imageRoot+'/screenshot/'+saved.body.id);assert.equal(picture.status,200);assert.equal(picture.headers.get('content-type'),'image/png');assert.equal(picture.headers.get('x-content-type-options'),'nosniff');const decoded=(await import('fast-png')).decode(new Uint8Array(await picture.arrayBuffer()));assert.deepEqual(decoded.data,pixels);
+ const listed=await(await get('dashboards')).json();assert.equal(listed.find(row=>row.id===images.id).screenshot.id,saved.body.id);assert.equal(listed.find(row=>row.id===images.id).packageHash,identity.packageHash);
+ assert.equal((await post(imageRoot+'/screenshot',shotBody)).status,409);
+ const other=await publishImages({});assert.equal((await post('dashboards/'+other.id+'/1/screenshot',shotBody)).status,409);
+ assert.equal((await get('dashboards/'+other.id+'/1/screenshot/'+saved.body.id)).status,404);
+ await publishImages({'new.js':Buffer.from('new version')},{itemId:images.id,expectedVersion:1});assert.equal((await get('dashboards/'+images.id+'/2/screenshot/'+saved.body.id)).status,404);assert.equal((await get(imageRoot+'/screenshot/'+saved.body.id)).status,200);
+ const nextIdentity=await(await get('dashboards/'+images.id+'/2/screenshot/info')).json();assert.equal((await post('dashboards/'+images.id+'/2/screenshot',shotBody)).status,409);assert.notEqual(nextIdentity.packageHash,identity.packageHash);
+ assert.equal((await post(imageRoot+'/screenshot/unbind',{expectedScreenshotId:saved.body.id},member.token)).status,403);
+ assert.equal((await post(imageRoot+'/screenshot/unbind',{expectedScreenshotId:'stale'})).status,409);
+ assert.equal((await post(imageRoot+'/screenshot/unbind',{expectedScreenshotId:saved.body.id})).status,200);assert.equal((await get(imageRoot+'/screenshot/'+saved.body.id)).status,404);
+ console.log('PASS package assets never imply screenshots; authenticated PNG decode, limits, binding CAS, ID/version/hash isolation and unbinding');
  const archiveBytes=Buffer.from(zipSync({'index.html':html,'assets/main.css':css,...Object.fromEntries(Object.entries(ancillary).map(([path,text])=>[path,Buffer.from(text)]))}));
  const archiveMeta={...metadata,name:'ZIP 大屏',system:'企业 ERP',sourceKind:'file',fileName:oldPack.fileName,key:crypto.randomUUID()};
  const archiveInit=await post('dashboards/uploads',archiveMeta),archiveRoot='dashboards/uploads/'+archiveInit.body.uploadId;
@@ -76,9 +110,9 @@ try{
  console.log('PASS cancelled uploads cannot publish and published metadata survives reopen');
  // Exercise the on-disk migration against the actual previous schema and original package bytes.
  const legacyPath=join(dir,'legacy.sqlite'),db=new DatabaseSync(legacyPath);db.exec(`CREATE TABLE users(id TEXT PRIMARY KEY,name TEXT UNIQUE NOT NULL,salt TEXT NOT NULL,password TEXT NOT NULL,role TEXT NOT NULL,disabled INTEGER NOT NULL DEFAULT 0);CREATE TABLE dashboard_items(id TEXT PRIMARY KEY,owner TEXT NOT NULL REFERENCES users(id),head INTEGER NOT NULL,archived INTEGER NOT NULL DEFAULT 0);CREATE TABLE dashboard_versions(item TEXT NOT NULL REFERENCES dashboard_items(id),version INTEGER NOT NULL,name TEXT NOT NULL,description TEXT NOT NULL,system TEXT NOT NULL CHECK(system IN('WMS','MES','其他')),created TEXT NOT NULL,package TEXT NOT NULL,file_name TEXT NOT NULL,entry TEXT NOT NULL,PRIMARY KEY(item,version));CREATE TABLE dashboard_requests(user TEXT NOT NULL,key TEXT NOT NULL,digest TEXT NOT NULL,result TEXT NOT NULL,PRIMARY KEY(user,key));CREATE TRIGGER dashboard_versions_no_update BEFORE UPDATE ON dashboard_versions BEGIN SELECT RAISE(ABORT,'immutable'); END;CREATE TRIGGER dashboard_versions_no_delete BEFORE DELETE ON dashboard_versions BEGIN SELECT RAISE(ABORT,'immutable'); END;`);db.prepare('INSERT INTO users VALUES(?,?,?,?,?,0)').run('legacy-user','legacy','salt','hash','admin');db.prepare('INSERT INTO dashboard_items VALUES(?,?,1,0)').run('legacy-item','legacy-user');db.prepare('INSERT INTO dashboard_versions VALUES(?,1,?,?,?,?,?,?,?)').run('legacy-item','旧模板','保留原始包','WMS',new Date().toISOString(),JSON.stringify(oldPack),oldPack.fileName,oldPack.entry);db.close();
- const legacy=openTeam(legacyPath);try{const value=legacy.dashboards.read({id:'legacy-user',role:'admin'},'legacy-item',1);assert.equal(value.name,'旧模板');assert.deepEqual(value.files.map(f=>f.path).sort(),['assets/main.js','index.html']);assert.equal(legacy.db.prepare('SELECT count(*) AS n FROM dashboard_versions').get().n,1);}finally{legacy.close();}
+ const legacy=openTeam(legacyPath);try{const user={id:'legacy-user',role:'admin'},value=legacy.dashboards.read(user,'legacy-item',1);assert.equal(value.name,'旧模板');assert.equal(value.screenshot,undefined);assert.deepEqual(value.files.map(f=>f.path).sort(),['assets/main.js','index.html']);assert.equal(legacy.db.prepare('SELECT count(*) AS n FROM dashboard_versions').get().n,1);const identity=await legacy.dashboards.screenshotInfo(user,'legacy-item',1);assert.match(identity.packageHash,/^[a-f0-9]{64}$/);const result=await legacy.dashboards.bindScreenshot(user,'legacy-item',1,{...shotBody,packageHash:identity.packageHash});assert.equal(legacy.dashboards.list(user)[0].screenshot.id,result.id);assert.equal(legacy.dashboards.read(user,'legacy-item',1).files.length,2);}finally{legacy.close();}
  console.log('PASS previous package schema migrates without losing fixed versions');
- server=await createServer({server:{middlewareMode:true},appType:'custom'});
+ server=await createServer({server:{middlewareMode:true,hmr:false},appType:'custom'});
  const {createEditorStore}=await server.ssrLoadModule('/src/store.ts'),{serializeProject,parseProject}=await server.ssrLoadModule('/src/domain/project.ts'),{dashboardBinding}=await server.ssrLoadModule('/src/domain/dashboard.ts');
  const {selectDashboardFiles}=await server.ssrLoadModule('/src/domain/dashboardUpload.ts');
  const {parseDashboardCommand}=await server.ssrLoadModule('/src/domain/dashboard.ts');
@@ -129,10 +163,18 @@ try{
  const completeSource=await selectDashboardFiles(sourceFiles,'folder');assert.equal(completeSource.entries[0],'dist/index.html');assert.ok(completeSource.files.some(f=>f.path==='scripts/build.py'));assert.ok(completeSource.files.some(f=>f.path==='README.md'));
  await assert.rejects(selectDashboardFiles([new File(['source'],'App.vue')],'folder'),/没有 HTML 入口/);
  globalThis.DOMParser=dom.window.DOMParser;
- const {buildDashboardPreview}=await server.ssrLoadModule('/src/scene/dashboardRuntime.ts');
+ const {buildDashboardPreview,buildDashboardExport,inspectDashboardPlacement}=await server.ssrLoadModule('/src/scene/dashboardRuntime.ts');
  const sourceResources=Object.fromEntries([['index.html','<h1>静态入口</h1>'],...Object.entries(ancillary)].map(([path,text])=>[path,new TextEncoder().encode(text)]));
  await buildDashboardPreview({fileName:'source.zip',entry:'index.html',files:sourceResources});
  await assert.rejects(buildDashboardPreview({fileName:'source.zip',entry:'index.html',files:{...sourceResources,'index.html':strToU8('<script type="module" src="src/main.ts"></script>')}}),/src\/main\.ts.*需要构建/);
+ const runtimeWindow=globalThis.window,runtimeDocument=globalThis.document;globalThis.window=dom.window;globalThis.document=dom.window.document;
+ try{
+  const pack={fileName:'runtime.html',entry:'index.html',files:{'index.html':strToU8('<main data-scenivo-scene>Actual template</main>')}},abort=new AbortController();
+  const pending=inspectDashboardPlacement(pack,abort.signal);assert.ok(dom.window.document.querySelector('iframe[sandbox="allow-scripts"]'));abort.abort();await assert.rejects(pending,{name:'AbortError'});assert.equal(dom.window.document.querySelector('iframe'),null);
+  await assert.rejects(inspectDashboardPlacement(pack,AbortSignal.abort()),{name:'AbortError'});assert.equal(dom.window.document.querySelector('iframe'),null);
+  const combined=await buildDashboardExport(pack,dashboardBinding('http://localhost',{id:first.id,version:1,name:'MES'},'dashboard'),'<html><body>offline scene</body></html>');assert.match(combined,/offline scene/);assert.match(combined,/Actual template/);
+ }finally{if(runtimeWindow===undefined)delete globalThis.window;else globalThis.window=runtimeWindow;if(runtimeDocument===undefined)delete globalThis.document;else globalThis.document=runtimeDocument;}
+ console.log('PASS actual placement probe abort removes iframe, pre-aborted probe never mounts, and composition export includes fixed template and scene');
  let blobIndex=0;dom.window.URL.createObjectURL=()=>`blob:local-${++blobIndex}`;dom.window.URL.revokeObjectURL=()=>{};
  Object.assign(dom.window,{fetch:globalThis.fetch,Request:globalThis.Request,Response:globalThis.Response});
  dom.window.eval((await readFile(new URL('../src/scene/dashboardPlacement.js',import.meta.url),'utf8'))+'\n'+(await readFile(new URL('../src/scene/dashboardSandbox.js',import.meta.url),'utf8'))+'\nmountDashboard('+JSON.stringify({entry:'index.html',marker:'__asset_',resources:{'assets/icon.png':{mime:'image/png',base64:'AA=='}},modules:{},documents:{'index.html':'<!doctype html><html><head></head><body><main id="dynamic"></main></body></html>'}})+',"default-src none");');

@@ -1,10 +1,11 @@
 import {DashboardRegionEditor} from './DashboardRegionEditor';
-import {DashboardCardPreview} from './DashboardCardPreview';
+import {DashboardCardPreview,DashboardScreenshot} from './DashboardCardPreview';
+import {DashboardScreenshotDialog} from './DashboardScreenshotDialog';
 import {useEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
 import {Alert,Button,Dropdown,Empty,Input,InputNumber,Modal,Progress,Select,Spin,Switch,Tag} from 'antd';
 import {CodeIcon,DashboardIcon,DotsHorizontalIcon,DownloadIcon,LayersIcon,MagnifyingGlassIcon,ReloadIcon,UploadIcon} from '@radix-ui/react-icons';
 import {getTeamSession,subscribeTeamSession} from '../domain/teamLibrary';
-import {DEFAULT_DASHBOARD_VIEW,dashboardBinding,downloadDashboardSource,listDashboards,readDashboard,validDashboardRegion,type DashboardItem,type DashboardVersion,type DashboardView,type DashboardRegion} from '../domain/dashboard';
+import {DEFAULT_DASHBOARD_VIEW,downloadDashboardSource,listDashboards,readDashboard,validDashboardRegion,type DashboardItem,type DashboardVersion,type DashboardView,type DashboardRegion} from '../domain/dashboard';
 import {useEditorStore} from '../store';
 import {useWorkspaceStore} from '../workspace';
 import {assertLibraryReady} from '../domain/libraryNavigation';
@@ -39,14 +40,14 @@ export function DashboardSceneView({onClose}:{onClose:()=>void}) {
   const [region,setRegion]=useState<DashboardRegion|undefined>(binding?.region),[previewRegion,setPreviewRegion]=useState(region);
   useEffect(()=>{const next={...DEFAULT_DASHBOARD_VIEW,...binding?.view};setDraft(next);setPreviewView(next);setRegion(binding?.region);setPreviewRegion(binding?.region);},[binding?.view,binding?.region]);
   useEffect(()=>{
-    let alive=true;setError('');setValue(undefined);setScene('');
+    let alive=true;const abort=new AbortController();setError('');setValue(undefined);setScene('');
     if(!binding)return;
     void(async()=>{
       if(!client?.user||client.base!==binding.service)throw Error('请登录绑定模板所属的团队服务：'+binding.service);
-      const [template,html]=await Promise.all([readDashboard(client,binding.templateId,binding.version),exportHtml(doc,binding.name,undefined,{embedded:true})]);
+      const [template,html]=await Promise.all([readDashboard(client,binding.templateId,binding.version,abort.signal),exportHtml(doc,binding.name,undefined,{embedded:true})]);
       if(alive){setValue(template);setScene(html);}
     })().catch(reason=>{if(alive)setError(errorMessage(reason));});
-    return()=>{alive=false;};
+    return()=>{alive=false;abort.abort();};
   },[client,doc.projectId,doc.nodes,doc.materials,doc.assets,binding?.service,binding?.templateId,binding?.version]);
   const adjustedScene=useMemo(()=>scene?withHtmlViewerView(scene,previewView):'',[scene,previewView]);
   const previewBinding=useMemo(()=>binding?{...binding,region:previewRegion}:undefined,[binding,previewRegion]);
@@ -97,16 +98,20 @@ export function DashboardPage({onSceneLibrary}:{onSceneLibrary?:()=>void}){
   const currentScene=workspace.sessions.find(session=>session.id===workspace.activeId&&!session.deletedAt&&session.moduleKind!=='asset');
   const sceneAvailable=!!currentScene&&doc.nodes.some(node=>node.visible);
   const sceneLocked=!['idle','error','cancelled'].includes(aiStatus)||!!workspace.error;
-  const [connection,setConnection]=useState<{template:DashboardVersion;account:typeof client;sceneId:string;name:string;doc:typeof doc}>();
+  const [connection,setConnection]=useState<{template:DashboardItem;account:typeof client;sceneId:string;name:string;doc:typeof doc}>();
   const [items,setItems]=useState<DashboardItem[]>([]);
   const [query,setQuery]=useState(''),[systemFilter,setSystemFilter]=useState('');
   const [all,setAll]=useState(false),[loading,setLoading]=useState(false),[busy,setBusy]=useState(false);
   const [notice,setNotice]=useState(''),[error,setError]=useState('');
   const [exportStatus,setExportStatus]=useState<ExportStatus|null>(null);
   const [upload,setUpload]=useState<{target?:DashboardItem}>();
-  const [selected,setSelected]=useState<DashboardVersion>();
+  const [selected,setSelected]=useState<DashboardItem>();
+  const [screenshotTarget,setScreenshotTarget]=useState<DashboardItem>();
   const [viewer,setViewer]=useState(false);
   const request=useRef(0),actionLock=useRef(false),detail=useRef<HTMLElement>(null);
+  const transfer=useRef<AbortController|undefined>(undefined),mounted=useRef(true),selectedRef=useRef(selected);
+  selectedRef.current=selected;
+  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;transfer.current?.abort();};},[]);
 
   async function refresh() {
     if(!client?.user)return;
@@ -117,50 +122,50 @@ export function DashboardPage({onSceneLibrary}:{onSceneLibrary?:()=>void}){
     finally{if(current===request.current)setLoading(false);}
   }
   useEffect(()=>{
-    setItems([]);setSelected(undefined);setConnection(undefined);setUpload(undefined);setSystemFilter('');setNotice('');setError('');
+    transfer.current?.abort();setItems([]);setSelected(undefined);setConnection(undefined);setUpload(undefined);setScreenshotTarget(undefined);setSystemFilter('');setNotice('');setError('');
     if(client?.user)void refresh();else setLoading(false);
-    return()=>{request.current++;};
+    return()=>{request.current++;transfer.current?.abort();};
   },[client,all]);
   useEffect(()=>{if(selected)detail.current?.scrollIntoView?.({behavior:'smooth',block:'start'});},[selected]);
   async function action(work:()=>Promise<void>) {
     if(actionLock.current)return;
     actionLock.current=true;setBusy(true);setError('');setNotice('');
-    try{await work();}catch(reason){setError(errorMessage(reason));}
-    finally{actionLock.current=false;setBusy(false);}
+    try{await work();}catch(reason){if(mounted.current)setError(errorMessage(reason));}
+    finally{actionLock.current=false;if(mounted.current)setBusy(false);}
   }
-  async function choose(item:DashboardItem) {
-    if(!client)return;
-    const result=await readDashboard(client,item.id,item.version);
-    if(getTeamSession()===client)setSelected(result);
+  function choose(item:DashboardItem) {
+    transfer.current?.abort();setSelected(item);setError('');
   }
   async function downloadSource(item:DashboardItem){
     if(!client)return;
     await action(async()=>{
-      setExportStatus(null);
+      const abort=new AbortController();transfer.current=abort;setExportStatus(null);
       try{
-        const result=await downloadDashboardSource(client,item,progress=>setExportStatus({kind:'running',name:item.name,...progress}));
-        setExportStatus(result===null?{kind:'cancel',message:'已取消导出'}:{kind:'success',message:result});
-      }catch(reason){setExportStatus({kind:'error',message:errorMessage(reason)});}
+        const result=await downloadDashboardSource(client,item,progress=>{if(!abort.signal.aborted)setExportStatus({kind:'running',name:item.name,...progress});},abort.signal);
+        if(!abort.signal.aborted)setExportStatus(result===null?{kind:'cancel',message:'已取消导出'}:{kind:'success',message:result});
+      }catch(reason){if(mounted.current)setExportStatus(abort.signal.aborted?{kind:'cancel',message:'已取消导出'}:{kind:'error',message:errorMessage(reason)});}
     });
   }
   async function connect(){
-    if(!connection||!client)return;
+    if(!connection||!client||actionLock.current)return;
     const target=connection;
+    const abort=new AbortController();transfer.current=abort;
     await action(async()=>{
       assertLibraryReady();
       if(client!==target.account)throw Error('团队账户已变更，请重新选择看板');
       const list=await listDashboards(client);
       if(!list.some(item=>item.id===target.template.id))throw Error('模板已下架或不可用，未修改场景');
-      const {binding:fixed,description}=await prepareDashboardBinding(client,target.template,'dashboard');
+      const template=await readDashboard(client,target.template.id,target.template.version,abort.signal);
+      const {binding:fixed,description}=await prepareDashboardBinding(client,template,'dashboard',abort.signal);
+      abort.signal.throwIfAborted();
       const current=useWorkspaceStore.getState(),scene=current.sessions.find(session=>session.id===target.sceneId&&!session.deletedAt);
-      if(!detail.current||current.activeId!==target.sceneId||scene?.title!==target.name||scene.moduleKind==='asset'||useEditorStore.getState().doc!==target.doc)throw Error('当前场景或模板预览已变化，请重新确认接入');
+      if(!mounted.current||selectedRef.current!==target.template||!detail.current||current.activeId!==target.sceneId||scene?.title!==target.name||scene.moduleKind==='asset'||useEditorStore.getState().doc!==target.doc)throw Error('当前场景或模板预览已变化，请重新确认接入');
       assertLibraryReady();
       const result=useEditorStore.getState().setDashboard(fixed);
       if(!result.ok)throw Error(result.error);
       setConnection(undefined);setNotice(`已接入场景“${target.name}”：${fixed.name} v${fixed.version}，引用版本保持固定。${description}。可在工作台“查看看板”或撤销。`);
     });
   }
-  const previewBinding=selected&&client?dashboardBinding(client.base,selected,'dashboard'):undefined;
   const systems=Array.from(new Set(items.map(item=>item.system))).filter(Boolean).sort((a,b)=>a.localeCompare(b,'zh-CN'));
   const needle=query.trim().toLocaleLowerCase();
   const visible=items.filter(item=>(!systemFilter||item.system===systemFilter)&&`${item.name} ${item.description} ${item.system} ${item.fileName}`.toLocaleLowerCase().includes(needle));
@@ -185,7 +190,7 @@ export function DashboardPage({onSceneLibrary}:{onSceneLibrary?:()=>void}){
         <ExportFeedback status={exportStatus}/>
         {loading?<div className="dashboard-loading" role="status"><Spin/><span>正在读取看板模板…</span></div>:visible.length?<div className="dashboard-template-grid">
           {visible.map(item=><article key={item.id} className={`dashboard-template-card${selected?.id===item.id?' is-selected':''}${item.archived?' is-archived':''}`} aria-label={`看板模板 ${item.name}`}>
-            <DashboardCardPreview client={client} item={item} disabled={working} onOpen={()=>void action(()=>choose(item))}/>
+            <DashboardCardPreview client={client} item={item} disabled={working} onOpen={()=>choose(item)}/>
             <div className="dashboard-template-topline">
               <span className="dashboard-template-icon"><DashboardIcon/></span>
               <div className="dashboard-template-tags">
@@ -193,6 +198,7 @@ export function DashboardPage({onSceneLibrary}:{onSceneLibrary?:()=>void}){
               </div>
               {admin&&<Dropdown trigger={['click']} menu={{items:[
                 {key:'version',label:'发布新版',onClick:()=>setUpload({target:item})},
+                {key:'screenshot',label:'管理此版本截图',onClick:()=>setScreenshotTarget(item)},
                 {type:'divider'},
                 {
                   key:'archive',label:item.archived?'重新上架':'下架模板',danger:!item.archived,
@@ -209,28 +215,30 @@ export function DashboardPage({onSceneLibrary}:{onSceneLibrary?:()=>void}){
             </div>
             <h3 title={item.name}>{item.name}</h3>
             <div className="dashboard-template-actions">
-              <Button type="primary" ghost disabled={working} onClick={()=>void action(()=>choose(item))}>查看模板</Button>
+              <Button type="primary" ghost disabled={working} onClick={()=>choose(item)}>查看模板</Button>
               <Button icon={<DownloadIcon/>} disabled={working} onClick={()=>void downloadSource(item)}>导出源码</Button>
             </div>
           </article>)}
         </div>:<div className="dashboard-empty"><span className="dashboard-empty-symbol"><DashboardIcon/></span><h3>{query||systemFilter?'没有匹配的看板模板':error?'暂时无法读取模板':'还没有看板模板'}</h3><p>{query||systemFilter?'试试其他关键词或系统，或清除筛选条件。':error?'请检查团队服务连接后重试。':'上传已有静态大屏，保留源码与版本，再选择场景接入。'}</p>{query||systemFilter?<Button onClick={()=>{setQuery('');setSystemFilter('');}}>清除筛选</Button>:!error&&admin?<Button type="primary" icon={<UploadIcon/>} onClick={()=>setUpload({})}>上传第一个看板模板</Button>:null}</div>}
       </section>
       <div className="dashboard-security-note"><CodeIcon/><p>静态源码在隔离环境中运行，不执行服务端构建，不共享登录信息。接入模板仅组合展示，不代表已接通业务数据。</p></div>
-      {selected&&previewBinding&&<section ref={detail} className="dashboard-connection" aria-labelledby="dashboard-connection-title">
+      {selected&&<section ref={detail} className="dashboard-connection" aria-labelledby="dashboard-connection-title">
         <header className="dashboard-connection-heading">
           <div>
             <span className="dashboard-page-eyebrow">模板预览</span>
             <h2 id="dashboard-connection-title">{selected.name} <Tag>v{selected.version}</Tag></h2>
             <p>{sceneAvailable?`当前场景：${currentScene!.title}。接入将固定使用模板 v${selected.version}，可撤销。`:'请先创建/打开有可见模型的场景，再接入看板。资产项目不能作为接入目标。'}</p>
           </div>
-          <Button type="text" onClick={()=>setSelected(undefined)}>关闭预览</Button>
+          <Button type="text" onClick={()=>{transfer.current?.abort();setSelected(undefined);setConnection(undefined);}}>关闭预览</Button>
         </header>
-        <div className="dashboard-template-preview"><DashboardPresentation pack={selected.package} binding={previewBinding}/></div>
+        <div className="dashboard-template-preview"><DashboardScreenshot client={client} item={selected}/></div>
+        {selected.screenshot&&<p>截图来源（管理员人工确认）：{selected.screenshot.source} · {selected.screenshot.width}×{selected.screenshot.height} · {selected.screenshot.capturedAt}。非服务端自动真实性证明。</p>}
         <div className="dashboard-command-hint"><Button type="primary" disabled={working||selected.archived||!sceneAvailable||sceneLocked} onClick={()=>{setError('');setConnection({template:selected,account:client,sceneId:currentScene!.id,name:currentScene!.title,doc});}}>接入当前场景</Button>{!sceneAvailable&&onSceneLibrary&&<Button onClick={onSceneLibrary}>创建/打开场景</Button>}{selected.archived?<p>此模板已下架，不能新接入。</p>:sceneAvailable&&sceneLocked&&<p>请先结束任务、处理预览或解决本机保存异常。</p>}<p>仅组合展示，不代表已接通业务数据。</p></div>
       </section>}
       {upload&&<DashboardUploadDialog client={client} target={upload.target} systems={systems} onClose={()=>setUpload(undefined)} onPublished={()=>{setUpload(undefined);setNotice('看板模板已发布，已有场景继续使用原固定版本');void refresh();}}/>}
+      {screenshotTarget&&<DashboardScreenshotDialog client={client} item={screenshotTarget} onClose={()=>setScreenshotTarget(undefined)} onSaved={()=>{setScreenshotTarget(undefined);setSelected(undefined);setNotice('截图绑定已更新');void refresh();}}/>}
     </>}
     {viewer&&<DashboardSceneView onClose={()=>setViewer(false)}/>}
-    <Modal open={!!connection} title="接入当前场景" confirmLoading={busy} okText="确认接入" cancelText="取消" onCancel={()=>{if(!busy)setConnection(undefined);}} onOk={()=>void connect()}><p>将“{connection?.template.name}”固定版本 v{connection?.template.version} 接入场景“{connection?.name}”{connection?.doc.dashboard?'，替换现有看板接入':''}。此操作可撤销，不会接通业务数据。</p>{error&&<Alert type="error" role="alert" title={error}/>}</Modal>
+    <Modal open={!!connection} title="接入当前场景" okButtonProps={{loading:busy}} okText="确认接入" cancelText={busy?'取消接入':'取消'} onCancel={()=>{transfer.current?.abort();setConnection(undefined);}} onOk={()=>void connect()}><p>将“{connection?.template.name}”固定版本 v{connection?.template.version} 接入场景“{connection?.name}”{connection?.doc.dashboard?'，替换现有看板接入':''}。此操作可撤销，不会接通业务数据。</p>{busy&&<p role="status">正在按需读取固定版本并检查场景区域…</p>}{error&&<Alert type="error" role="alert" title={error}/>}</Modal>
   </section>;
 }

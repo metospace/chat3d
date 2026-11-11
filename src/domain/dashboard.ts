@@ -8,7 +8,8 @@ export function validDashboardView(value:unknown):value is DashboardView {if(!va
 export interface DashboardRegion {x:number;y:number;width:number;height:number}
 export function validDashboardRegion(value:unknown):value is DashboardRegion {if(!value||typeof value!=='object')return false;const r=value as DashboardRegion;return [r.x,r.y,r.width,r.height].every(Number.isFinite)&&r.x>=0&&r.y>=0&&r.width>=5&&r.height>=5&&r.x+r.width<=100&&r.y+r.height<=100;}
 export interface DashboardBinding {service:string;templateId:string;version:number;name:string;mode:DashboardMode;view?:DashboardView;region?:DashboardRegion;slot:DashboardRegion}
-export interface DashboardItem {id:string;version:number;name:string;description:string;system:string;archived:boolean;fileName:string;entry:string;created:string;sourceKind?:'file'|'folder';bytes?:number;fileCount?:number}
+export interface DashboardScreenshot {id:string;templateId:string;version:number;packageHash:string;sha256:string;width:number;height:number;bytes:number;source:string;capturedAt:string;confirmedBy:string;created:string;provenance:'admin-confirmed-local-render'}
+export interface DashboardItem {id:string;version:number;name:string;description:string;system:string;archived:boolean;fileName:string;entry:string;created:string;sourceKind?:'file'|'folder';bytes?:number;fileCount?:number;packageHash?:string;screenshot?:DashboardScreenshot}
 export interface DashboardVersion extends DashboardItem {package:DashboardPackage}
 export interface DashboardManifest extends DashboardItem {files:{path:string;bytes:number}[]}
 export function validDashboardBinding(value:unknown):value is DashboardBinding {
@@ -21,24 +22,26 @@ export function validDashboardBinding(value:unknown):value is DashboardBinding {
 }
 export function dashboardBinding(service:string,item:DashboardItem,mode:DashboardMode):DashboardBinding{return {service,templateId:item.id,version:item.version,name:item.name,mode,slot:mode==='dashboard'?{x:25,y:18,width:50,height:64}:{x:65,y:5,width:33,height:85}};}
 export function listDashboards(client:TeamClient,all=false){return client.request<DashboardItem[]>('dashboards'+(all?'?all=1':''));}
-export async function readDashboard(client:TeamClient,id:string,version:number):Promise<DashboardVersion>{
- const result=await client.request<DashboardManifest>(`dashboards/${encodeURIComponent(id)}/${version}`);if(result.id!==id||result.version!==version||!Array.isArray(result.files))throw Error('看板固定版本不匹配');
+export async function readDashboard(client:TeamClient,id:string,version:number,signal?:AbortSignal):Promise<DashboardVersion>{
+ signal?.throwIfAborted();
+ const result:DashboardManifest=await (await client.raw(`dashboards/${encodeURIComponent(id)}/${version}`,undefined,signal)).json();signal?.throwIfAborted();if(result.id!==id||result.version!==version||!Array.isArray(result.files))throw Error('看板固定版本不匹配');
  const files:Record<string,Uint8Array>=Object.create(null);
- // Bound concurrent transfers; the preview necessarily needs its static resources in browser memory.
- for(let offset=0;offset<result.files.length;offset+=4)await Promise.all(result.files.slice(offset,offset+4).map(async file=>{dashboardPath(file.path);const response=await client.raw(`dashboards/${encodeURIComponent(id)}/${version}/files?path=${encodeURIComponent(file.path)}`);const bytes=new Uint8Array(await response.arrayBuffer());if(bytes.length!==file.bytes)throw Error('看板资源未完整返回：'+file.path);files[file.path]=bytes;}));
+ // Only explicit composition/connection reads the package; bound concurrent transfers.
+ for(let offset=0;offset<result.files.length;offset+=4){signal?.throwIfAborted();await Promise.all(result.files.slice(offset,offset+4).map(async file=>{dashboardPath(file.path);const response=await client.raw(`dashboards/${encodeURIComponent(id)}/${version}/files?path=${encodeURIComponent(file.path)}`,undefined,signal);const bytes=new Uint8Array(await response.arrayBuffer());signal?.throwIfAborted();if(bytes.length!==file.bytes)throw Error('看板资源未完整返回：'+file.path);files[file.path]=bytes;}));}
  return {...result,package:{fileName:result.fileName,entry:result.entry,files}};
 }
-export async function downloadDashboardSource(client:TeamClient,item:DashboardItem,onProgress?:(progress:{loaded:number;total?:number})=>void):Promise<string|null>{
+export async function downloadDashboardSource(client:TeamClient,item:DashboardItem,onProgress?:(progress:{loaded:number;total?:number})=>void,signal?:AbortSignal):Promise<string|null>{
  return exportFile(async()=>{
+  signal?.throwIfAborted();
   onProgress?.({loaded:0});
-  const response=await client.raw(`dashboards/${encodeURIComponent(item.id)}/${item.version}/source`,undefined,new AbortController().signal);
+  const response=await client.raw(`dashboards/${encodeURIComponent(item.id)}/${item.version}/source`,undefined,signal??new AbortController().signal);
   const length=response.headers.get('content-length');
   const total=length!==null&&/^\d+$/.test(length)&&Number.isSafeInteger(Number(length))?Number(length):undefined;
   const report=(loaded:number)=>onProgress?.(total===undefined?{loaded}:{loaded,total});
   report(0);
-  if(!response.body){const bytes=await response.arrayBuffer();report(bytes.byteLength);return bytes;}
+  if(!response.body){const bytes=await response.arrayBuffer();signal?.throwIfAborted();report(bytes.byteLength);return bytes;}
   const reader=response.body.getReader(),chunks:Uint8Array[]=[];let loaded=0;
-  try{while(true){const {done,value}=await reader.read();if(done)break;chunks.push(value);loaded+=value.byteLength;report(loaded);}}
+  try{while(true){signal?.throwIfAborted();const {done,value}=await reader.read();if(done)break;chunks.push(value);loaded+=value.byteLength;report(loaded);}signal?.throwIfAborted();}
   finally{reader.releaseLock();}
   const bytes=new Uint8Array(loaded);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}return bytes.buffer;
  },/\.zip$/i.test(item.fileName)?'zip':'html',item.fileName);

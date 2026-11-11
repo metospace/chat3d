@@ -3,6 +3,7 @@ import {mkdirSync,writeFileSync,rmSync,createReadStream,linkSync} from 'node:fs'
 import {open,rm,mkdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {fail,safePath,pathIndex,extension,extractZip,validateHtml,migratePackage,loadManifest,folderZip,contentType} from './dashboard-files.mjs';
+import {openDashboardScreenshots} from './dashboard-screenshots.mjs';
 
 const admin=user=>{if(!user?.id)fail(401,'请重新登录团队服务');if(user.role!=='admin')fail(403,'只有管理员可以管理看板');};
 const member=user=>{if(!user?.id)fail(401,'请重新登录团队服务');};
@@ -51,9 +52,10 @@ export function openDashboardStore(db,root){
   let release;const done=new Promise(resolve=>{release=resolve;});busy.set(id,done);
   try{return await fn();}finally{busy.delete(id);release();}
  }
- function list(user,{all=false}={}){member(user);return db.prepare(`SELECT ${columns} FROM dashboard_items i JOIN dashboard_versions v ON v.item=i.id AND v.version=i.head WHERE i.archived=0 OR ?=1 ORDER BY v.created DESC,i.id`).all(user.role==='admin'&&all?1:0).map(metadata);}
+ const screenshots=openDashboardScreenshots(db,root,{admin,versionRow});
+ function list(user,{all=false}={}){member(user);return db.prepare(`SELECT ${columns} FROM dashboard_items i JOIN dashboard_versions v ON v.item=i.id AND v.version=i.head WHERE i.archived=0 OR ?=1 ORDER BY v.created DESC,i.id`).all(user.role==='admin'&&all?1:0).map(row=>screenshots.metadata(metadata(row)));}
  function versionRow(user,id,version){member(user);if(typeof id!=='string'||!Number.isSafeInteger(version)||version<1)fail(400,'看板版本无效');const row=db.prepare(`SELECT ${columns},v.manifest FROM dashboard_items i JOIN dashboard_versions v ON v.item=i.id WHERE i.id=? AND v.version=?`).get(id,version);if(!row)fail(404,'找不到看板发布版本');return row;}
- function read(user,id,version){const {manifest:ref,...row}=versionRow(user,id,version);const manifest=loadManifest(join(root,'versions',ref));return {...metadata(row),files:manifest.files.map(({path,bytes})=>({path,bytes}))};}
+ function read(user,id,version){const {manifest:ref,...row}=versionRow(user,id,version);const manifest=loadManifest(join(root,'versions',ref));return {...screenshots.metadata(metadata(row)),files:manifest.files.map(({path,bytes})=>({path,bytes}))};}
  function validateMetadata(body){
   if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(key=>!['name','description','system','entry','itemId','expectedVersion','key','sourceKind','fileName'].includes(key)))fail(400,'看板发布信息无效');
   const {name,description='',system,entry,itemId,expectedVersion,key,sourceKind,fileName}=body;
@@ -135,6 +137,8 @@ export function openDashboardStore(db,root){
      const itemId=item?.id??randomUUID(),version=(item?.head??0)+1;
      if(item)db.prepare('UPDATE dashboard_items SET head=? WHERE id=?').run(version,itemId);else db.prepare('INSERT INTO dashboard_items(id,owner,head) VALUES(?,?,?)').run(itemId,user.id,version);
      db.prepare('INSERT INTO dashboard_versions(item,version,name,description,system,created,manifest,file_name,entry,source_kind,bytes,file_count) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(itemId,version,meta.name,meta.description,meta.system,new Date().toISOString(),ref,meta.fileName,meta.entry,meta.sourceKind,bytes,content.length);
+     const packageHash=digest({entry:meta.entry,sourceKind:meta.sourceKind,fileName:meta.fileName,files:[...hashes].sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0)});
+     db.prepare('INSERT INTO dashboard_package_hashes VALUES(?,?,?)').run(itemId,version,packageHash);
      const published={id:itemId,version};db.prepare('INSERT INTO dashboard_requests(user,key,digest,result) VALUES(?,?,?,?)').run(user.id,meta.key,requestDigest,JSON.stringify(published));
      db.prepare("UPDATE dashboard_uploads SET state='completed',result=? WHERE id=?").run(JSON.stringify(published),id);return published;
     });
@@ -158,17 +162,6 @@ export function openDashboardStore(db,root){
   const found=manifest.files.find(file=>file.path===path);if(!found)fail(404,'看板资源不存在');
   return {path:join(directory,found.storage),bytes:found.bytes,type:contentType(found.path),fileName:found.path.split('/').at(-1)};
  }
- function thumbnail(user,id,version){
-  const row=versionRow(user,id,version),directory=join(root,'versions',row.manifest),manifest=loadManifest(directory);
-  let selected,preferred=false;
-  for(const file of manifest.files){
-   if(!/\.(png|jpe?g|webp|gif)$/i.test(file.path))continue;
-   const candidatePreferred=/thumbnail|preview|cover|poster|reference-full/i.test(file.path);
-   if(!selected||(candidatePreferred&&!preferred)||(candidatePreferred===preferred&&(file.bytes>selected.bytes||(file.bytes===selected.bytes&&file.path<selected.path)))){selected=file;preferred=candidatePreferred;}
-  }
-  if(!selected)fail(404,'看板缩略图不存在');
-  return {path:join(directory,selected.storage),bytes:selected.bytes,type:contentType(selected.path),fileName:selected.path.split('/').at(-1)};
- }
  async function source(user,id,version){
   const row=versionRow(user,id,version),directory=join(root,'versions',row.manifest),manifest=loadManifest(directory);
   if(manifest.sourceKind==='file')return {path:join(directory,manifest.source),bytes:manifest.bytes,type:extension(manifest.fileName)==='zip'?'application/zip':contentType(manifest.fileName),fileName:manifest.fileName};
@@ -176,5 +169,5 @@ export function openDashboardStore(db,root){
   try{const bytes=await folderZip(directory,manifest,path);return {path,bytes,type:'application/zip',fileName:/\.zip$/i.test(manifest.fileName)?manifest.fileName:`${manifest.fileName}.zip`,cleanup:()=>rm(path,{force:true})};}catch(error){await rm(path,{force:true});throw error;}
  }
  function archive(user,id,archived){admin(user);if(typeof id!=='string'||typeof archived!=='boolean')fail(400,'看板归档参数无效');return transaction(()=>{const result=db.prepare('UPDATE dashboard_items SET archived=? WHERE id=?').run(archived?1:0,id);if(!result.changes)fail(404,'看板原件不存在');return {id,archived};});}
- return {list,read,createUpload,registerFile,writeChunk,completeUpload,cancelUpload,file,thumbnail,source,archive};
+ return {list,read,createUpload,registerFile,writeChunk,completeUpload,cancelUpload,file,source,archive,screenshotInfo:screenshots.info,bindScreenshot:screenshots.bind,unbindScreenshot:screenshots.unbind,screenshot:screenshots.image};
 }

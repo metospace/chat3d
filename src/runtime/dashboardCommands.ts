@@ -4,9 +4,10 @@ import {inspectDashboardPlacement} from '../scene/dashboardRuntime';
 import {activeConversationStore} from '../conversationStores';
 import type {EditorStore} from '../store';
 
-export async function prepareDashboardBinding(client:TeamClient,template:DashboardVersion,mode:DashboardMode){
- if(template.archived)throw Error('模板已下架，不能新接入；已有场景的固定版本不受影响');
- const description=mode==='dashboard'?(await inspectDashboardPlacement(template.package)).description:'';
+export async function prepareDashboardBinding(client:TeamClient,template:DashboardVersion,mode:DashboardMode,signal?:AbortSignal){
+ signal?.throwIfAborted();if(template.archived)throw Error('模板已下架，不能新接入；已有场景的固定版本不受影响');
+ const description=mode==='dashboard'?(await inspectDashboardPlacement(template.package,signal)).description:'';
+ signal?.throwIfAborted();
  if(getTeamSession()!==client)throw Error('团队账户已变更，请重新选择看板');
  return {binding:dashboardBinding(client.base,template,mode),description};
 }

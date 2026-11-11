@@ -29,7 +29,7 @@
     "test:product-ui": "node tests/product-redesign-browser.mjs",
     "test:glb-interaction": "node tests/glb-interaction-browser.mjs",
     "test:blender": "node tests/blender-direct.mjs && node tests/blender-modeling-frontend.mjs && node tests/blender-desktop.mjs && node tests/blender-python-security.mjs",
-    "test:dashboard": "node tests/dashboard.mjs && node tests/dashboard-card.mjs && node tests/dashboard-export-ui.mjs",
+    "test:dashboard": "node tests/dashboard.mjs && node tests/dashboard-card.mjs && node tests/dashboard-export-ui.mjs && node tests/dashboard-screenshot-ui.mjs && node tests/dashboard-screenshot-backfill.mjs",
     "test:streaming-ui": "node tests/progress-notifications.mjs && node tests/streaming-ui-browser.mjs"
   },
   "dependencies": {
