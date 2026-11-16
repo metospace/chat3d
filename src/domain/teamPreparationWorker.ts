@@ -17,7 +17,7 @@ scope.onmessage=async event=>{
   if(message.type==='savedFingerprint'){const payload=message.input.asset?await readModelAsset(message.input.asset.id,message.input.asset.version):receiver.get(message.root);const fingerprint=await fingerprintSavedTeamContent(message.input,payload);receiver.clear();scope.postMessage({type:'fingerprint',fingerprint});return;}
   const input=message.input;
   scope.postMessage({type:'progress',stage:'reading'});
-  const localPayload=input.asset?await readModelAsset(input.asset.id,input.asset.version):receiver.get(message.root);
+  const localPayload=input.payload??(input.asset?await readModelAsset(input.asset.id,input.asset.version):receiver.get(message.root));
   receiver.clear();
   const result=await constructTeamPreparation(input,localPayload,stage=>scope.postMessage({type:'progress',stage}));
   // Transfer the compressed bytes, not a cloned expanded JSON string or geometry.

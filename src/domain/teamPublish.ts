@@ -39,11 +39,12 @@ export function readTeamPublication<T=unknown>(publication:TeamPublicationPackag
 }
 
 /** Every size uses the same bounded resumable route; no raw/native fallback or automatic retry. */
-export async function sendTeamPublication(origin:string,token:string,publication:TeamPublicationPackage,onProgress:((progress:TeamUploadProgress)=>void)|undefined,key:string):Promise<Response>{
+export async function sendTeamPublication(origin:string,token:string,publication:TeamPublicationPackage,onProgress:((progress:TeamUploadProgress)=>void)|undefined,key:string,signal?:AbortSignal):Promise<Response>{
  const {data,digest:fingerprint}=publication,total=data.byteLength;
  if(publication.encoding!=='gzip'||!total||total>TEAM_PUBLISH_MAX_BYTES)throw Error(limitMessage);
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),TEAM_PUBLISH_TIMEOUT_MS);
- const checkDeadline=()=>{if(controller.signal.aborted)throw Error(TEAM_PUBLISH_TIMEOUT_MESSAGE+` 服务：${safeOrigin(origin)}；请检查服务或代理的超时设置。`);};
+ const cancel=()=>controller.abort();signal?.addEventListener('abort',cancel,{once:true});if(signal?.aborted)cancel();
+ const checkDeadline=()=>{if(signal?.aborted)throw Error(networkMessage(origin));if(controller.signal.aborted)throw Error(TEAM_PUBLISH_TIMEOUT_MESSAGE+` 服务：${safeOrigin(origin)}；请检查服务或代理的超时设置。`);};
  const request=async(path:string,value:unknown)=>{
   checkDeadline();let response:Response;
   try{response=await teamFetch(origin+'/api/team/publish-uploads/'+path,{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:JSON.stringify(value),signal:controller.signal,redirect:'error',credentials:'omit'});
@@ -67,5 +68,5 @@ export async function sendTeamPublication(origin:string,token:string,publication
    onProgress?.({phase:'uploading',loaded:offset,total,computable:true});
   }
   onProgress?.({phase:'processing',loaded:total,total});return await request(state.uploadId+'/complete',{});
- }finally{clearTimeout(timer);}
+ }finally{clearTimeout(timer);signal?.removeEventListener('abort',cancel);}
 }

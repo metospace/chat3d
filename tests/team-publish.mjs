@@ -39,6 +39,10 @@ try{
  globalThis.fetch=async()=>Response.json({error:'团队登录已失效'},{status:401});assert.equal((await sendTeamPublication('https://team.example','bad',tiny,undefined,key)).status,401);
  for(const encoding of [undefined,'json']){globalThis.fetch=async()=>Response.json({uploadId:'wrong-encoding',offset:0,total:tiny.data.length,encoding});await assert.rejects(sendTeamPublication('https://team.example','token',tiny,undefined,key),/状态无效/);}
  globalThis.fetch=async()=>Response.json({uploadId:'invalid-confirmation',offset:0,total:tiny.data.length,encoding:'gzip'});await assert.rejects(sendTeamPublication('https://team.example','token',tiny,undefined,key),/未确认/);
+ const canceled=new AbortController();let abortedRequests=0;
+ globalThis.fetch=(_url,init)=>new Promise((_resolve,reject)=>{abortedRequests++;init.signal.addEventListener('abort',()=>reject(Error('Canceled')),{once:true});canceled.abort();});
+ await assert.rejects(sendTeamPublication('https://team.example','token',tiny,undefined,key,canceled.signal),/上传连接已中断，尚未确认服务器是否保存/);assert.equal(abortedRequests,1);
+ await assert.rejects(sendTeamPublication('https://team.example','token',tiny,undefined,key,canceled.signal),/尚未确认服务器是否保存/);assert.equal(abortedRequests,1,'already canceled upload sends no request');
  let expire;const deadlineTimer=Symbol('publication-deadline');globalThis.setTimeout=(fn,ms,...args)=>{if(ms!==TEAM_PUBLISH_TIMEOUT_MS)return originalSetTimeout(fn,ms,...args);expire=fn;return deadlineTimer;};globalThis.clearTimeout=timer=>{if(timer!==deadlineTimer)originalClearTimeout(timer);};
  globalThis.fetch=(_url,init)=>new Promise((_resolve,reject)=>{init.signal.addEventListener('abort',()=>reject(Error('Request canceled')),{once:true});expire();});
  await assert.rejects(sendTeamPublication('https://team.example','token',tiny,undefined,key),/15 分钟.*https:\/\/team.example/);
