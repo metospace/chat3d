@@ -8,7 +8,7 @@ import {compressTeamPublication,readTeamPublication,type TeamPublicationPackage}
 export interface TeamPreparationProgress {stage:string;completed:number;total:number;name?:string}
 export interface TeamPreparationInput {
  kind:'asset'|'scene';name:string;description:string;category?:string;categoryPath:string[];key:string;expectedVersion:number;itemId?:string;
- asset?:{id:string;version:number};scene?:SceneDocument;
+ asset?:{id:string;version:number};scene?:SceneDocument;payload?:ModelAssetVersion|SceneDocument;
 }
 export interface TeamPreparationResult {request:TeamPublish;publication:TeamPublicationPackage;bytes:number;baselineFingerprint:string}
 export function teamPreparationRequest(metadata:Omit<TeamPublish,'payload'>,publication:TeamPublicationPackage):TeamPublish{

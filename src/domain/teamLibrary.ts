@@ -44,9 +44,9 @@ export class TeamClient {
   if(!response.ok){let message='团队服务请求失败（HTTP '+response.status+'）';try{const data=await response.json();if(typeof data?.error==='string')message=data.error;}catch{/* Proxy errors need not be JSON. */}if(response.status===401&&this.token&&sharedClient===this){expireTeamSession(this);message='团队登录已失效，请重新登录。';}throw new TeamServiceError(response.status,message);}
   return response;
  }
- async request<T>(path:string,body?:unknown,onProgress?:(progress:TeamUploadProgress)=>void,publication?:TeamPublicationPackage):Promise<T>{
+ async request<T>(path:string,body?:unknown,onProgress?:(progress:TeamUploadProgress)=>void,publication?:TeamPublicationPackage,signal?:AbortSignal):Promise<T>{
   const response=path==='publish'&&body!==undefined
-   ?await sendTeamPublication(this.base,this.token,publication??await compressTeamPublication(JSON.stringify(body)),onProgress,(body as TeamPublish).key)
+   ?await sendTeamPublication(this.base,this.token,publication??await compressTeamPublication(JSON.stringify(body)),onProgress,(body as TeamPublish).key,signal)
    :await teamFetch(this.base+'/api/team/'+path,{method:body===undefined?'GET':'POST',headers:{...(body===undefined?{}:{'Content-Type':'application/json'}),...(this.token?{Authorization:'Bearer '+this.token}:{})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(60000),redirect:'error',credentials:'omit'});
   const authentication=path==='login'||path.startsWith('login/');
   const raw=await response.text();
@@ -69,7 +69,7 @@ async loginWithPlatform(auth:{accessToken:string;tenantId:string}){const result=
  async logout(){const pending=this.request('logout',{});this.token='';this.user=undefined;await pending;}
  list(kind:'asset'|'scene',q=''){return this.request<TeamItem[]>('items?kind='+kind+'&q='+encodeURIComponent(q));}
  async read(item:TeamItem){const value=await this.request<TeamVersion>(`items/${encodeURIComponent(item.id)}/${item.version}`);if(value.id!==item.id||value.kind!==item.kind||value.version!==item.version)throw Error('团队服务返回的固定版本不匹配');return value;}
- publish(body:TeamPublish,onProgress?:(progress:TeamUploadProgress)=>void,publication?:TeamPublicationPackage){return this.request<{id:string;version:number}>('publish',body,onProgress,publication);}
+ publish(body:TeamPublish,onProgress?:(progress:TeamUploadProgress)=>void,publication?:TeamPublicationPackage,signal?:AbortSignal){return this.request<{id:string;version:number}>('publish',body,onProgress,publication,signal);}
 }
 const sessionListeners=new Set<()=>void>();
 let sharedClient:TeamClient|undefined;

@@ -42,12 +42,12 @@ async function runPreparationWorker(input:TeamPreparationInput|undefined,content
 }
 export async function prepareTeamPublicationSnapshot(input:TeamPreparationInput,onStage?:(stage:string)=>void):Promise<TeamPreparationResult>{
  if(import.meta.env.SSR||typeof window==='undefined'){
-  const local=input.asset?await readModelAsset(input.asset.id,input.asset.version):input.scene;
+  const local=input.payload??(input.asset?await readModelAsset(input.asset.id,input.asset.version):input.scene);
   return constructTeamPreparation(input,local,onStage);
  }
  if(typeof Worker==='undefined')throw Error('当前浏览器不支持后台发布准备，请使用支持 Web Worker 的浏览器');
- const {scene,...metadata}=input;
- const result=await runPreparationWorker(metadata,scene,onStage);
+ const {scene,payload,...metadata}=input;
+ const result=await runPreparationWorker(metadata,payload??scene,onStage);
  if(result.type!=='result')throw Error('发布后台没有返回准备结果');
  return {...result,request:teamPreparationRequest(result.request,result.publication)};
 }
