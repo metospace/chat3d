@@ -1,20 +1,29 @@
-import {parseModelAssetFile,MAX_TEAM_ASSET_BYTES,ASSET_SIZE_ERROR,type ModelAssetVersion} from './modelAssets';
+import {createModelAsset,parseModelAssetFile,MAX_TEAM_ASSET_BYTES,ASSET_SIZE_ERROR,type ModelAssetVersion} from './modelAssets';
 import {parseProjectFile,MAX_TEAM_SCENE_BYTES} from './project';
 import {validPublishedCategoryPath} from './teamCategories';
 import {prepareTeamPublicationSnapshot} from './teamPreparation';
 import type {TeamPreparationResult} from './teamPreparationCore';
 import type {TeamClient,TeamItem} from './teamLibrary';
 import type {SceneDocument} from './types';
+import {assertGlbSize,importGlb,type GlbImportStage} from '../scene/importGlb';
 
 export interface TeamUploadFile {readonly kind:'asset'|'scene';readonly name:string;readonly description:string;readonly categoryPath:string[]}
 // File contents stay in memory and cannot be substituted by a caller's metadata object.
 const payloads=new WeakMap<TeamUploadFile,ModelAssetVersion|SceneDocument>();
-export async function parseTeamUploadFile(file:File,kind:'asset'|'scene'):Promise<TeamUploadFile>{
+export async function parseTeamUploadFile(file:File,kind:'asset'|'scene',onStage?:(stage:GlbImportStage)=>void|Promise<void>):Promise<TeamUploadFile>{
+ if(/\.(glb|gltf)$/i.test(file.name)){
+  if(kind==='scene')throw Error('这是模型文件，请到团队资产中上传。');
+  if(/\.gltf$/i.test(file.name))throw Error('暂不支持 GLTF 或外置资源，请导出为单个自包含 GLB 后再上传。');
+  assertGlbSize(file.size);
+  const name=file.name.replace(/\.glb$/i,'')||'导入模型';
+  const {doc}=await importGlb(await file.arrayBuffer(),name,onStage);
+  const asset=createModelAsset(doc,doc.nodes.map(node=>node.id),{name,category:'其他'});
+  const result:TeamUploadFile={kind,name:asset.name,description:asset.description??'',categoryPath:[asset.category]};payloads.set(result,asset);return result;
+ }
  const limit=kind==='asset'?MAX_TEAM_ASSET_BYTES:MAX_TEAM_SCENE_BYTES;
  if(!file.size)throw Error('文件为空，请选择资产或场景 JSON 文件');
  const sizeError=kind==='asset'?ASSET_SIZE_ERROR:`项目文件超过 ${limit/1024/1024} MiB`;
  if(file.size>limit)throw Error(sizeError);
- if(/\.(glb|gltf)$/i.test(file.name))throw Error('GLB / GLTF 不能直接上传，请先导入本地并另存为资产或场景 JSON 文件后再上传');
  if(/\.zip$/i.test(file.name))throw Error('不支持上传备份包，请选择单个资产或场景 JSON 文件');
  const text=await file.text();
  if(text.length>limit||new TextEncoder().encode(text).length>limit)throw Error(sizeError);
