@@ -12,11 +12,13 @@ export interface TeamUploadFile {readonly kind:'asset'|'scene';readonly name:str
 const payloads=new WeakMap<TeamUploadFile,ModelAssetVersion|SceneDocument>();
 export async function parseTeamUploadFile(file:File,kind:'asset'|'scene',onStage?:(stage:GlbImportStage)=>void|Promise<void>):Promise<TeamUploadFile>{
  if(/\.(glb|gltf)$/i.test(file.name)){
-  if(kind==='scene')throw Error('这是模型文件，请到团队资产中上传。');
   if(/\.gltf$/i.test(file.name))throw Error('暂不支持 GLTF 或外置资源，请导出为单个自包含 GLB 后再上传。');
   assertGlbSize(file.size);
-  const name=file.name.replace(/\.glb$/i,'')||'导入模型';
+  const name=file.name.replace(/\.glb$/i,'')||(kind==='asset'?'导入模型':'导入场景');
   const {doc}=await importGlb(await file.arrayBuffer(),name,onStage);
+  if(kind==='scene'){
+   const result:TeamUploadFile={kind,name,description:'',categoryPath:[]};payloads.set(result,doc);return result;
+  }
   const asset=createModelAsset(doc,doc.nodes.map(node=>node.id),{name,category:'其他'});
   const result:TeamUploadFile={kind,name:asset.name,description:asset.description??'',categoryPath:[asset.category]};payloads.set(result,asset);return result;
  }
