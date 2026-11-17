@@ -8,7 +8,7 @@ use url::{Host, Url};
 const REQUEST_LIMIT: usize = 500 * 1024 * 1024;
 const RESPONSE_LIMIT: usize = 1024 * 1024;
 const UPLOAD_CHUNK_SIZE: usize = 64 * 1024;
-const ORIGIN_ERROR: &str = "请输入 HTTPS 服务根地址（本机测试可用 HTTP localhost）";
+const ORIGIN_ERROR: &str = "请输入 HTTPS 服务根地址（本机或内网地址可用 HTTP）";
 const AMBIGUOUS_RESULT: &str = "服务器可能已完成发布；请先检查团队库，确需重试时请手动使用同一发布标识重试，避免重复发布。";
 
 #[derive(Debug, serde::Serialize)]
@@ -38,14 +38,17 @@ fn trusted_window(label: &str, url: &Url, development: bool) -> bool {
 
 fn publish_url(origin: &str) -> Result<Url, String> {
     let mut url = Url::parse(origin).map_err(|_| ORIGIN_ERROR.to_string())?;
-    let loopback = match url.host() {
+    let local_or_private = match url.host() {
         Some(Host::Domain("localhost")) => true,
-        Some(Host::Ipv4(address)) => address.is_loopback(),
+        Some(Host::Ipv4(address)) => {
+            let [first, second, _, _] = address.octets();
+            address.is_loopback() || address.is_private() || (first == 100 && (64..=127).contains(&second))
+        }
         Some(Host::Ipv6(address)) => address.is_loopback(),
         _ => false,
     };
     if url.host().is_none()
-        || !(url.scheme() == "https" || (url.scheme() == "http" && loopback))
+        || !(url.scheme() == "https" || (url.scheme() == "http" && local_or_private))
         || !url.username().is_empty()
         || url.password().is_some()
         || url.path() != "/"
@@ -215,13 +218,13 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     #[test]
-    fn publish_endpoint_accepts_only_exact_secure_or_loopback_origins() {
-        for origin in ["https://portal.example", "https://portal.example/", "https://portal.example:8443", "http://localhost:1421", "http://127.0.0.1:38008", "http://[::1]:8080"] {
+    fn publish_endpoint_accepts_only_exact_secure_or_intranet_origins() {
+        for origin in ["https://portal.example", "https://portal.example/", "https://portal.example:8443", "http://localhost:1421", "http://127.0.0.0", "http://127.0.0.1:38008", "http://127.255.255.255", "http://[::1]:8080", "http://10.0.0.0", "http://10.255.255.255", "http://172.16.0.0", "http://172.31.255.255", "http://192.168.0.0", "http://192.168.255.255", "http://192.168.1.1:8080", "http://100.64.0.0", "http://100.127.255.255", "http://100.69.45.126:1420"] {
             let endpoint = publish_url(origin).unwrap();
             assert_eq!(endpoint.path(), "/api/team/publish");
             assert!(endpoint.query().is_none() && endpoint.fragment().is_none());
         }
-        for origin in ["http://portal.example", "http://192.168.1.1:8080", "http://localhost.evil", "https://user:secret@portal.example", "https://@portal.example", "https://portal.example/api/team/publish", "https://portal.example/a/..", "https://portal.example?", "https://portal.example#", "https://portal.example/\\evil", " https://portal.example", "https://portal.example\n", "file:///tmp/team.json", "tauri://localhost", "not a URL"] {
+        for origin in ["http://portal.example", "http://8.8.8.8", "http://9.255.255.255", "http://11.0.0.0", "http://172.15.255.255", "http://172.32.0.0", "http://192.167.255.255", "http://192.169.0.0", "http://100.63.255.255", "http://100.128.0.0", "http://126.255.255.255", "http://128.0.0.0", "http://0.0.0.0", "http://169.254.1.1", "http://224.0.0.1", "http://[::]", "http://[::2]", "http://[::ffff:127.0.0.1]", "http://[fc00::1]", "http://[fe80::1]", "http://[2001:db8::1]", "http://localhost.evil", "http://localhost.", "http://100.69.45.126.evil:1420", "http://user:secret@100.69.45.126:1420", "http://100.69.45.126:1420/api/team", "http://100.69.45.126:1420/a/..", "http://100.69.45.126:1420?", "http://100.69.45.126:1420#", "https://user:secret@portal.example", "https://@portal.example", "https://portal.example/api/team/publish", "https://portal.example/a/..", "https://portal.example/%2e", "https://portal.example?", "https://portal.example#", "https://portal.example/\\evil", " https://portal.example", "https://portal.example\n", "HTTP://LOCALHOST:80/", "https://PORTAL.example", "https://portal.example:443", "http://127.1", "file:///tmp/team.json", "tauri://localhost", "not a URL"] {
             assert_eq!(publish_url(origin).unwrap_err(), ORIGIN_ERROR, "{origin}");
         }
     }

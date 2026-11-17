@@ -1,5 +1,7 @@
 import {buildTeamCopyExport} from './teamCopyExport';
 import {teamFetch} from './teamTransport';
+import {teamServiceOrigin} from './teamServiceOrigin';
+import {makeId} from '../util/ids';
 import {compressTeamPublication,sendTeamPublication,type TeamPublicationPackage,type TeamUploadProgress} from './teamPublish';
 import {localPublishedCategoryPath,publishedCategoryPath,acquirePublishedCategory} from './teamCategories';
 import {parseModelAsset} from './modelAssets';
@@ -33,9 +35,10 @@ export function teamResponseBodyPreview(text:string,maxChars=200){
  return redacted.length>maxChars?redacted.slice(0,maxChars)+'…':redacted;
 }
 const TEAM_ADDRESS_KEY='chat3d.team.address';
-export function teamAddress(value:string){const url=new URL(value);if(url.username||url.password||url.search||url.hash||url.pathname!=='/'||(url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(url.hostname))))throw Error('请输入 HTTPS 服务根地址（本机测试可用 HTTP localhost）');return url.origin;}
+export function teamAddress(value:string){return teamServiceOrigin(value);}
 export function defaultTeamServiceBase(){return configuredTeamServiceBase();}
-export function rememberTeamServiceBase(base:string){localStorage.setItem(TEAM_ADDRESS_KEY,teamAddress(base));}
+export function rememberTeamServiceBase(base:string){const origin=teamAddress(base);try{localStorage.setItem(TEAM_ADDRESS_KEY,origin);}catch{/* Address persistence must not prevent login when storage is unavailable. */}}
+export function rememberedTeamServiceBase():string|undefined {try{const value=localStorage.getItem(TEAM_ADDRESS_KEY);return value?teamAddress(value):undefined;}catch{return undefined;}}
 export class TeamClient {
  readonly base:string;private token='';user?:TeamUser;
  constructor(base:string){this.base=teamAddress(base);}
@@ -169,7 +172,7 @@ export async function beginTeamAuthorization(options:{base?:string;remember?:boo
  // A new user action starts a new state, never a cached or unrelated prior login.
  clearPendingPlatformOAuth();
  if(parsePlatformOAuthCallback())clearPlatformOAuthCallbackFromUrl();
- const state=crypto.randomUUID();
+ const state=makeId();
  const timeoutMs=options.timeoutMs??300000;
  const pollMs=options.pollMs??1500;
  return await new Promise<TeamClient>((resolve,reject)=>{

@@ -2,8 +2,7 @@ import {useEffect,useRef,useState,useSyncExternalStore} from 'react';
 import {Button as AntButton,Input,Tag} from 'antd';
 import {PortalDialog} from './kit/PortalDialog';
 import {Cross1Icon,UploadIcon,DownloadIcon} from '@radix-ui/react-icons';
-import {acquireLinkedTeamVersion,beginTeamAuthorization,defaultTeamServiceBase,getTeamSession,getTeamSessionStatus,listTeamPublishSources,loginTeamSession,logoutTeamSession,prepareTeamPublications,publishPreparedTeamBatch,resolveTeamPublishTarget,resumeTeamFromPlatformAuth,subscribeTeamSession,type PreparedTeamPublication,type TeamItem,type TeamLocalSource,type TeamPreparationProgress,type TeamPublishSource} from '../domain/teamLibrary';
-import {showTeamPasswordLogin} from '../domain/platformOAuth';
+import {acquireLinkedTeamVersion,beginTeamAuthorization,defaultTeamServiceBase,getTeamSession,getTeamSessionStatus,listTeamPublishSources,loginTeamSession,logoutTeamSession,prepareTeamPublications,publishPreparedTeamBatch,rememberedTeamServiceBase,resolveTeamPublishTarget,resumeTeamFromPlatformAuth,subscribeTeamSession,type PreparedTeamPublication,type TeamItem,type TeamLocalSource,type TeamPreparationProgress,type TeamPublishSource} from '../domain/teamLibrary';
 import {OperationProgress,nextProgressPaint} from './OperationProgress';
 import {listModelAssets} from '../domain/modelAssetStorage';
 import {useWorkspaceStore} from '../workspace';
@@ -12,22 +11,21 @@ import './team-library.css';
 
 export function TeamSessionLogin({onConnected,serviceOrigin}:{onConnected?:()=>void;serviceOrigin?:string}){
  const sessionStatus=useSyncExternalStore(subscribeTeamSession,getTeamSessionStatus,getTeamSessionStatus);
- const address=serviceOrigin??defaultTeamServiceBase();
- const [teamUser,setTeamUser]=useState(''),[teamPassword,setTeamPassword]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[waiting,setWaiting]=useState(false);const lock=useRef(false);
- const debugPassword=showTeamPasswordLogin();
- useEffect(()=>{if(getTeamSession()?.user||!address)return;let alive=true;void resumeTeamFromPlatformAuth(address).then(next=>{if(alive&&next)onConnected?.();}).catch(()=>{});return ()=>{alive=false;};},[address,onConnected]);
- function submit(action:()=>Promise<unknown>){if(lock.current)return;lock.current=true;setBusy(true);setError('');void action().then(()=>{setTeamPassword('');setWaiting(false);onConnected?.();}).catch(error=>{setWaiting(false);setError(error instanceof Error?error.message:'团队登录失败');}).finally(()=>{lock.current=false;setBusy(false);});}
+ const [address,setAddress]=useState(()=>serviceOrigin??rememberedTeamServiceBase()??defaultTeamServiceBase());
+ const [teamUser,setTeamUser]=useState(''),[teamPassword,setTeamPassword]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[waiting,setWaiting]=useState(false);const lock=useRef(false),initialAddress=useRef(address),connected=useRef(onConnected);
+ connected.current=onConnected;
+ useEffect(()=>{const base=initialAddress.current;if(getTeamSession()?.user||!base)return;let alive=true;void resumeTeamFromPlatformAuth(base).then(next=>{if(alive&&next)connected.current?.();}).catch(()=>{});return ()=>{alive=false;};},[]);
+ function submit(action:()=>Promise<unknown>){if(lock.current)return;lock.current=true;setBusy(true);setError('');void action().then(()=>{setTeamPassword('');setWaiting(false);connected.current?.();}).catch(error=>{setWaiting(false);setError(error instanceof Error?error.message:'团队登录失败');}).finally(()=>{lock.current=false;setBusy(false);});}
  return <form className="team-login-card" onSubmit={event=>{event.preventDefault();setWaiting(true);submit(()=>beginTeamAuthorization({base:address}));}}>
   <header><h3>通过协同平台登录</h3><p>在授权页面完成登录后自动返回，登录状态在应用内共用。</p></header>
   {!address&&<p className="team-security-note" role="status">团队授权服务尚未配置，请联系管理员。你可以继续使用本地资源。</p>}
   {error&&<p className="team-error" role="alert">{error}</p>}
+  <label className="team-field"><span>团队服务地址</span><Input aria-label="团队服务地址" type="url" autoComplete="url" value={address} onChange={event=>setAddress(event.target.value)} disabled={busy}/></label>
   <AntButton htmlType="submit" disabled={busy||!address||sessionStatus==='restoring'}>{sessionStatus==='restoring'?'正在恢复登录…':busy||waiting?'等待协同登录…':'登录授权'}</AntButton>
   {waiting&&!error&&<p className="team-security-note">已打开协同登录，请在浏览器完成授权后回到本窗口。</p>}
-  {debugPassword&&<>
    <label className="team-field"><span>团队账号</span><Input aria-label="团队账号" autoComplete="username" value={teamUser} onChange={event=>setTeamUser(event.target.value)} disabled={busy}/></label>
    <label className="team-field"><span>团队密码</span><Input aria-label="团队密码" type="password" autoComplete="current-password" value={teamPassword} onChange={event=>setTeamPassword(event.target.value)} disabled={busy}/></label>
    <AntButton htmlType="button" disabled={busy||!address||!teamUser||!teamPassword} onClick={()=>submit(()=>loginTeamSession(address,teamUser,teamPassword))}>使用团队密码登录</AntButton>
-  </>}
  </form>;
 }
 

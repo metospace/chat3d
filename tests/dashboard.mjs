@@ -114,6 +114,11 @@ try{
  console.log('PASS previous package schema migrates without losing fixed versions');
  server=await createServer({server:{middlewareMode:true,hmr:false},appType:'custom'});
  const {createEditorStore}=await server.ssrLoadModule('/src/store.ts'),{serializeProject,parseProject}=await server.ssrLoadModule('/src/domain/project.ts'),{dashboardBinding}=await server.ssrLoadModule('/src/domain/dashboard.ts');
+ const {validDashboardBinding}=await server.ssrLoadModule('/src/domain/dashboard.ts');
+ const policyBinding=service=>dashboardBinding(service,{id:'policy-template',version:1,name:'内网看板'},'dashboard');
+ for(const service of ['https://public.example','http://localhost','http://127.0.0.0','http://127.255.255.255','http://[::1]:8787','http://10.0.0.0','http://10.255.255.255','http://172.16.0.0','http://172.31.255.255','http://192.168.0.0','http://192.168.255.255','http://100.64.0.0','http://100.127.255.255'])assert.equal(validDashboardBinding(policyBinding(service)),true,service);
+ for(const service of ['http://126.255.255.255','http://128.0.0.0','http://9.255.255.255','http://11.0.0.0','http://100.63.255.255','http://100.128.0.0','http://172.15.255.255','http://172.32.0.0','http://192.167.255.255','http://192.169.0.0','http://169.254.1.1','http://8.8.8.8','http://public.example','http://localhost.example','http://localhost.','http://[::ffff:127.0.0.1]','http://[fc00::1]','http://[fe80::1]','https://user@team.example','http://@localhost','http://localhost/','HTTP://LOCALHOST','http://127.1','http://[0:0:0:0:0:0:0:1]','https://TEAM.example','https://team.example:443','https://team.example?','https://team.example#','https://team.example/.','https://team.example/a/..','https://team.example/path','https://team.example\\path',' https://team.example','https://team.example\n','https://team.example:65536',undefined,null])assert.equal(validDashboardBinding(policyBinding(service)),false,String(service));
+ console.log('PASS dashboard binding shares intranet allowlist while requiring an exact canonical service origin');
  const {selectDashboardFiles}=await server.ssrLoadModule('/src/domain/dashboardUpload.ts');
  const {parseDashboardCommand}=await server.ssrLoadModule('/src/domain/dashboard.ts');
  const {downloadDashboardSource}=await server.ssrLoadModule('/src/domain/dashboard.ts');

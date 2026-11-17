@@ -55,8 +55,12 @@ try{
  const authorizeState=()=>new URL(window.__lastOpenUrl.split('#')[1],'http://local.invalid').searchParams.get('state');
  // Stale URL/storage results must not authenticate a newly requested login.
  localStorage.setItem('chat3d.platform.oauth.pending',JSON.stringify({accessToken:'stale-token',state:'stale-state',at:Date.now()}));
- const waiting=opener.beginTeamAuthorization({base,timeoutMs:2000});
- expectedState=authorizeState();assert.ok(expectedState);
+ const savedCrypto=Object.getOwnPropertyDescriptor(globalThis,'crypto');let waiting;
+ try{
+  Object.defineProperty(globalThis,'crypto',{value:undefined,configurable:true});
+  waiting=opener.beginTeamAuthorization({base,timeoutMs:2000});
+  expectedState=authorizeState();assert.ok(expectedState);
+ }finally{if(savedCrypto)Object.defineProperty(globalThis,'crypto',savedCrypto);else delete globalThis.crypto;}
  assert.equal(oauth.parsePlatformOAuthCallback(),undefined);
  assert.equal(localStorage.getItem('chat3d.platform.oauth.pending'),null);
  oauth.publishPlatformOAuthResult({accessToken:'wrong-token',state:'another-attempt'});
@@ -75,16 +79,20 @@ try{
  assert.equal(exchanges,1);assert.equal(tokenLogins,1);
  assert.deepEqual(requests.filter(r=>r.url!=='/api/team/login/sso/claim').map(r=>r.url),['/api/team/login/sso/code','/api/team/login/sso']);
  assert.equal(exchanges,1);assert.equal(tokenLogins,1);
- console.log('PASS callback exchanges once with state; opener accepts token delivery across BroadcastChannel/storage/focus without exchanging code');
+ console.log('PASS callback exchanges once with state without crypto; opener accepts token delivery across BroadcastChannel/storage/focus without exchanging code');
  await callback.logoutTeamSession();await opener.logoutTeamSession();
  messages.length=0;claims=0;exchanges=0;tokenLogins=0;pendingByState.clear();requests.length=0;
  // Cross-origin desktop path: no BroadcastChannel/storage delivery; opener polls claim by state.
  window.history.replaceState({},'','/team/');
- const desktopWaiting=opener.beginTeamAuthorization({base,timeoutMs:4000,pollMs:50});
+ let desktopWaiting;
+ try{
+  Object.defineProperty(globalThis,'crypto',{value:{},configurable:true});
+  desktopWaiting=opener.beginTeamAuthorization({base,timeoutMs:4000,pollMs:50});
+ }finally{if(savedCrypto)Object.defineProperty(globalThis,'crypto',savedCrypto);else delete globalThis.crypto;}
  // Claim-only delivery also covers a remote service callback on another origin.
  const opened=window.__lastOpenUrl;assert.ok(opened);
  const openedState=new URL(opened.slice(opened.indexOf('?')),'http://local.invalid').searchParams.get('state');
- assert.ok(openedState);
+ assert.ok(openedState);assert.notEqual(openedState,expectedState,'each authorization gets a fresh state without randomUUID');
  window.history.replaceState({},'',`/team/sso/callback?code=one-time&state=${openedState}`);
  const desktopCallback=oauth.parsePlatformOAuthCallback();
  window.history.replaceState({},'','/team/');
@@ -94,7 +102,7 @@ try{
  assert.equal((await desktopWaiting).user.name,'Alice');
  assert.ok(claims>=1);assert.equal(tokenLogins,1);assert.equal(exchanges,0);
  assert.ok(requests.some(r=>r.url==='/api/team/login/sso/claim'));
- console.log('PASS desktop opener claims platform tokens by OAuth state without BroadcastChannel or code re-exchange');
+ console.log('PASS desktop opener without crypto.randomUUID claims platform tokens by fresh OAuth state without BroadcastChannel or code re-exchange');
  await opener.logoutTeamSession();
  messages.length=0;claims=0;exchanges=0;tokenLogins=0;pendingByState.clear();requests.length=0;
  await callback.completeTeamOAuthCallbackPage({accessToken:'platform-access',code:'spent-code',state:'stale-state',refreshToken:'platform-refresh'},{base});
