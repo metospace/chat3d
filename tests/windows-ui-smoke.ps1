@@ -142,16 +142,16 @@ try {
  $checks.Add(@{name='installed app home renders with accessible navigation';pass=$true})
  Click-Control '团队库';Find-Control '登录授权' | Out-Null;Shot 'ui-team-page';Dump-Controls 'ui-team-page-controls'
  $checks.Add(@{name='team library page opens from navigation';pass=$true})
- # #66+: unauthenticated team library is login-only — no asset/scene tabs or local password form.
+# Unauthenticated team library exposes official password/address fields and OAuth, but no asset/scene tabs.
  Assert-ControlMissing '团队资产'
  Assert-ControlMissing '团队场景'
- Assert-ControlMissing '团队账号'
- Assert-ControlMissing '团队密码'
- Assert-ControlMissing '团队服务地址'
+Find-Control '团队账号' | Out-Null
+Find-Control '团队密码' | Out-Null
+Find-Control '团队服务地址' | Out-Null
  Assert-ControlMissing '服务地址已固定为门户地址，不可修改'
  Find-Control '登录授权' | Out-Null
  Find-Control '登录，连接你的团队' | Out-Null
- $checks.Add(@{name='team library login-only until authenticated (SSO 登录授权; no asset/scene tabs or password form)';pass=$true})
+$checks.Add(@{name='team library login-only until authenticated (editable address, team account/password and OAuth; no asset/scene tabs or fixed-address copy)';pass=$true})
 Click-Control '继续使用本地资源'
 
 Click-Control '资产库'

@@ -10,7 +10,6 @@ export const SSO_CALLBACK_PATH='/team/sso/callback';
 
 type ViteEnv={
  VITE_CHAT3D_TEAM_DEFAULT_BASE?:string;
- VITE_CHAT3D_TEAM_SHOW_PASSWORD_LOGIN?:string;
  VITE_CHAT3D_PLATFORM_AUTH_BASE?:string;
  VITE_CHAT3D_PLATFORM_TENANT_ID?:string;
  VITE_CHAT3D_PLATFORM_OAUTH_CLIENT_ID?:string;
@@ -20,9 +19,6 @@ type ViteEnv={
 };
 function env():ViteEnv{
  try{return (import.meta as ImportMeta & {env?:ViteEnv}).env??{};}catch{return {};}
-}
-function globalFlag(name:string){
- return typeof globalThis!=='undefined'&&(globalThis as Record<string,unknown>)[name]===true;
 }
 
 export function configuredTeamServiceBase(){
@@ -37,9 +33,9 @@ export function configuredTeamServiceBase(){
  return DEFAULT_TEAM_SERVICE_BASE;
 }
 
-/** Local team password fields: off by default; Vite env or test global may enable. */
+/** Team account/password login is available alongside collaborative authorization. */
 export function showTeamPasswordLogin(){
- return env().VITE_CHAT3D_TEAM_SHOW_PASSWORD_LOGIN==='1'||globalFlag('__CHAT3D_TEAM_SHOW_PASSWORD_LOGIN__');
+ return true;
 }
 
 export function platformAuthBase(){

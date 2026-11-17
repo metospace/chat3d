@@ -1,4 +1,5 @@
 import type {TeamClient} from './teamLibrary';
+import {teamServiceOrigin} from './teamServiceOrigin';
 import {dashboardPath,type DashboardPackage} from '../../shared/dashboard-package.mjs';
 import {exportFile} from '../util/exportFile';
 export type DashboardMode='dashboard'|'overlay';
@@ -17,7 +18,7 @@ export function validDashboardBinding(value:unknown):value is DashboardBinding {
  const b=value as DashboardBinding;
  if(b.view!==undefined&&!validDashboardView(b.view))return false;
  if(b.region!==undefined&&!validDashboardRegion(b.region))return false;
- try{const u=new URL(b.service);if(u.origin!==b.service||u.username||u.password||!['https:','http:'].includes(u.protocol)||u.protocol==='http:'&&!['localhost','127.0.0.1','[::1]'].includes(u.hostname))return false;}catch{return false;}
+ try{if(teamServiceOrigin(b.service)!==b.service)return false;}catch{return false;}
  return typeof b.templateId==='string'&&/^[a-zA-Z0-9-]{1,80}$/.test(b.templateId)&&Number.isSafeInteger(b.version)&&b.version>0&&typeof b.name==='string'&&b.name.length>0&&b.name.length<=80&&['dashboard','overlay'].includes(b.mode)&&!!b.slot&&['x','y','width','height'].every(k=>Number.isFinite(b.slot[k as keyof typeof b.slot]))&&b.slot.x>=0&&b.slot.y>=0&&b.slot.width>=5&&b.slot.height>=5&&b.slot.x+b.slot.width<=100&&b.slot.y+b.slot.height<=100;
 }
 export function dashboardBinding(service:string,item:DashboardItem,mode:DashboardMode):DashboardBinding{return {service,templateId:item.id,version:item.version,name:item.name,mode,slot:mode==='dashboard'?{x:25,y:18,width:50,height:64}:{x:65,y:5,width:33,height:85}};}

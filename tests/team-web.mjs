@@ -37,10 +37,10 @@ assert.equal(authUrl.searchParams.get('response_type'),'code');
 assert.equal(authUrl.searchParams.has('scope'),false);
 assert.equal(authUrl.searchParams.get('state'),'state-test');
 assert.equal(authUrl.searchParams.get('redirect_uri'),configuredTeamServiceBase()+SSO_CALLBACK_PATH);
-assert.equal(showTeamPasswordLogin(),false);
+assert.equal(showTeamPasswordLogin(),true,'team password login is available without a feature flag');
 const dom=new JSDOM('<html><body></body></html>',{url:'http://localhost:1420/'});
 for(const key of ['window','document','localStorage'])Object.defineProperty(globalThis,key,{value:dom.window[key],configurable:true});
-const {defaultTeamServiceBase}=await server.ssrLoadModule('/src/domain/teamLibrary.ts');
+const {defaultTeamServiceBase,rememberTeamServiceBase,rememberedTeamServiceBase}=await server.ssrLoadModule('/src/domain/teamLibrary.ts');
 for(const path of ['/','/team','/team/','/team/sso/callback']){
  dom.reconfigure({url:'https://workbench.example'+path});
  assert.equal(defaultTeamServiceBase(),'https://workbench.example','all browser entrypoints use same-origin API');
@@ -49,6 +49,13 @@ dom.reconfigure({url:'http://localhost:1420/team/'});
 assert.equal(defaultTeamServiceBase(),'http://localhost:1420');
 assert.equal(platformOAuthRedirectUri(defaultTeamServiceBase()),'http://localhost:1420'+SSO_CALLBACK_PATH);
 assert.equal(platformOAuthRedirectUri('https://remote-api.example'),'https://remote-api.example'+SSO_CALLBACK_PATH,'remote API must not silently redirect to localhost');
+assert.equal(rememberedTeamServiceBase(),undefined);
+rememberTeamServiceBase('https://remembered-api.example/');
+assert.equal(rememberedTeamServiceBase(),'https://remembered-api.example');
+assert.equal(defaultTeamServiceBase(),'http://localhost:1420','remembered addresses do not redefine the configured browser default');
+localStorage.setItem('chat3d.team.address','https://remembered-api.example/api/team');
+assert.equal(rememberedTeamServiceBase(),undefined,'invalid saved addresses are ignored');
+localStorage.removeItem('chat3d.team.address');
 Object.defineProperty(globalThis,'__TAURI_INTERNALS__',{value:{},configurable:true});
 for(const url of ['http://localhost:1420/team/','http://tauri.localhost/','https://tauri.localhost/']){
  dom.reconfigure({url});
@@ -75,6 +82,6 @@ try{
 }finally{await overrideServer.close();dom.window.close();delete globalThis.__TAURI_INTERNALS__;}
 await server.close();
 console.log('PASS team web copy export produces desktop-importable snapshots');
+console.log('PASS browser same-origin/desktop official defaults, remembered addresses, remote redirects and explicit API/redirect overrides');
 console.log('PASS platform authorize URLs preserve OAuth parameters without auto-approval scope');
-console.log('PASS root/team browser origins, desktop defaults, remote redirects and explicit API/redirect overrides');
 
