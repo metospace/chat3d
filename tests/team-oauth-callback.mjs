@@ -55,8 +55,12 @@ try{
  const authorizeState=()=>new URL(window.__lastOpenUrl.split('#')[1],'http://local.invalid').searchParams.get('state');
  // Stale URL/storage results must not authenticate a newly requested login.
  localStorage.setItem('chat3d.platform.oauth.pending',JSON.stringify({accessToken:'stale-token',state:'stale-state',at:Date.now()}));
- const waiting=opener.beginTeamAuthorization({base,timeoutMs:2000});
- expectedState=authorizeState();assert.ok(expectedState);
+ const savedCrypto=Object.getOwnPropertyDescriptor(globalThis,'crypto');let waiting;
+ try{
+  Object.defineProperty(globalThis,'crypto',{value:undefined,configurable:true});
+  waiting=opener.beginTeamAuthorization({base,timeoutMs:2000});
+ }finally{if(savedCrypto)Object.defineProperty(globalThis,'crypto',savedCrypto);else delete globalThis.crypto;}
+ expectedState=authorizeState();assert.match(expectedState,/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/,'authorization state works without secure-context crypto.randomUUID');
  assert.equal(oauth.parsePlatformOAuthCallback(),undefined);
  assert.equal(localStorage.getItem('chat3d.platform.oauth.pending'),null);
  oauth.publishPlatformOAuthResult({accessToken:'wrong-token',state:'another-attempt'});

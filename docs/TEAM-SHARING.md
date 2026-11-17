@@ -28,7 +28,15 @@ Dockerfile 同时包含团队校验器。容器部署时将受限持久卷挂载
 
 首次运行前由服务器管理员创建持久目录并限制服务用户访问。反向代理将指定 HTTPS 域名转发到 127.0.0.1:1420，旧单请求接口上限采用 512 MiB（`client_max_body_size 512m`）；新 gzip 分块接口每请求仅需 2 MiB。请求体接收、上游发送及响应读取超时均设置为至少 900 秒。公司域名、证书、服务器位置和运行账号须由部署方提供；仓库不含生产凭据。不要向公网开放无 TLS 的 Node 端口。已有模型代理配置保持独立。
 
-网页本机测试可以使用 `http://127.0.0.1:1420`，将实际浏览器来源加入 `CHAT3D_TEAM_ORIGINS`。Vite 不内嵌团队数据库：另起 Node 团队服务（例如 `PORT=1422`），在 Vite 环境设置 `CHAT3D_TEAM_DEV_BASE=http://127.0.0.1:1422`，重启 `npm run dev` 后由 `/api/team` 代理到该服务；代理不移除浏览器 Origin，白名单仍需精确配置。也可用 `VITE_CHAT3D_TEAM_DEFAULT_BASE` 显式选择远程服务，并配置其 CORS 来源。桌面客户端保留既有 Tauri 权限，仅支持标准 HTTPS 443（本机测试 HTTP 80），不要扩大客户端通配权限。未设置 `CHAT3D_TEAM_DB` 时共享 API 不启用。
+网页本机测试可以使用 `http://127.0.0.1:1420`，将实际浏览器来源加入 `CHAT3D_TEAM_ORIGINS`。Vite 不内嵌团队数据库：另起 Node 团队服务（例如 `PORT=1422`），在 Vite 环境设置 `CHAT3D_TEAM_DEV_BASE=http://127.0.0.1:1422`，重启 `npm run dev` 后由 `/api/team` 代理到该服务；代理不移除浏览器 Origin，白名单仍需精确配置。也可用 `VITE_CHAT3D_TEAM_DEFAULT_BASE` 显式选择远程服务，并配置其 CORS 来源。桌面客户端保留既有 Tauri HTTP 权限，团队服务地址另按下述来源规则校验，不扩大客户端权限。未设置 `CHAT3D_TEAM_DB` 时共享 API 不启用。
+
+### 内网专用 Windows 安装包（0.2.45 分支）
+
+此分支仅在 `windows-desktop.yml` 的 `build-windows` 作业设置 `VITE_CHAT3D_TEAM_SHOW_PASSWORD_LOGIN=1` 和 `VITE_CHAT3D_TEAM_DEFAULT_BASE=http://100.69.45.126:1420`，签名与未签名构建均继承；Ubuntu 回归不设置这两个变量。官方默认界面仍隐藏团队账号、团队密码和团队服务地址。
+
+专用安装包的登录表单可编辑「团队服务地址」，初次使用构建默认值，也可改为 `http://192.168.31.65:1420`；成功登录后记住该地址，后续打开优先使用。密码登录与「登录授权」均使用当前编辑值；本内网服务没有协同 SSO，应使用团队密码登录。模型 API 账户与配置不受影响。
+
+团队服务及看板绑定允许 HTTPS 根地址；HTTP 仅允许 localhost、IPv4/IPv6 回环、RFC1918 IPv4（10/8、172.16/12、192.168/16）及 Tailscale CGNAT（100.64/10）。公共 HTTP、用户凭据、非根路径、查询及片段仍拒绝。HTTP 不提供 TLS 机密性，只应在受信任内网使用；此变更不扩大 Tauri 窗口信任、Blender 或模型上游策略，不更改更新端点或官方发布制品。
 
 ### Web 工作空间（与客户端共用业务）
 

@@ -27,6 +27,9 @@ jobs:
     needs: regression
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      VITE_CHAT3D_TEAM_SHOW_PASSWORD_LOGIN: '1'
+      VITE_CHAT3D_TEAM_DEFAULT_BASE: http://100.69.45.126:1420
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
