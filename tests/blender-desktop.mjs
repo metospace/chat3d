@@ -23,7 +23,11 @@ try{
  assert.throws(()=>desktopBlenderArtifacts(payload.slice(0,-1)),/长度/);
  const badPng=payload.slice(0);new Uint8Array(badPng)[12+blend.length+glb.length]=0;assert.throws(()=>desktopBlenderArtifacts(badPng),/格式/);
  const largePng=payload.slice(0);new DataView(largePng).setUint32(12+blend.length+glb.length+16,769,false);assert.throws(()=>desktopBlenderArtifacts(largePng),/格式/);
- console.log('PASS truncated/oversize/malformed native frames reject before preview');
+ const blendLength=33*1024*1024,glbLength=21*1024*1024,large=new ArrayBuffer(12+blendLength+glbLength+png.length),largeView=new DataView(large),largeBytes=new Uint8Array(large);
+ for(const [i,size] of [blendLength,glbLength,png.length].entries())largeView.setUint32(i*4,size,true);
+ largeBytes.set(blend,12);largeBytes.set(glb,12+blendLength);largeView.setUint32(12+blendLength+8,glbLength,true);largeBytes.set(png,12+blendLength+glbLength);
+ const artifacts=desktopBlenderArtifacts(large);assert.equal(artifacts.blend.size,blendLength);assert.equal(artifacts.glb.size,glbLength);
+ console.log('PASS large native models pass while inconsistent lengths and malformed previews reject');
  let finishProgress,progressChannel;const stages=[];
  mockIPC((command,args)=>{if(command==='desktop_blender_run'){progressChannel=args.onProgress;return new Promise(resolve=>finishProgress=resolve);}throw Error(command);});
  const progressRun=runBlenderScript({name:'cube',script:'import bpy'},async()=>true,undefined,p=>stages.push(p.stage));

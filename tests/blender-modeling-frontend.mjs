@@ -64,6 +64,11 @@ try {
   const result=await runBlenderScript(scriptArgs,confirm);
   assert.equal(posts,1);
   for(const [key,expected] of Object.entries(payloads))assert.deepEqual(new Uint8Array(await result[key].arrayBuffer()),expected);
+  payloads.blend=new Uint8Array(40*1024*1024);payloads.blend.set(new TextEncoder().encode('BLENDER-v500'));payloads.blend[payloads.blend.length-1]=42;
+  payloads.glb=new Uint8Array(27*1024*1024);payloads.glb.set(new Uint8Array(bytes));new DataView(payloads.glb.buffer).setUint32(8,payloads.glb.length,true);
+  const large=await runBlenderScript(scriptArgs,confirm);
+  assert.equal(large.blend.size,payloads.blend.length);assert.equal(large.glb.size,payloads.glb.length);
+  assert.equal(new Uint8Array(await large.blend.slice(-1).arrayBuffer())[0],42);
   outcome='missing-render';await assert.rejects(runBlenderScript(scriptArgs,confirm),/未返回完整/);
   console.log('PASS plate compatibility, Python authorization/cancellation and unchanged Blender artifacts');
 } finally {globalThis.fetch=originalFetch;globalThis.FileReader=originalReader;await server.close();}

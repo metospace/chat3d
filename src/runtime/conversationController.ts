@@ -11,6 +11,7 @@ import {checkEditScope,type EditScope} from '../domain/editScope';
 import {continueDraft,type DraftBaseline} from '../domain/draftContinuation';
 import {userEditScope} from '../domain/conversationScope';
 import {evaluateDetailAcceptance} from '../domain/detailAcceptance';
+import {carryRebuiltReferenceRepairs} from '../domain/referenceRepairs';
 import {generationFailureMessage,generationStopMessage,sanitizeGenerationText,STOP_PREVIEW_NEXT,STOP_USAGE_NOTE,type StopResult} from '../domain/generationFailure';
 import {makeId} from '../util/ids';
 import {useEditorStore,type EditorStore} from '../store';
@@ -158,7 +159,7 @@ function createConversationController(editor:EditorStore) {
     reservations.add(editor);useConversationRuns.setState({activeCount:reservations.size});ui.setState({running:true});
     let lastActivitySave=0;
     const parent=store().aiStatus==='previewing'&&store().pendingBatch&&store().pendingResult?{batch:store().pendingBatch!,result:store().pendingResult!}:null;
-    const referenceRepairs=parent?structuredClone(store().lastRun?.referenceRepairs??[]):[];
+    const referenceRepairs=parent?carryRebuiltReferenceRepairs(store().lastRun?.referenceRepairs??[],parent.result.applied):[];
     parentDraft.current=parent;
     const original=store().doc,working=parent?.result.doc??original;
     checkpointRef.current=null;store().setPreviewDoc(parent?.result.doc??null);
@@ -190,8 +191,11 @@ function createConversationController(editor:EditorStore) {
     const editScope:EditScope=requestedScope;
     if(lockPlacement&&!editScope.lockPlacement)setNotice('本次描述明确要求移动或旋转，已临时解除位置锁；默认开关未修改');
     const controller = new AbortController(); abortRef.current = controller;
-    const armTimeout = () => {
-      if(timeoutRef.current)clearTimeout(timeoutRef.current);
+    const armTimeout = (activity?:AgentActivity) => {
+      clearTimeout(timeoutRef.current??undefined);
+      timeoutRef.current=null;
+      // Local Three.js builds have no streaming progress; stop them via cancellation, not the model watchdog.
+      if(activity?.timings.some(t=>t.kind==='tool'&&t.endedAt===undefined&&['build_modeling_program','patch_modeling_program','build_components_parallel'].includes(t.toolName??'')))return;
       timeoutRef.current=setTimeout(()=>{
         if(!alive())return;
         recordDiagnostic('timeout','等待超过 3 分钟，已停止本次接收');
@@ -256,7 +260,7 @@ function createConversationController(editor:EditorStore) {
           onControl:control=>{if(alive()){controlRef.current=control;setCanSteer(!!control);if(!control)clearControl();}},
           onSteeringApplied:id=>{if(alive()){markSteering(id,'received');setNotice('补充要求已收到，将在后续调整中参考');}},
           onCheckpoint:cp=>{if(alive()){const combined=continueDraft(original,parent,cp.batch,cp.result);checkpointRef.current={...cp,...combined};editor.setState({pendingBatch:combined.batch,pendingResult:combined.result});}},
-          onActivity:event=>{if(alive()){armTimeout();queueAgentActivity(event);if(Date.now()-lastActivitySave>=1000||/暂停|中断|工具失败/.test(event.title)){store().setLastRun(event);if(runMessageId.current)store().updateMessageRun(runMessageId.current,{activity:event});lastActivitySave=Date.now();}if(checkpointRef.current)checkpointRef.current.activity=event;}},onPreview:document=>{if(alive())store().setPreviewDoc(document);}});
+          onActivity:event=>{if(alive()){armTimeout(event);queueAgentActivity(event);if(Date.now()-lastActivitySave>=1000||/暂停|中断|工具失败/.test(event.title)){store().setLastRun(event);if(runMessageId.current)store().updateMessageRun(runMessageId.current,{activity:event});lastActivitySave=Date.now();}if(checkpointRef.current)checkpointRef.current.activity=event;}},onPreview:document=>{if(alive())store().setPreviewDoc(document);}});
         batch=generated.batch;prepared=generated.result;if(alive()){setAgentActivity(generated.activity);store().setLastRun(generated.activity);}
       } else {
         const generated = await generateBatch(modelText+`\n本次编辑范围约束：${JSON.stringify(editScope)}。${editScope.nodeIds?'只允许修改范围内对象；allowAssemblyAdditions=true时可给完整组件追加部件，不能新增其他组件或改范围外对象。':'允许编辑全场景。高亮对象只是指代参考，不是权限边界，不能因此拒绝其他对象的修改。'}${editScope.lockPlacement?'保留所有已有位置与朝向。':'遵守用户描述中的布局和局部修改要求。'}`, cfg, ctx, controller.signal, images, history, event => { if(alive()) setProgress(event); },record);

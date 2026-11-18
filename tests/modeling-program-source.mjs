@@ -135,15 +135,22 @@ try{
   assert.throws(()=>editSource('ab',{expectedVersion:readSource('ab').version,patches:[{find:'a',replace:''},{find:'b',replace:'ab'}]}),/no change/);
   const edited=editSource(source,options());assert.throws(()=>editSource(edited.source,options()),/Stale/);
  });
- test('patch counts, source budget, required fields and prototype-unsafe inputs are guarded',()=>{
+ test('patch counts, required fields and prototype-unsafe inputs are guarded',()=>{
   for(const patches of [[],Array(9).fill({find:'a',replace:'b'}),[{find:'',replace:'x'}],[{find:'width'}],[{replace:'x'}],[{find:'width',replace:4}],[{find:'width = 4',replace:'x',path:'arbitrary.path'}],[JSON.parse('{"find":"width = 4","replace":"x","__proto__":{}}')],[Object.create({find:'width = 4',replace:'x'})],new Array(1)])assert.throws(()=>editSource(source,{...options(),patches}));
   assert.throws(()=>editSource(source,{...options(),path:'any.path'}));
   assert.throws(()=>editSource(source,JSON.parse('{"__proto__":{}}')));
   const accessor=[];Object.defineProperty(accessor,'0',{get(){throw Error('must not execute getter');},enumerable:true});
   assert.throws(()=>editSource(source,{...options(),patches:accessor}),/accessors/);
-  const exact=editSource('x',{expectedVersion:readSource('x').version,patches:[{find:'x',replace:'a'.repeat(80000)}]});assert.equal(exact.chars,80000);
-  assert.throws(()=>editSource('x',{expectedVersion:readSource('x').version,patches:[{find:'x',replace:'a'.repeat(80001)}]}),/80000/);
   const eight='abcdefgh',result=editSource(eight,{expectedVersion:readSource(eight).version,patches:[...eight].map(find=>({find,replace:find.toUpperCase()}))});assert.equal(result.patchCount,8);assert.equal(result.source,'ABCDEFGH');
+ });
+ test('source edits have no default size cap and enforce a caller-provided maximum',()=>{
+  const replace='a'.repeat(256*1024)+'z',args={expectedVersion:readSource('x').version,patches:[{find:'x',replace}]};
+  const edited=editSource('x',args);
+  assert.equal(edited.source,replace);assert.equal(edited.chars,replace.length);
+  const editedAgain=editSource(edited.source,{expectedVersion:edited.version,patches:[{find:'z',replace:'Z'}]});
+  assert.equal(editedAgain.source,replace.slice(0,-1)+'Z');
+  assert.equal(editSource('x',args,replace.length).source,replace);
+  assert.throws(()=>editSource('x',args,replace.length-1),/Modified source exceeds 262144 chars/);
  });
  test('inspection and editing never execute code',()=>{
   const script='throw new Error("never execute"); globalThis.__sourceHelperExecuted = true;';

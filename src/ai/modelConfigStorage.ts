@@ -1,5 +1,4 @@
 import type {ModelConfig} from './provider';
-import {normalizeTaskBudget} from './taskBudget';
 
 export const MODEL_CONFIG_KEY = 'chat3d.modelConfig';
 let storageError: string | null = null;
@@ -10,9 +9,9 @@ export function saveModelConfig(config: ModelConfig | null): void {
   storageError = null;
   try {
     if (!config) { localStorage.removeItem(MODEL_CONFIG_KEY); return; }
-    const {apiKey,baseURL,model,useMock,reasoningEffort,taskBudget,agentMode,parallelDrafts,stream} = config;
+    const {apiKey,baseURL,model,useMock,reasoningEffort,agentMode,parallelDrafts,stream} = config;
     localStorage.setItem(MODEL_CONFIG_KEY, JSON.stringify({
-      baseURL,model,useMock,reasoningEffort,taskBudget,agentMode,parallelDrafts,stream,
+      baseURL,model,useMock,reasoningEffort,agentMode,parallelDrafts,stream,
       rememberApiKey: config.rememberApiKey === true,
       ...(config.rememberApiKey === true ? {apiKey} : {}),
     }));
@@ -41,12 +40,12 @@ export function loadModelConfig(): ModelConfig | null {
     }
     const config: ModelConfig = {
       reasoningEffort: c.reasoningEffort === 'low' || c.reasoningEffort === 'medium' || c.reasoningEffort === 'high' || c.reasoningEffort === 'xhigh' ? c.reasoningEffort : undefined,
-      taskBudget: normalizeTaskBudget(c.taskBudget), baseURL: c.baseURL, model: c.model,
+      baseURL: c.baseURL, model: c.model,
       apiKey: typeof c.apiKey === 'string' ? c.apiKey : '', rememberApiKey: c.rememberApiKey === true,
       agentMode: c.agentMode === 'single' ? 'single' : 'pi', parallelDrafts: c.parallelDrafts === true,
       stream: c.stream !== false, useMock: false,
     };
-    if ((!config.rememberApiKey && typeof c.apiKey === 'string') || 'generationQuality' in c || 'generationStyle' in c || 'style' in c) saveModelConfig(config);
+    if ((!config.rememberApiKey && typeof c.apiKey === 'string') || 'taskBudget' in c || 'generationQuality' in c || 'generationStyle' in c || 'style' in c) saveModelConfig(config);
     return config;
   } catch { return null; }
 }

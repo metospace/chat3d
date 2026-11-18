@@ -14,7 +14,7 @@ use uuid::Uuid;
 const RUNNER: &str = include_str!("../../server/blender/python-runner.py");
 const SCRIPT_LIMIT: usize = 256 * 1024;
 const LOG_LIMIT: usize = 1024 * 1024;
-const ARTIFACT_LIMITS: [usize; 3] = [32 * 1024 * 1024, 20 * 1024 * 1024, 8 * 1024 * 1024];
+const PREVIEW_LIMIT: usize = 8 * 1024 * 1024;
 const JOB_TIMEOUT: Duration = Duration::from_secs(60);
 const POLL_INTERVAL: Duration = Duration::from_millis(15);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
@@ -759,8 +759,8 @@ fn validate_artifact(index: usize, bytes: &[u8]) -> Result<(), String> {
             && (1..=768).contains(&u32::from_be_bytes(bytes[20..24].try_into().unwrap())),
         _ => false,
     };
-    if !valid || bytes.len() > ARTIFACT_LIMITS.get(index).copied().unwrap_or(0) {
-        return Err(format!("Blender 输出文件无效或超过大小上限 ({index})"));
+    if !valid || (index == 2 && bytes.len() > PREVIEW_LIMIT) {
+        return Err(format!("Blender 输出文件无效或超过预览大小上限 ({index})"));
     }
     Ok(())
 }
@@ -769,8 +769,8 @@ fn artifact_lengths(directory: &Path) -> Result<[usize; 3], String> {
     let mut lengths = [0; 3];
     for (index, filename) in ["result.blend", "result.glb", "render.png"].iter().enumerate() {
         let metadata = fs::symlink_metadata(directory.join(filename)).map_err(|e| format!("缺少 Blender 输出 {filename}: {e}"))?;
-        if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > ARTIFACT_LIMITS[index] as u64 {
-            return Err(format!("Blender 输出 {filename} 超过大小上限或不是普通文件"));
+        if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > u64::from(u32::MAX) || (index == 2 && metadata.len() > PREVIEW_LIMIT as u64) {
+            return Err(format!("Blender 输出 {filename} 不是普通文件或无法通过原生传输"));
         }
         lengths[index] = metadata.len() as usize;
     }
@@ -780,8 +780,9 @@ fn artifact_lengths(directory: &Path) -> Result<[usize; 3], String> {
 fn frame_header(lengths: [usize; 3]) -> Result<[u8; 12], String> {
     let mut header = [0; 12];
     for (index, length) in lengths.into_iter().enumerate() {
-        if length == 0 || length > ARTIFACT_LIMITS[index] { return Err("Blender 输出大小无效".into()); }
-        header[index * 4..index * 4 + 4].copy_from_slice(&(length as u32).to_le_bytes());
+        if length == 0 || (index == 2 && length > PREVIEW_LIMIT) { return Err("Blender 输出大小无效".into()); }
+        let length = u32::try_from(length).map_err(|_| "Blender 文件长度超出原生帧格式")?;
+        header[index * 4..index * 4 + 4].copy_from_slice(&length.to_le_bytes());
     }
     Ok(header)
 }
@@ -790,7 +791,9 @@ fn read_framed_artifacts(directory: &Path) -> Result<Vec<u8>, String> {
     let lengths = artifact_lengths(directory)?;
     let header = frame_header(lengths)?;
     // Allocate the final IPC frame once; artifacts are read directly into it.
-    let mut frame = Vec::with_capacity(12 + lengths.iter().sum::<usize>());
+    let capacity = lengths.iter().try_fold(12usize, |total, &length| total.checked_add(length)).ok_or("Blender 文件总长度超出原生帧格式")?;
+    let mut frame = Vec::new();
+    frame.try_reserve_exact(capacity).map_err(|_| "内存不足，无法接收 Blender 文件")?;
     frame.extend_from_slice(&header);
     for (index, filename) in ["result.blend", "result.glb", "render.png"].iter().enumerate() {
         let start = frame.len();
@@ -971,14 +974,13 @@ mod tests {
     }
 
     #[test]
-    fn framing_is_little_endian_and_enforces_all_three_limits() {
+    fn framing_accepts_large_models_and_rejects_invalid_preview_lengths() {
         let header = frame_header([0x1234, 0x5678, 0x9abc]).unwrap();
         assert_eq!(header, [0x34, 0x12, 0, 0, 0x78, 0x56, 0, 0, 0xbc, 0x9a, 0, 0]);
-        assert!(frame_header(ARTIFACT_LIMITS).is_ok());
+        assert!(frame_header([40 * 1024 * 1024, 32 * 1024 * 1024, PREVIEW_LIMIT]).is_ok());
+        assert!(frame_header([12, 20, PREVIEW_LIMIT + 1]).is_err());
         for index in 0..3 {
-            let mut lengths = ARTIFACT_LIMITS;
-            lengths[index] += 1;
-            assert!(frame_header(lengths).is_err());
+            let mut lengths = [12, 20, 33];
             lengths[index] = 0;
             assert!(frame_header(lengths).is_err());
         }

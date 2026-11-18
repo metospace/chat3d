@@ -1,6 +1,5 @@
 import {Box3,Matrix4,Quaternion,Vector3} from 'three';
 import {buildPrimitiveGeometry} from '../scene/geometry';
-import {STRUCTURED_PART_LIMIT} from './structureLimits';
 import type {SceneDocument,SceneNode} from './types';
 import type {ObjectBlueprint,FeatureBinding,ReferenceExtent,ReferenceProportion} from './objectBlueprint';
 
@@ -19,11 +18,9 @@ export function referenceObservationCoverage(plans:ObjectBlueprint[],hasReferenc
  const features=plans.flatMap(p=>p.features.map(f=>({object:p.name,name:f.name,observation:f.referenceObservation??null})));
  const missing=features.filter(f=>!f.observation);
  const issues:string[]=!hasReference?[]:!features.length?['参考图尚未拆解为可逐项核对的可见结构特征']:missing.map(f=>`${f.object}：${f.name}缺少参考图可见特征记录`);
- // Multi-part machines in a reference photo rarely resolve with 1–2 buckets; push for a real inventory.
- if(hasReference&&features.length>0&&features.length<4)issues.push('参考图结构特征过少（当前'+features.length+'项）：复杂设备应按可见分区拆成更多可核对特征（如底盘、门架/立柱、货叉或载货面、灯具/标牌等），避免单柱或单箱偷懒');
  return {required:hasReference,featureCount:features.length,recordedCount:features.length-missing.length,accepted:false,
   issues,
-  limitation:'只统计是否记录参考观察及特征拆分是否过粗，不证明观察正确、几何实现或视觉相似；遮挡部分须注明未知，不能编造精确尺寸。'};
+  limitation:'只统计是否记录了已声明特征的参考观察，不证明观察正确、几何实现或视觉相似；遮挡部分须注明未知，不能编造精确尺寸。'};
 }
 
 export function referenceShapeChanged(before:SceneDocument,after:SceneDocument){
@@ -78,7 +75,7 @@ export function inspectReferenceProportions(doc:SceneDocument,plan:ObjectBluepri
  const measure=(side:ReferenceExtent):ReferenceExtentMeasurement=>{
   const key=side.featureKey+':'+side.axis,cached=extents.get(key);if(cached)return cached;
   const links=binding?.features.filter(f=>f.key===side.featureKey)??[],ids=links[0]?.nodeIds??[],result:ReferenceExtentMeasurement={...side,nodeIds:ids,actual:null,bounds:null,status:'missing_binding',reason:'特征没有真实节点绑定'};
-  if(ids.length){result.status='invalid_binding';result.reason='绑定节点无效、重复或不属于当前组件';if(binding?.blueprintKey===plan.key&&links.length===1&&ids.length<=STRUCTURED_PART_LIMIT&&new Set(ids).size===ids.length&&ids.every(id=>{const n=nodes.get(id);return n&&(n.assemblyId??n.id)===binding.componentId;})){
+  if(ids.length){result.status='invalid_binding';result.reason='绑定节点无效、重复或不属于当前组件';if(binding?.blueprintKey===plan.key&&links.length===1&&new Set(ids).size===ids.length&&ids.every(id=>{const n=nodes.get(id);return n&&(n.assemblyId??n.id)===binding.componentId;})){
    try{const box=new Box3();for(const id of ids)box.union(nodeBounds(nodes.get(id)!));const actual=box.max[side.axis]-box.min[side.axis];if(!Number.isFinite(actual)||actual<=0)throw Error('所选轴跨度为零或非法');result.actual=actual;result.bounds={min:box.min.toArray(),max:box.max.toArray()};result.status='measured';result.reason=null;}catch(error){result.status='unmeasurable';result.reason=error instanceof Error?error.message:String(error);}
   }}extents.set(key,result);return result;
  };

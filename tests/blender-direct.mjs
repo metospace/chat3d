@@ -72,9 +72,20 @@ try{
   context=>[call('review_blender_result',{expectedVersion:latest(context).version,observations:'宽度明显不足。',issues:['宽度不足']})],
   context=>[call('review_blender_result',{expectedVersion:latest(context).version,observations:'尝试只清空问题',issues:[]})],
   context=>{assert.equal(context.messages.at(-1).isError,true);return [{type:'text',text:'保留未修复候选。'}];},
+  ()=>[{type:'text',text:'仍无实际修复。'}],
+  ()=>[{type:'text',text:'现有预算内保留明确差异。'}],
  ]);
  assert.equal(unresolved.results.at(-1).review.status,'issues');assert.deepEqual(unresolved.results.at(-1).review.issues,['宽度不足']);
  console.log('PASS known issues cannot be cleared without a new generation');
+ const repairedAfterText=await scenario([
+  ()=>[call('run_blender_python',{name:'家具主体',script})],
+  context=>[call('review_blender_result',{expectedVersion:latest(context).version,observations:'主体宽度不足，需要修正轮廓。',issues:['主体宽度不足']})],
+  ()=>[{type:'text',text:'发现比例问题，请再次发送。'}],
+  context=>[call('patch_blender_script',{expectedVersion:latest(context).version,patches:[{find:'width = 1',replace:'width = 2'}]})],
+  context=>{assert.deepEqual(latest(context).previousIssues,['主体宽度不足']);return [call('review_blender_result',{expectedVersion:latest(context).version,observations:'新图确认主体比例已调整。',issues:[]})];},
+ ]);
+ assert.equal(repairedAfterText.posted.length,2);assert.equal(repairedAfterText.results.at(-1).review.status,'reviewed');
+ console.log('PASS known shape defect survives regeneration and early text until follow-up repair is reviewed');
  const question=await scenario([
   ()=>[call('run_blender_python',{name:'不得执行',script})],
   context=>{assert.equal(context.messages.at(-1).isError,true);return [{type:'text',text:'当前模型有一个立方体。'}];},
@@ -103,7 +114,7 @@ try{
   context=>[call('review_blender_result',{expectedVersion:latest(context).version,observations:'已核对修改后的当前图。',issues:[]})],
  ],{previous:largePrevious});
  assert.deepEqual(large.posted,[largeScript.replace('width = 1','width = 2')]);
- console.log('PASS Blender patches support scripts above Three.js source budget while preserving untouched bytes');
+ console.log('PASS Blender patches preserve untouched bytes in large Python scripts');
  const failedReview=[];
  await assert.rejects(scenario([
   ()=>[call('run_blender_python',{name:'立方体',script})],
@@ -111,4 +122,14 @@ try{
  ],{onResult:r=>failedReview.push(r)}),/review provider unavailable/);
  assert.equal(failedReview.at(-1).script,script);assert.equal(failedReview.at(-1).review.status,'pending');
  console.log('PASS provider failure after generation still publishes unreviewed original artifacts');
+ const requests=[];
+ globalThis.fetch=async(_url,init)=>{
+  requests.push(JSON.parse(init.body));
+  const chunk=JSON.stringify({id:'question',object:'chat.completion.chunk',choices:[{index:0,delta:{role:'assistant',content:'只回答当前问题。'},finish_reason:'stop'}]});
+  return new Response(`data: ${chunk}\n\ndata: [DONE]\n\n`,{headers:{'content-type':'text/event-stream'}});
+ };
+ const answer=await runBlenderAgent({text:'当前任务是什么？',questionOnly:true,config,history:[],images:[],signal:new AbortController().signal,onActivity:()=>{},onResult:()=>assert.fail('A question must not produce artifacts'),onControl:()=>{},onSteeringApplied:()=>{}});
+ assert.match(answer,/只回答当前问题/);assert.equal(requests.length,1);
+ assert.ok(!Object.hasOwn(requests[0],'max_tokens')&&!Object.hasOwn(requests[0],'max_completion_tokens'));
+ console.log('PASS Blender agent leaves the output length to the model service');
 }finally{globalThis.fetch=original;await server.close();}

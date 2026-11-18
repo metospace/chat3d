@@ -1,4 +1,3 @@
-import {STRUCTURED_PART_LIMIT, STRUCTURED_BYTES_LIMIT} from './structureLimits';
 import {assemblyBounds} from './assemblyEditing';
 import {Matrix4,Quaternion,Vector3,Euler} from 'three';
 import {nodeMatrix} from './assetContract';
@@ -24,7 +23,7 @@ export function validateBlueprintDimensions(plan:ObjectBlueprint,nodes:SceneNode
  if(issues.length)throw new StructuredValidationError(issues,'dimensions',issues.length);
 }
 export function validateStructuredRecipe(plan:ObjectBlueprint,definition:AssemblyDefinition,features:FeatureParts[],requiredKeys?:string[]):void{
- validateBlueprints([plan]);if(!Array.isArray(definition.parts)||!definition.parts.length||definition.parts.length>100)throw Error('单体需1–100条部件定义');let expanded=0,bytes=0;for(const p of definition.parts){const n=p.repeat?.count??1;if(!Number.isSafeInteger(n)||n<1||n>STRUCTURED_PART_LIMIT)throw Error('repeat.count需为1–1000整数');expanded+=n;bytes+=new TextEncoder().encode(JSON.stringify(p)).length*n;if(expanded>STRUCTURED_PART_LIMIT||bytes>STRUCTURED_BYTES_LIMIT)throw Error(`单体展开超过1000零件或${STRUCTURED_BYTES_LIMIT/(1024*1024)}MB预算，保留要求的数量，按真实组件分批生成；不要截断或减少数量`);}
+ validateBlueprints([plan]);if(!Array.isArray(definition.parts)||!definition.parts.length||definition.parts.length>100)throw Error('单体需1–100条部件定义');
  const issues:string[]=[],partIssues:string[]=[],dimensionIssues:string[]=[];let localNodes:SceneNode[]|undefined;
  // Bindings and method compatibility do not depend on successful mesh construction.
  if(new Set(definition.parts.map(p=>p.name)).size!==definition.parts.length)issues.push('部件名称必须唯一，重复件请使用repeat');
@@ -35,9 +34,10 @@ export function validateStructuredRecipe(plan:ObjectBlueprint,definition:Assembl
  for(const feature of Array.isArray(features)?features:[]){
   const spec=plan.features.find(f=>f.key===feature.key);
   if(!spec||!Array.isArray(feature.partNames)||!feature.partNames.length||feature.partNames.length>100||new Set(feature.partNames).size!==feature.partNames.length||feature.partNames.some(name=>!lookup.has(name))){issues.push('特征必须引用本单体真实且不重复的部件名称');continue;}
-  const linked=feature.partNames.flatMap(name=>{const part=lookup.get(name)!;return Array.from({length:part.repeat?.count??1},()=>({geometry:part.geometry} as SceneNode));});
-  if(linked.length>STRUCTURED_PART_LIMIT){issues.push('每项特征最多关联1000个展开部件');continue;}
-  if(!matchesGeometryApproach(spec.geometryApproach,linked))issues.push(`特征“${spec.name}”规划为${spec.geometryApproach}，实际造型方法不匹配（关联${linked.length}件：${[...new Set(linked.map(node=>node.geometry?.type))].join('、')}）；${spec.geometryApproach==='assembly'?'assembly表示至少两个真实独立零件；若实际为一个连续实体，请用plan_object_structure保持特征key/name/role，明确改为匹配的profile/lathe/sweep/mesh方案，再重新调用构建。':'请修改实际几何，或按真实用途明确修订方案，不能只改标签。'}`);
+  const parts=feature.partNames.map(name=>lookup.get(name)!);
+  const count=parts.reduce((n,part)=>n+(part.repeat?.count??1),0);
+  const linked=parts.map(part=>({geometry:part.geometry} as SceneNode));
+  if(!(spec.geometryApproach==='assembly'?count>=2:matchesGeometryApproach(spec.geometryApproach,linked)))issues.push(`特征“${spec.name}”规划为${spec.geometryApproach}，实际造型方法不匹配（关联${count}件：${[...new Set(linked.map(node=>node.geometry?.type))].join('、')}）；${spec.geometryApproach==='assembly'?'assembly表示至少两个真实独立零件；若实际为一个连续实体，请用plan_object_structure保持特征key/name/role，明确改为匹配的profile/lathe/sweep/mesh方案，再重新调用构建。':'请修改实际几何，或按真实用途明确修订方案，不能只改标签。'}`);
  }
  try{localNodes=buildAssembly({...definition,position:[0,0,0],yaw:0});}catch(error){partIssues.push(...(error instanceof AssemblyValidationError?error.issues:[error instanceof Error?error.message:String(error)]));}
  if(localNodes&&!requiredKeys){try{validateBlueprintDimensions(plan,localNodes);}catch(error){dimensionIssues.push(...(error instanceof AssemblyValidationError?error.issues:[error instanceof Error?error.message:String(error)]));}}
@@ -55,7 +55,7 @@ export function restoreModelStructure(doc:SceneDocument){
  const plans=new Map<string,ObjectBlueprint>(),conflicts=new Set<string>();for(const n of doc.nodes){const p=n.modelStructure?.blueprint;if(!p)continue;try{validateBlueprints([p]);}catch{continue;}if(plans.has(p.key)&&JSON.stringify(plans.get(p.key))!==JSON.stringify(p))conflicts.add(p.key);else plans.set(p.key,p);}
  for(const key of conflicts)plans.delete(key);const blueprints=[...plans.values()].slice(0,24),bindings:FeatureBinding[]=[];
  const groups=new Map<string,SceneNode[]>();for(const n of doc.nodes)if(n.modelStructure){const id=n.assemblyId??n.id;groups.set(id,[...(groups.get(id)??[]),n]);}
- for(const [componentId,nodes] of groups)for(const p of blueprints){const members=nodes.filter(n=>n.modelStructure?.blueprintKey===p.key);if(!members.length)continue;const features=p.features.map(f=>({key:f.key,nodeIds:members.filter(n=>n.modelStructure!.featureKeys.includes(f.key)).map(n=>n.id)})).filter(f=>f.nodeIds.length&&f.nodeIds.length<=STRUCTURED_PART_LIMIT);if(features.length&&bindings.length<128)bindings.push({blueprintKey:p.key,componentId,features});}
+ for(const [componentId,nodes] of groups)for(const p of blueprints){const members=nodes.filter(n=>n.modelStructure?.blueprintKey===p.key);if(!members.length)continue;const features=p.features.map(f=>({key:f.key,nodeIds:members.filter(n=>n.modelStructure!.featureKeys.includes(f.key)).map(n=>n.id)})).filter(f=>f.nodeIds.length);if(features.length&&bindings.length<128)bindings.push({blueprintKey:p.key,componentId,features});}
  return {blueprints,bindings,conflicts:[...conflicts]};
 }
 

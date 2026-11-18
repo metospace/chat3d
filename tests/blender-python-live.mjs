@@ -37,14 +37,14 @@ async function artifacts(response) {
   assert.deepEqual([...form.keys()].sort(),['blend','glb','render']);
   const result={};
   for(const [field,name,type,maxBytes] of [
-    ['blend','result.blend','application/octet-stream',32*1024*1024],
-    ['glb','result.glb','model/gltf-binary',20*1024*1024],
+    ['blend','result.blend','application/octet-stream'],
+    ['glb','result.glb','model/gltf-binary'],
     ['render','render.png','image/png',8*1024*1024],
   ]) {
     const file=form.get(field);
     assert.equal(file?.name,name);
     assert.equal(file.type,type);
-    assert.ok(file.size>0 && file.size<=maxBytes,field+' size');
+    assert.ok(file.size>0 && (maxBytes===undefined||file.size<=maxBytes),field+' size');
     result[field]=Buffer.from(await file.arrayBuffer());
   }
   assert.equal(result.blend.toString('ascii',0,7),'BLENDER');

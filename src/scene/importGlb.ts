@@ -7,10 +7,8 @@ import {makeId} from '../util/ids';
 import {withStockMaterials} from '../domain/materials';
 import {PHYSICAL_MATERIAL_KEYS} from '../domain/physicalMaterial';
 import {serializeProject} from '../domain/project';
+import {assertGlbSize} from './glbLimit';
 
-export const MAX_GLB_BYTES=512*1024*1024;
-export const GLB_SIZE_ERROR=`GLB文件不能超过${MAX_GLB_BYTES/1024/1024} MiB`;
-export function assertGlbSize(size:number):void{if(size>MAX_GLB_BYTES)throw Error(GLB_SIZE_ERROR);}
 export interface GlbImportOptions {fitTextures?:boolean}
 export async function inspectGlbBytes(data:ArrayBuffer,options:GlbImportOptions={}){
  assertGlbSize(data.byteLength);if(data.byteLength<20)throw Error('GLB文件头不完整');const view=new DataView(data);

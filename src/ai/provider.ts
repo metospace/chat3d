@@ -3,7 +3,6 @@ import {sanitizeSectionLoftParams} from '../domain/sectionLoft';
 import {generationStylePrompt} from './generationStyle';
 import {PHYSICAL_MATERIAL_KEYS, PHYSICAL_MATERIAL_LIMITS} from '../domain/physicalMaterial';
 import {generationReviewPrompt} from './generationPolicy';
-import type {TaskBudget} from './taskBudget';
 import type {EditScope} from '../domain/editScope';
 import type {AnimationProgram} from '../domain/animation';
 import {createBrowserProxyFetch} from './transport';
@@ -27,7 +26,6 @@ export interface ModelConfig {
   model: string; // 如 gpt-4o-mini
   reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh'; // undefined leaves the service default unchanged.
   agentMode?: 'pi' | 'single';
-  taskBudget?: Partial<TaskBudget>;
   parallelDrafts?: boolean; // 实验：最多两个隔离子草稿，默认关闭
   stream?: boolean; // 默认流式；不支持 SSE 的服务可关闭
   useMock?: boolean; // 仅识别旧配置；true 时要求重新配置真实模型
@@ -138,7 +136,7 @@ mat_fabric 深蓝哑光工作服；mat_skin 肤色；mat_light 柔和发光灯�
 box 可指定 bevelRadius（米，0为锐边），用小倒角表达钣金，不要一律使用肥厚圆角。
 
 # 自由组合与阵列建模
-优先以 createAssembly 定义每个自设计设备/结构的部件、尺寸、材质和局部变换；没有预设几何或工艺。parts最多100条，repeat用count与step排列重复部件；单组合最多2000零件。
+优先以 createAssembly 定义每个自设计设备/结构的部件、尺寸、材质和局部变换；没有预设几何或工艺。每次提交最多100条部件定义，repeat用count与step排列重复部件，不按生成零件数截断。
 格式：{"op":"createAssembly","tempId":"custom1","name":"按需求命名的自设计组合","position":[0,0,0],"yaw":0,"parts":[{"name":"自定义支柱","geometry":{"type":"box","params":{"width":0.05,"height":1,"depth":0.05}},"materialId":"mat_metal","transform":{"position":[0,0.5,0]},"repeat":{"count":4,"step":[0.4,0,0]}}]}
 createAssembly还可指定sceneRole（equipment/conveyor/workstation/storage/person/safety/building/floor/transport/other）、planKey（对应设计清单名称）、zone（区域名）。省略materialId时按sceneRole选择基础材质，细分玻璃、金属、肤色等仍需显式设置。每个逻辑实体单独分组，例如一名人员为一个组合，不能把全车间塞成一个组合。重复同类可复制组并保留planKey。
 parts可加label短文本；仅用于尺寸足够的平面标牌/面板，使用plate/box薄片作承载，避免给曲面贴字。不写虚构品牌。
@@ -503,7 +501,7 @@ export async function generateBatch(
   onProgress?: (event: GenerationProgress) => void,
   onDiagnostic?: (kind:string,data:unknown) => void,
 ): Promise<GeneratedBatch> {
-  cfg = {...cfg, taskBudget: cfg.taskBudget ? {...cfg.taskBudget} : undefined};
+  cfg = {...cfg};
   const base = (cfg.baseURL || '').trim().replace(/\/+$/, '');
   if (!base) throw new Error('未配置 API 地址（baseURL）');
   if (!cfg.apiKey.trim()) throw new Error('未配置 API Key');
@@ -558,7 +556,6 @@ async function fetchChat(
       ...(cfg.reasoningEffort ? {reasoning_effort: cfg.reasoningEffort} : {}),
       messages,
       temperature: 0.2,
-      max_tokens: 8192,
       stream: cfg.stream !== false,
     }),
     signal,

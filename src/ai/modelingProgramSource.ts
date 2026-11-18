@@ -24,7 +24,7 @@ export interface SourceEditOptions {expectedVersion:string;patches:SourcePatch[]
 /** Keep `source` internal: tool responses should return metadata, never this whole object. */
 export interface SourceEditResult extends SourceMetadata {source:string;patchCount:number}
 
-const MAX_CHARS=12000,MAX_LINES=120,MAX_SOURCE=80000,MAX_PATCHES=8,MAX_MATCHES=8;
+const MAX_CHARS=12000,MAX_LINES=120,MAX_PATCHES=8,MAX_MATCHES=8;
 const own=(value:object,key:string)=>Object.prototype.hasOwnProperty.call(value,key);
 function record(value:unknown,allowed:readonly string[],label:string):asserts value is Record<string,unknown>{
  if(!value||typeof value!=='object'||Array.isArray(value)||(Object.getPrototypeOf(value)!==Object.prototype&&Object.getPrototypeOf(value)!==null))throw Error(label+' must be a plain object');
@@ -116,16 +116,16 @@ export function readSource(source:string,options:SourceReadOptions={}):SourceRea
 }
 
 /** Resolve all patches against the same original source before applying any changes. */
-export function editSource(source:string,options:SourceEditOptions,maxSourceChars=MAX_SOURCE):SourceEditResult{
+export function editSource(source:string,options:SourceEditOptions,maxSourceChars?:number):SourceEditResult{
  if(typeof source!=='string')throw Error('source must be a string');
- integer(maxSourceChars,'maxSourceChars',1,Number.MAX_SAFE_INTEGER);
+ if(maxSourceChars!==undefined)integer(maxSourceChars,'maxSourceChars',1,Number.MAX_SAFE_INTEGER);
  record(options,['expectedVersion','patches'],'edit options');
  if(!own(options,'expectedVersion')||!own(options,'patches'))throw Error('edit options requires expectedVersion and patches');
  if(typeof options.expectedVersion!=='string'||options.expectedVersion!==version(source))throw Error('Stale expectedVersion: read the current source before editing');
  if(!Array.isArray(options.patches)||Object.getPrototypeOf(options.patches)!==Array.prototype||options.patches.length<1||options.patches.length>MAX_PATCHES)throw Error('patches must contain between 1 and 8 literal patches');
  if(Reflect.ownKeys(options.patches).some(key=>typeof key!=='string'||(key!=='length'&&!/^(?:0|[1-9]\d*)$/.test(key))))throw Error('patches contains an unsupported or unsafe key');
  if(Object.values(Object.getOwnPropertyDescriptors(options.patches)).some(descriptor=>!('value' in descriptor)))throw Error('patches must not contain accessors');
- const resolved:{start:number;end:number;replace:string}[]=[];let size=source.length;
+ const resolved:{start:number;end:number;replace:string}[]=[];
  for(let i=0;i<options.patches.length;i++){
   if(!own(options.patches,String(i)))throw Error('patches must not contain empty entries');
   const patch=options.patches[i];record(patch,['find','replace'],'patch');
@@ -135,11 +135,14 @@ export function editSource(source:string,options:SourceEditOptions,maxSourceChar
   const start=source.indexOf(patch.find);
   if(start===-1)throw Error(`Patch ${i+1} find did not match the source`);
   if(source.indexOf(patch.find,start+1)!==-1)throw Error(`Patch ${i+1} find is ambiguous; include unique surrounding text`);
-  resolved.push({start,end:start+patch.find.length,replace:patch.replace});size+=patch.replace.length-patch.find.length;
+  resolved.push({start,end:start+patch.find.length,replace:patch.replace});
  }
  resolved.sort((a,b)=>a.start-b.start);
  for(let i=1;i<resolved.length;i++)if(resolved[i].start<resolved[i-1].end)throw Error('Patches overlap in the original source');
- if(size>maxSourceChars)throw Error(`Modified source exceeds ${maxSourceChars} chars`);
+ if(maxSourceChars!==undefined){
+  const size=resolved.reduce((length,{start,end,replace})=>length+replace.length-(end-start),source.length);
+  if(size>maxSourceChars)throw Error(`Modified source exceeds ${maxSourceChars} chars`);
+ }
  let cursor=0;const chunks:string[]=[];
  for(const patch of resolved){chunks.push(source.slice(cursor,patch.start),patch.replace);cursor=patch.end;}
  chunks.push(source.slice(cursor));const modified=chunks.join('');

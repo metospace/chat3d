@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';import {createServer} from 'vite';
 const server=await createServer({server:{middlewareMode:true},appType:'custom'});let passed=0;const check=(name,f)=>{f();passed++;console.log('PASS '+name)};
-try{const {normalizedUsage,providerHasUsage,executionMetadata,classifyToolFailure,safeToolFailureCategory}=await server.ssrLoadModule('/src/ai/executionTelemetry.ts');const {runDiagnostics,fullRunDiagnostics,expandDiagnosticBundle}=await server.ssrLoadModule('/src/domain/runDiagnostics.ts');const {DEFAULT_TASK_BUDGET}=await server.ssrLoadModule('/src/ai/taskBudget.ts');
+try{const {normalizedUsage,providerHasUsage,executionMetadata,classifyToolFailure,safeToolFailureCategory}=await server.ssrLoadModule('/src/ai/executionTelemetry.ts');const {runDiagnostics,fullRunDiagnostics,expandDiagnosticBundle}=await server.ssrLoadModule('/src/domain/runDiagnostics.ts');
 check('SDK default zero is unknown without provider evidence',()=>{assert.equal(normalizedUsage({input:0,output:0,totalTokens:0}).usageState,'unknown');assert.equal(normalizedUsage({input:0,output:0},true).usageState,'reported-zero');});
 check('cached input is counted once in per-round totals',()=>{assert.deepEqual(normalizedUsage({input:20,cacheRead:80,cacheWrite:10,output:5}),{inputTokens:110,uncachedInputTokens:20,cacheReadTokens:80,cacheWriteTokens:10,outputTokens:5,usageState:'reported'});});
 check('only explicit provider usage counters prove reported zero',()=>{assert.equal(providerHasUsage({usage:{prompt_tokens:0,completion_tokens:0}}),true);assert.equal(providerHasUsage({usage:{}}),false);assert.equal(providerHasUsage({usage:{prompt_tokens:-1,completion_tokens:0}}),false);assert.equal(providerHasUsage({response:{usage:{input_tokens:2,output_tokens:3}}}),true);});
@@ -20,22 +20,23 @@ check('v2 diagnostics retain model content, scene, history commands and raw fail
  assert.match(result.aiError,/HTTP 401/);assert.equal(result.aiConfig,undefined);assert.doesNotMatch(JSON.stringify(result),/fixture-configured-credential|fixture-auth-header|private-config\.example/);
 });
 check('explicit zero is complete and first response/content timings remain distinct',()=>{const d=runDiagnostics('idle',{turn:1,toolCalls:0,inputTokens:0,outputTokens:0,timings:[{kind:'model',usageState:'reported-zero',startedAt:1,responseAt:2,firstDataAt:3,firstContentAt:4,endedAt:5,inputTokens:0,outputTokens:0}]},null);assert.equal(d.run.usageIncomplete,false);assert.equal(d.run.timings[0].responseAt,2);assert.equal(d.run.timings[0].firstContentAt,4);});
-check('launch snapshot copies and freezes safe model reasoning budget and reference dimensions without legacy quality',()=>{
+check('launch snapshot copies and freezes safe model reasoning and reference dimensions without legacy quality or budget',()=>{
  const config={model:'gpt-test',apiKey:'private-secret',generationQuality:'private-legacy-quality',reasoningEffort:'xhigh',taskBudget:{maxMinutes:12.9,maxRounds:35.8,maxReportedTokens:300000.4}};
  const reference={count:2,dimensions:[{width:640,height:480,url:'https://private.example',data:'private-secret'},{width:1024,height:768}]};
  const meta=executionMetadata(config,7,reference),before=JSON.stringify(meta);
- config.model='other';config.generationQuality='fine';config.reasoningEffort='low';config.taskBudget.maxRounds=2;reference.count=0;reference.dimensions[0].width=1;reference.dimensions.push({width:1,height:1});
- assert.equal(JSON.stringify(meta),before);assert.equal(meta.model,'gpt-test');assert.equal(Object.hasOwn(meta,'generationQuality'),false);assert.equal(meta.reasoningEffort,'xhigh');assert.deepEqual(meta.taskBudget,{maxMinutes:12,maxRounds:35,maxReportedTokens:300000});assert.deepEqual(meta.referenceImages,{count:2,dimensions:[{width:640,height:480},{width:1024,height:768}]});
- for(const value of [meta,meta.taskBudget,meta.referenceImages,meta.referenceImages.dimensions,meta.referenceImages.dimensions[0]])assert.equal(Object.isFrozen(value),true);
+ config.model='other';config.generationQuality='fine';config.reasoningEffort='low';reference.count=0;reference.dimensions[0].width=1;reference.dimensions.push({width:1,height:1});
+ assert.equal(JSON.stringify(meta),before);assert.equal(meta.model,'gpt-test');assert.equal(Object.hasOwn(meta,'generationQuality'),false);assert.equal(meta.reasoningEffort,'xhigh');assert.equal(Object.hasOwn(meta,'taskBudget'),false);assert.deepEqual(meta.referenceImages,{count:2,dimensions:[{width:640,height:480},{width:1024,height:768}]});
+ for(const value of [meta,meta.referenceImages,meta.referenceImages.dimensions,meta.referenceImages.dimensions[0]])assert.equal(Object.isFrozen(value),true);
  assert.equal(before.includes('private'),false);const exported=runDiagnostics('idle',{executionMeta:meta,timings:[]},null).run.executionMeta;assert.deepEqual(exported,meta);
 });
 check('reasoning accepts only configured enums and exposes service default explicitly',()=>{
  for(const value of [undefined,null,'default','off','HIGH','private-secret',{},['high'],4])assert.equal(executionMetadata({reasoningEffort:value},0).reasoningEffort,'default');
  for(const value of ['low','medium','high','xhigh'])assert.equal(executionMetadata({reasoningEffort:value},0).reasoningEffort,value);
 });
-check('invalid budgets are normalized without coercing strings or retaining unknown fields',()=>{
- for(const value of [undefined,null,'private-secret',{maxMinutes:'private-secret',maxRounds:NaN,maxReportedTokens:Infinity,extra:'private-secret'}])assert.deepEqual(executionMetadata({taskBudget:value},0).taskBudget,DEFAULT_TASK_BUDGET);
- assert.deepEqual(executionMetadata({taskBudget:{maxMinutes:-2,maxRounds:999,maxReportedTokens:1e20}},0).taskBudget,{maxMinutes:1,maxRounds:200,maxReportedTokens:20000000});
+check('sanitized diagnostics omit legacy execution budgets',()=>{
+ const executionMeta={...executionMetadata({model:'gpt-test'},0),taskBudget:{maxMinutes:12,maxRounds:35,maxReportedTokens:300000}};
+ const sanitized=runDiagnostics('idle',{executionMeta,timings:[]},null).run.executionMeta;
+ assert.equal(Object.hasOwn(sanitized,'taskBudget'),false);assert.equal(sanitized.model,'gpt-test');
 });
 check('reference metadata exports only numeric count and complete positive integer dimensions',()=>{
  for(const count of ['private-secret',-1,NaN,Infinity,.5])assert.equal(executionMetadata({},0,{count}).referenceImages,undefined);

@@ -10,9 +10,9 @@ export function isolatedDocument(base:SceneDocument):SceneDocument{
 }
 export function componentDraftCommand(doc:SceneDocument,job:ComponentJob):Command{
  const errors=validateDocument(doc);if(errors.length)throw errors[0];
- if(!doc.nodes.length||doc.nodes.length>1000||doc.nodes.some(n=>!n.visible||n.kind!=='primitive'||!n.geometry||n.parentId!==null)||doc.animation)throw Error('子草稿必须包含1–1000个可见静态平级部件');
+ if(!doc.nodes.length||doc.nodes.some(n=>!n.visible||n.kind!=='primitive'||!n.geometry||n.parentId!==null)||doc.animation)throw Error('子草稿必须包含可见静态平级部件');
  if(!Array.isArray(job.position)||job.position.length!==3||job.position.some(v=>!Number.isFinite(v)||Math.abs(v)>10000))throw Error('子草稿放置坐标无效');
- const group=makeId(),nodes=structuredClone(doc.nodes).map(n=>({...n,assemblyId:group,assemblyName:job.name,planKey:job.name,transform:{...n.transform,position:n.transform.position.map((v,i)=>v+job.position[i]) as Vec3}}));
+ const group=makeId(),nodes=doc.nodes.map(n=>({...n,assemblyId:group,assemblyName:job.name,planKey:job.name,transform:{...n.transform,position:n.transform.position.map((v,i)=>v+job.position[i]) as Vec3}}));
  const used=new Set(nodes.map(n=>n.materialId));return {op:'importComponentDraft',nodes,materials:doc.materials.filter(m=>used.has(m.id))};
 }
 /** Only two workers can run. Abort stops queued work and rejects late results. */

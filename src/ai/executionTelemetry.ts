@@ -1,5 +1,4 @@
 import packageInfo from '../../package.json';
-import {normalizeTaskBudget,type TaskBudget} from './taskBudget';
 export type UsageState='reported'|'reported-zero'|'unknown';
 export function normalizedUsage(value:unknown,providerReported=false){
  const u=value&&typeof value==='object'?value as Record<string,unknown>:{};
@@ -14,7 +13,7 @@ export function providerHasUsage(data:unknown){
  return !!u&&typeof u==='object'&&[['prompt_tokens','completion_tokens'],['input_tokens','output_tokens']].some(keys=>keys.every(k=>typeof u[k]==='number'&&Number.isFinite(u[k])&&u[k]>=0));
 }
 export interface ExecutionConfiguration {
- model?:unknown;apiKey?:unknown;reasoningEffort?:unknown;taskBudget?:unknown;
+ model?:unknown;apiKey?:unknown;reasoningEffort?:unknown;
 }
 export interface ReferenceImageMetadata {count?:unknown;dimensions?:readonly {width?:unknown;height?:unknown}[]}
 export type SafeReasoningEffort='default'|'low'|'medium'|'high'|'xhigh';
@@ -22,17 +21,12 @@ export interface SafeReferenceImages {readonly count:number;readonly dimensions?
 export interface ExecutionMetadata {
  readonly appVersion:string;readonly model?:string;readonly initialRevision?:number;readonly buildCommit:string;
  readonly contextPolicy:'edit-delta-v1';readonly executionMode:'pi';
- readonly reasoningEffort:SafeReasoningEffort;readonly taskBudget:Readonly<TaskBudget>;readonly referenceImages?:SafeReferenceImages;
+ readonly reasoningEffort:SafeReasoningEffort;readonly referenceImages?:SafeReferenceImages;
 }
 const record=(value:unknown):Record<string,unknown>=>value&&typeof value==='object'?value as Record<string,unknown>:{};
 const count=(value:unknown)=>typeof value==='number'&&Number.isSafeInteger(value)&&value>=0?value:undefined;
 const safeModel=(value:unknown,secret:unknown)=>typeof value==='string'&&/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/.test(value)&&!/^sk-|bearer|token-/i.test(value)&&!value.includes('://')&&!(typeof secret==='string'&&secret&&value.includes(secret))?value:undefined;
 const reasoningEffort=(value:unknown):SafeReasoningEffort=>value==='low'||value==='medium'||value==='high'||value==='xhigh'?value:'default';
-function safeBudget(value:unknown):Readonly<TaskBudget>{
- const source=record(value),budget:Partial<TaskBudget>={};
- for(const key of ['maxMinutes','maxRounds','maxReportedTokens'] as const){const v=source[key];if(typeof v==='number'&&Number.isFinite(v))budget[key]=v;}
- return Object.freeze(normalizeTaskBudget(budget));
-}
 function safeReferenceImages(value:unknown):SafeReferenceImages|undefined{
  const source=record(value),imageCount=count(source.count);
  if(imageCount===undefined)return undefined;
@@ -44,12 +38,12 @@ function safeReferenceImages(value:unknown):SafeReferenceImages|undefined{
 }
 /** Copy only operational values at launch; never retain the mutable config or image data. */
 export function executionMetadata(config:ExecutionConfiguration,revision:number,referenceImages?:ReferenceImageMetadata):ExecutionMetadata{
- return Object.freeze({appVersion:packageInfo.version,model:safeModel(config.model,config.apiKey),initialRevision:count(revision),buildCommit:typeof __APP_BUILD_COMMIT__==='string'&&/^[a-f0-9]{40}$/.test(__APP_BUILD_COMMIT__)?__APP_BUILD_COMMIT__:'local',contextPolicy:'edit-delta-v1' as const,executionMode:'pi' as const,reasoningEffort:reasoningEffort(config.reasoningEffort),taskBudget:safeBudget(config.taskBudget),referenceImages:safeReferenceImages(referenceImages)});
+ return Object.freeze({appVersion:packageInfo.version,model:safeModel(config.model,config.apiKey),initialRevision:count(revision),buildCommit:typeof __APP_BUILD_COMMIT__==='string'&&/^[a-f0-9]{40}$/.test(__APP_BUILD_COMMIT__)?__APP_BUILD_COMMIT__:'local',contextPolicy:'edit-delta-v1' as const,executionMode:'pi' as const,reasoningEffort:reasoningEffort(config.reasoningEffort),referenceImages:safeReferenceImages(referenceImages)});
 }
 /** Reapply the v1 allowlist to persisted/untrusted activity before diagnostic export. */
 export function safeExecutionMetadata(value:unknown):Partial<ExecutionMetadata>{
  const source=record(value);
- return {appVersion:source.appVersion===packageInfo.version?packageInfo.version:undefined,model:safeModel(source.model,undefined),initialRevision:count(source.initialRevision),buildCommit:source.buildCommit==='local'||typeof source.buildCommit==='string'&&/^[a-f0-9]{40}$/.test(source.buildCommit)?source.buildCommit:undefined,contextPolicy:source.contextPolicy==='edit-delta-v1'?'edit-delta-v1':undefined,executionMode:source.executionMode==='pi'?'pi':undefined,reasoningEffort:source.reasoningEffort===undefined?undefined:reasoningEffort(source.reasoningEffort),taskBudget:source.taskBudget===undefined?undefined:safeBudget(source.taskBudget),referenceImages:safeReferenceImages(source.referenceImages)};
+ return {appVersion:source.appVersion===packageInfo.version?packageInfo.version:undefined,model:safeModel(source.model,undefined),initialRevision:count(source.initialRevision),buildCommit:source.buildCommit==='local'||typeof source.buildCommit==='string'&&/^[a-f0-9]{40}$/.test(source.buildCommit)?source.buildCommit:undefined,contextPolicy:source.contextPolicy==='edit-delta-v1'?'edit-delta-v1':undefined,executionMode:source.executionMode==='pi'?'pi':undefined,reasoningEffort:source.reasoningEffort===undefined?undefined:reasoningEffort(source.reasoningEffort),referenceImages:safeReferenceImages(source.referenceImages)};
 }
 export const TOOL_FAILURE_CATEGORIES=['schema','geometry','scope','review-evidence','reference-mismatch','transport','other'] as const;
 export type ToolFailureCategory=typeof TOOL_FAILURE_CATEGORIES[number];

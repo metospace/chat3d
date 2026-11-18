@@ -64,11 +64,11 @@ try {
   const occupied=new Set();for(const members of instances.values()){const i=Number(members[0].assemblyName.split(' ').at(-1))-1;assert.ok(Number.isInteger(i)&&i>=0&&i<400);occupied.add(i);assert.deepEqual(members[0].transform.position,asset.nodes[0].transform.position.map((v,k)=>v+slot(i)[k]));}assert.equal(occupied.size,400,'every requested shelf position must be occupied');
   assert.equal(checkRequirements(large,[quantity]).items[0].status,'pass');assert.equal(generated.batch.incomplete,true,'data-only draft must remain visually unverified');assert.deepEqual(validateDocument(large),[]);assert.equal(JSON.stringify(asset),assetBefore);
  });
- await test('a bounded task retains its complete batch above 10,000 and manual continuation finishes without duplicates',async()=>{
-  const options={text:'继续完成总共400个货箱',config:{baseURL:'https://mock.invalid/v1',apiKey:'mock',model:'mock',taskBudget:{maxRounds:1}},document:seed,selection:[],captureAvailable:()=>false};
-  const partial=await runModelingAgent({...options,streamFn:fake([[add(352)]])});assert.equal(partial.result.doc.nodes.length,10304);assert.equal(partial.batch.incomplete,true);assert.match(partial.batch.continuation,/保留有效部分，不要重复创建/);
+ await test('a staged draft above 10,000 reopens and continues without duplicate instances',async()=>{
+  const options={text:'继续完成总共400个货箱',config:{baseURL:'https://mock.invalid/v1',apiKey:'mock',model:'mock'},document:seed,selection:[],captureAvailable:()=>false};
+  const partial=await runModelingAgent({...options,streamFn:fake([[add(352)],[{name:'submit_data_preview',args:{summary:'第一批货箱已就位，保留为阶段草稿'}}]])});assert.equal(partial.result.doc.nodes.length,10304);assert.equal(partial.batch.incomplete,true);assert.match(partial.batch.continuation,/保留有效部分，不要重复创建/);
   const restored=parseProject(serializeProject(partial.result.doc));const ids=restored.nodes.map(n=>n.id);
-  const resumed=await runModelingAgent({...options,config:{...options.config,taskBudget:{maxRounds:5}},document:restored,streamFn:fake([[add(368)],[add(384)],[{name:'submit_data_preview',args:{summary:'完整400个货箱已填入，待视觉检查'}}]])});
+  const resumed=await runModelingAgent({...options,document:restored,streamFn:fake([[add(368)],[add(384)],[{name:'submit_data_preview',args:{summary:'完整400个货箱已填入，待视觉检查'}}]])});
   assert.equal(resumed.result.doc.nodes.length,11200);assert.deepEqual(resumed.result.doc.nodes.slice(0,ids.length).map(n=>n.id),ids);assert.equal(new Set(resumed.result.doc.nodes.map(n=>n.modelAsset.instanceId)).size,400);assert.equal(checkRequirements(resumed.result.doc,[quantity]).items[0].status,'pass');
  });
  await test('pagination reaches every part past 10,000 and retains bounded page/input validation',()=>{
@@ -93,9 +93,10 @@ try {
   }
   const chain={...large,nodes:large.nodes.map((n,i)=>({...n,parentId:i?large.nodes[i-1].id:null}))};assert.deepEqual(validateDocument(chain),[]);
  });
- await test('scene capacity does not bypass per-batch command work budgets',()=>{
-  let result=applyBatch(large,{operations:Array.from({length:201},()=>({op:'rename',targetId:large.nodes[0].id,name:'same'}))});assert.equal(result.doc,large);assert.match(result.errors[0].message,/命令数/);
-  const assembly=count=>({op:'createAssembly',name:'budget',parts:Array.from({length:count},(_,i)=>({...part(i),repeat:{count:100,step:[1,0,0]}}))});result=applyBatch(large,{operations:[assembly(20),assembly(11)]});assert.equal(result.doc,large);assert.deepEqual(result.applied,[]);assert.match(result.errors[0].message,/本批实际新增.*3000.*分批/);
+ await test('command count stays bounded without capping the number of generated parts',()=>{
+  const invalid=applyBatch(large,{operations:Array.from({length:201},()=>({op:'rename',targetId:large.nodes[0].id,name:'same'}))});assert.equal(invalid.doc,large);assert.match(invalid.errors[0].message,/命令数/);
+  const assembly=count=>({op:'createAssembly',name:'Generated component',parts:Array.from({length:count},(_,i)=>({...part(i),repeat:{count:100,step:[1,0,0]}}))});
+  const built=applyBatch(large,{operations:[assembly(21),assembly(10)]});assert.deepEqual(built.errors,[]);assert.equal(built.doc.nodes.length,large.nodes.length+3100);assert.equal(built.applied.length,2);
  });
  await test('compact project save and reopen keep all 11,200 nodes without weakening the byte budget',async()=>{
   const json=serializeProject(large);assert.ok(Buffer.byteLength(json)<MAX_PROJECT_BYTES);assert.deepEqual(parseProject(json),JSON.parse(JSON.stringify(large)));console.log('Portable project bytes',Buffer.byteLength(json));

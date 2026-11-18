@@ -1,10 +1,8 @@
 /* Runs inside the disposable modeling worker. No scene JSON/GLB intermediate. */
-export const MODELING_PROGRAM_LIMITS = Object.freeze({sourceBytes:262144,resultBytes:24*1024*1024,meshes:1000,materials:100,vertices:500000,meshVertices:200000,indices:600000,totalIndices:1500000,objects:4096});
 
-export function serializeModelingObject(THREE,root,limits=MODELING_PROGRAM_LIMITS) {
+export function serializeModelingObject(THREE,root) {
   if(!(root instanceof THREE.Object3D))throw Error('建模程序必须返回 THREE.Object3D / Group / Mesh');
   const nodes=[],materials=[],materialIds=new Map(),materialValues=new Map(),seen=new Set();
-  let vertexTotal=0,indexTotal=0;
   const finite=(values,label)=>{if(values.some(v=>!Number.isFinite(v)))throw Error(label+'包含非有限数字');};
   const materialId=material=>{
     if(materialIds.has(material))return materialIds.get(material);
@@ -19,7 +17,6 @@ export function serializeModelingObject(THREE,root,limits=MODELING_PROGRAM_LIMIT
     finite(Object.values(value).filter(v=>typeof v==='number'),'材质');
     const key=JSON.stringify({...value,id:undefined});
     if(materialValues.has(key)){const existing=materialValues.get(key);materialIds.set(material,existing);return existing;}
-    if(materials.length>=limits.materials)throw Error('模型超过100种 PBR 材质预算');
     materials.push(value);materialIds.set(material,id);materialValues.set(key,id);return id;
   };
   // Iterate explicitly: a hostile/accidentally cyclic or deeply nested graph must not
@@ -28,7 +25,7 @@ export function serializeModelingObject(THREE,root,limits=MODELING_PROGRAM_LIMIT
   while(stack.length){
     const {object,parentMatrix,visible:parentVisible}=stack.pop();
     if(!(object instanceof THREE.Object3D)||seen.has(object))throw Error('建模对象层级无效或包含循环');
-    seen.add(object);if(seen.size>limits.objects)throw Error('建模对象数量超出预算');
+    seen.add(object);
     if(object.animations.length||object.isSkinnedMesh||object.isInstancedMesh||object.isBatchedMesh||object.isLine||object.isPoints||object.isSprite||object.isLight||object.isCamera)throw Error('仅支持静态普通网格，不支持骨骼、实例、动画、线、点、灯光或相机');
     if(!object.isMesh&&!object.isGroup&&!object.isScene&&object.type!=='Object3D')throw Error('不支持此建模对象类型');
     if(object.matrixAutoUpdate)object.updateMatrix();
@@ -43,10 +40,10 @@ export function serializeModelingObject(THREE,root,limits=MODELING_PROGRAM_LIMIT
     if(!(geometry instanceof THREE.BufferGeometry)||Object.keys(geometry.morphAttributes).length)throw Error('仅支持无形变的 BufferGeometry 网格');
     if(Object.keys(geometry.attributes).some(key=>!['position','normal','uv'].includes(key)))throw Error('网格包含无法保留的顶点属性（仅支持 position / normal / uv）');
     const position=geometry.getAttribute('position'),normal=geometry.getAttribute('normal'),uv=geometry.getAttribute('uv');
-    if(!position||position.itemSize!==3||position.count<3||position.count>limits.meshVertices||!Number.isInteger(position.count))throw Error('网格顶点无效或超过20万顶点预算');
+    if(!position||position.itemSize!==3||position.count<3||!Number.isSafeInteger(position.count))throw Error('网格顶点无效');
     if(normal&&(normal.itemSize!==3||normal.count!==position.count)||uv&&(uv.itemSize!==2||uv.count!==position.count))throw Error('网格法线或 UV 数量无效');
     const count=geometry.index?geometry.index.count:position.count;
-    if(!Number.isInteger(count)||!count||count%3||count>limits.indices||geometry.index&&geometry.index.itemSize!==1)throw Error('网格三角索引无效或超过预算');
+    if(!Number.isSafeInteger(count)||!count||count%3||geometry.index&&geometry.index.itemSize!==1)throw Error('网格三角索引无效');
     if(geometry.drawRange.start!==0||geometry.drawRange.count!==Infinity&&geometry.drawRange.count!==count)throw Error('不支持部分 drawRange，请返回完整网格');
     const indices=new Array(count);
     for(let i=0;i<count;i++){const index=geometry.index?geometry.index.getX(i):i;if(!Number.isInteger(index)||index<0||index>=position.count)throw Error('网格三角索引越界');indices[i]=index;}
@@ -59,9 +56,6 @@ export function serializeModelingObject(THREE,root,limits=MODELING_PROGRAM_LIMIT
     const ordered=[...groups].sort((a,b)=>a.start-b.start);let end=0;
     for(const group of ordered){if(!Number.isInteger(group.start)||!Number.isInteger(group.count)||group.start!==end||group.count<=0||group.start%3||group.count%3||!Number.isInteger(group.materialIndex??0)||!ids[group.materialIndex??0])throw Error('材质分组必须完整覆盖三角形且不能重叠');end+=group.count;}
     if(end!==count)throw Error('材质分组未完整覆盖网格');
-    if(nodes.length+groups.length>limits.meshes)throw Error('模型超过1000个可编辑网格部件预算');
-    vertexTotal+=position.count*groups.length;indexTotal+=count;
-    if(vertexTotal>limits.vertices||indexTotal>limits.totalIndices)throw Error('模型超过总顶点或三角形预算');
     const p=new THREE.Vector3(),q=new THREE.Quaternion(),s=new THREE.Vector3();world.decompose(p,q,s);
     const rebuilt=new THREE.Matrix4().compose(p,q,s);
     const bake=rebuilt.elements.some((value,i)=>Math.abs(value-world.elements[i])>1e-8*Math.max(1,Math.abs(world.elements[i])));

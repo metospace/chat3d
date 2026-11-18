@@ -20,6 +20,7 @@ import {assertLibraryReady,projectLabel} from '../domain/libraryNavigation';
 import {ProjectThumb} from './ProjectLibrary';
 import {StudioPage} from './studio/StudioPage';
 import {StudioEmptyState} from './studio/StudioEmptyState';
+import {LocalGlbPreview} from './LocalGlbPreview';
 
 function ideaTitle(text:string,kind:'asset'|'scene'){
  const subject=text.trim().split(/[\n，。；,;]/)[0].replace(/^(?:(?:请|帮我|给我|为我)\s*)*(?:生成|创建|制作|设计|建模|做)(?:一下)?\s*(?:一个|一台|一座|一套|一组|个)?\s*/,'').trim();
@@ -95,7 +96,14 @@ export function StudioHome({onOpen,onGenerate,onConfigure,onTasks,onImport,hidde
     </form>
    {imageBusy&&<OperationProgress title="处理参考附件" stage="读取并准备附件" completed={attachmentProgress.completed} total={attachmentProgress.total} detail={attachmentProgress.name}/>}
    </div>
-   <div className="home-idea-footnote">{!configured?<span><Button type="link" disabled={locked} onClick={onConfigure}>连接模型</Button>后即可生成，输入和附件会保留。</span>:<span>{blenderModeling?'Blender 模型会在工作台预览，应用后可编辑。':'每次生成独立项目，预览确认后再应用。'}</span>}<Dropdown trigger={['click']} menu={{items:createMenu}}><Button type="text" disabled={locked} aria-label="新建项目">空白项目 / 导入为新资产 <ArrowRightIcon/></Button></Dropdown>{kind==='scene'&&<span>导入 GLB 始终新建资产，可在资产库中用它新建场景。</span>}</div>
+   <div className="home-idea-footnote">
+    {!configured?<span><Button type="link" disabled={locked} onClick={onConfigure}>连接模型</Button>后即可生成，输入和附件会保留。</span>:<span>{blenderModeling?'Blender 模型会在工作台预览，应用后可编辑。':'每次生成独立项目，预览确认后再应用。'}</span>}
+    <div className="home-file-actions">
+     <LocalGlbPreview/>
+     <Dropdown trigger={['click']} menu={{items:createMenu}}><Button type="text" disabled={locked} aria-label="新建项目">空白项目 / 导入为新资产 <ArrowRightIcon/></Button></Dropdown>
+    </div>
+    {kind==='scene'&&<span>导入 GLB 始终新建资产，可在资产库中用它新建场景。</span>}
+   </div>
    {error&&<p className="resource-error" role="alert">{error}</p>}
   </section>
   <div className="home-resume-area"><HomeTasks items={items} disabled={locked} hidden={hidden} onOpen={onOpen} onAll={onTasks}/>

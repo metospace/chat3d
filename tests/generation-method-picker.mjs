@@ -39,13 +39,13 @@ try{
  await test('missing configuration opens configuration instead of the method menu',async()=>{
   store.setState({aiConfig:null,aiStatus:'idle'});let configured=0;const ui=render(React.createElement(Harness,{onConfigure:()=>configured++}));fireEvent.click(ui.getByRole('button',{name:'生成方式，当前直接生成'}));assert.equal(configured,1);assert.equal(ui.queryByRole('menu'),null);assert.equal(store.getState().aiConfig,null);
  });
- await test('legacy saved quality and style fields are stripped without losing approved credentials or configuration',async()=>{
+ await test('legacy saved quality, style and budget fields are stripped without losing approved credentials or configuration',async()=>{
   for(const rememberApiKey of [false,true])for(const generationQuality of ['fast','fine','unknown']){
    const legacy={...cfg,rememberApiKey,agentMode:'single',stream:false,reasoningEffort:'high',taskBudget:{maxMinutes:10,maxRounds:12,maxReportedTokens:12345},generationQuality,generationStyle:'stylized',style:'legacy-style'};localStorage.setItem('chat3d.modelConfig',JSON.stringify(legacy));const loaded=loadModelConfig(),saved=JSON.parse(localStorage.getItem('chat3d.modelConfig'));
-   for(const field of ['generationQuality','generationStyle','style']){assert.equal(Object.hasOwn(loaded,field),false);assert.equal(Object.hasOwn(saved,field),false);}
-   assert.equal(loaded.apiKey,cfg.apiKey);assert.equal(loaded.rememberApiKey,rememberApiKey);assert.equal(saved.apiKey,rememberApiKey?cfg.apiKey:undefined);for(const field of ['baseURL','model','agentMode','stream','reasoningEffort','taskBudget']){assert.deepEqual(loaded[field],legacy[field]);assert.deepEqual(saved[field],legacy[field]);}
+   for(const field of ['generationQuality','generationStyle','style','taskBudget']){assert.equal(Object.hasOwn(loaded,field),false);assert.equal(Object.hasOwn(saved,field),false);}
+   assert.equal(loaded.apiKey,cfg.apiKey);assert.equal(loaded.rememberApiKey,rememberApiKey);assert.equal(saved.apiKey,rememberApiKey?cfg.apiKey:undefined);for(const field of ['baseURL','model','agentMode','stream','reasoningEffort']){assert.deepEqual(loaded[field],legacy[field]);assert.deepEqual(saved[field],legacy[field]);}
    store.setState({aiConfig:loaded,aiStatus:'idle'});const ui=render(React.createElement(Harness));assert.ok(ui.getByRole('button',{name:'生成方式，当前直接生成'}));cleanup();
-   saveModelConfig(legacy);const resaved=JSON.parse(localStorage.getItem('chat3d.modelConfig'));for(const field of ['generationQuality','generationStyle','style'])assert.equal(Object.hasOwn(resaved,field),false);assert.equal(resaved.apiKey,rememberApiKey?cfg.apiKey:undefined);
+   saveModelConfig(legacy);const resaved=JSON.parse(localStorage.getItem('chat3d.modelConfig'));for(const field of ['generationQuality','generationStyle','style','taskBudget'])assert.equal(Object.hasOwn(resaved,field),false);assert.equal(resaved.apiKey,rememberApiKey?cfg.apiKey:undefined);
   }
  });
  console.log(passed+' generation method picker checks passed; no model requests');

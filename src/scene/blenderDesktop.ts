@@ -16,8 +16,7 @@ export async function desktopBlenderStatus(connect=false):Promise<DesktopBlender
 export function desktopBlenderArtifacts(payload:unknown):{blend:Blob;glb:Blob;render:Blob}{
  if(!(payload instanceof ArrayBuffer)||payload.byteLength<12)throw Error('桌面 Blender 未返回完整原始文件。');
  const view=new DataView(payload),lengths=[view.getUint32(0,true),view.getUint32(4,true),view.getUint32(8,true)];
- const caps=[32,20,8].map(m=>m*1024*1024);
- if(lengths.some((n,i)=>n<12||n>caps[i])||lengths.reduce((sum,n)=>sum+n,12)!==payload.byteLength)throw Error('桌面 Blender 文件长度无效。');
+ if(lengths.some(n=>n<12)||lengths[2]>8*1024*1024||lengths.reduce((sum,n)=>sum+n,12)!==payload.byteLength)throw Error('桌面 Blender 文件长度无效。');
  const blend=new Uint8Array(payload,12,lengths[0]),glb=new Uint8Array(payload,12+lengths[0],lengths[1]),render=new Uint8Array(payload,12+lengths[0]+lengths[1],lengths[2]);
  const prefix=(bytes:Uint8Array,text:string)=>[...text].every((c,i)=>bytes[i]===c.charCodeAt(0));
  const glbHeader=new DataView(glb.buffer,glb.byteOffset,glb.byteLength),pngHeader=new DataView(render.buffer,render.byteOffset,render.byteLength);

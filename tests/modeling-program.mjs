@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import {createServer} from 'vite';
-import {MODELING_PROGRAM_LIMITS,serializeModelingObject} from '../src/scene/modelingProgramConverter.js';
+import {serializeModelingObject} from '../src/scene/modelingProgramConverter.js';
 
 const server=await createServer({server:{middlewareMode:true},appType:'custom'});
 const material=()=>new THREE.MeshStandardMaterial({color:'#6699bb',metalness:.4,roughness:.3});
@@ -52,16 +52,15 @@ try{
     for(const corrupt of cases){const root=new THREE.Group(),valid=mesh(),invalid=mesh();corrupt(invalid);root.add(valid,invalid);assert.throws(()=>serializeModelingObject(THREE,root));assert.equal(root.children.length,2);assert.equal(valid.parent,root);}
     const grouped=mesh();grouped.material=[material()];grouped.geometry.clearGroups();grouped.geometry.addGroup(0,3,0);assert.throws(()=>serializeModelingObject(THREE,grouped),/覆盖/);
   });
-  test('component, object, vertex and material budgets reject explicitly',()=>{
-    assert.throws(()=>serializeModelingObject(THREE,mesh(),{...MODELING_PROGRAM_LIMITS,meshes:0}),/部件预算/);
-    assert.throws(()=>serializeModelingObject(THREE,mesh(),{...MODELING_PROGRAM_LIMITS,objects:0}),/对象数量/);
-    assert.throws(()=>serializeModelingObject(THREE,mesh(),{...MODELING_PROGRAM_LIMITS,vertices:3}),/总顶点/);
-    assert.throws(()=>serializeModelingObject(THREE,mesh(),{...MODELING_PROGRAM_LIMITS,materials:0}),/材质预算/);
-  });
-  test('641 separate named meshes are not collapsed or blocked by the former 512-node limit',()=>{
-    const root=new THREE.Group(),geometry=new THREE.BoxGeometry(.01,.01,.01),shared=material();root.name='Repeated mechanical parts';
-    for(let i=0;i<641;i++){const part=new THREE.Mesh(geometry,shared);part.name='Mechanical part';part.position.x=i*.01;root.add(part);}
-    const result=serializeModelingObject(THREE,root);assert.equal(result.nodes.length,641);assert.equal(new Set(result.nodes.map(n=>n.id)).size,641);assert.deepEqual(validateDocument(result),[]);
+  test('dense curved meshes and many materials retain their full geometry',()=>{
+    const root=new THREE.Group(),dense=new THREE.SphereGeometry(.8,768,300),small=new THREE.BoxGeometry();
+    for(let i=0;i<3;i++)root.add(new THREE.Mesh(dense,material()));
+    for(let i=0;i<1001;i++)root.add(new THREE.Mesh(small,new THREE.MeshStandardMaterial({color:0x100000+i})));
+    const result=serializeModelingObject(THREE,root);
+    assert.equal(result.nodes.length,1004);assert.equal(result.materials.length,1002);
+    assert.equal(result.nodes[2].geometry.params.positions.length,dense.attributes.position.count*3);
+    assert.equal(result.nodes[2].geometry.params.indices.at(-1),dense.index.getX(dense.index.count-1));
+    assert.deepEqual(validateDocument(result),[]);
   });
   console.log(`${passed} modeling program converter checks passed`);
 }finally{await server.close();}

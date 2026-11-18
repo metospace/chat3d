@@ -5,7 +5,8 @@ import {prepareTeamPublicationSnapshot} from './teamPreparation';
 import type {TeamPreparationResult} from './teamPreparationCore';
 import type {TeamClient,TeamItem} from './teamLibrary';
 import type {SceneDocument} from './types';
-import {assertGlbSize,importGlb,type GlbImportStage} from '../scene/importGlb';
+import {importGlb,type GlbImportStage} from '../scene/importGlb';
+import {assertGlbSize} from '../scene/glbLimit';
 
 export interface TeamUploadFile {readonly kind:'asset'|'scene';readonly name:string;readonly description:string;readonly categoryPath:string[]}
 // File contents stay in memory and cannot be substituted by a caller's metadata object.
