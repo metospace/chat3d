@@ -25,6 +25,8 @@ function oauthClientSecretFromEnv(){
   if(!file)return undefined;
   try{return readFileSync(file,'utf8').trim();}catch{return undefined;}
 }
+// 团队后台已迁移到 metospace/3dserver；这里只保留尚未切换的部署兼容入口。
+// 切换后不要设置 CHAT3D_TEAM_DB。模型代理、Blender 和 Web 入口不受影响。
 const team=process.env.CHAT3D_TEAM_DB?openTeam(process.env.CHAT3D_TEAM_DB,{platformAuthBase:process.env.CHAT3D_PLATFORM_AUTH_BASE,platformTenantId:process.env.CHAT3D_PLATFORM_TENANT_ID,passwordLogin:process.env.CHAT3D_TEAM_PASSWORD_LOGIN!=='0',oauthClientId:process.env.CHAT3D_PLATFORM_OAUTH_CLIENT_ID??'scenivo',oauthClientSecret:oauthClientSecretFromEnv(),oauthTokenPath:process.env.CHAT3D_PLATFORM_OAUTH_TOKEN_PATH}):null;
 const sharing=team?teamMiddleware(team,(await import('../dist-team/validator.mjs')).validateTeamPayload,{origins:(process.env.CHAT3D_TEAM_ORIGINS??'').split(',').filter(Boolean)}):(req,res,next)=>next();
 const version=appVersionMiddleware();

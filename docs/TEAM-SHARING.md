@@ -2,7 +2,13 @@
 
 沿用 React/Vite/Tauri 与 Node 服务。首版是**一个公司、一个团队**：所有有效成员可查看、搜索、预览并复制已发布资产和场景；个人 IndexedDB、草稿、对话、模型 API 设置仍保留本地，没有后台同步或迁移上传。团队账户与模型 API 账户无关。
 
-## 部署
+## 新部署：连接 3dserver
+
+团队账号、资产、场景和看板的 `/api/team` 后台已迁移到 [`metospace/3dserver`](https://github.com/metospace/3dserver)。按该仓库 README 的「接入 Chat3D 客户端」部署；在客户端填写新服务的 HTTPS 根地址，不加 `/api/team`。继续使用原域名时，反向代理将 `/api/team/` 和 `/team/sso/callback` 指向新后台，Chat3D 网页和模型代理仍由本项目提供。
+
+旧数据库和线上流量不会自动迁移。如需保留旧账号、历史版本或资源关联，请在切换前备份旧 `team.sqlite` 和配套内容目录，并先验证数据迁移。切换后的 Chat3D Web 服务不要设置 `CHAT3D_TEAM_DB`，避免启用本仓库的旧接口。
+
+## 旧版内置服务部署（仅供尚未切换的环境参考）
 
 需要 Node.js 24、一个持久化本地磁盘目录，以及由公司指定的 HTTPS 反向代理。SQLite 是 Node 内置模块，无新增数据库服务；静态看板使用 npm 锁定的 `yauzl` / `yazl` 处理流式 ZIP，Docker 运行层已包含所需依赖。不支持将数据库及看板内容目录放在临时容器层、网络共享磁盘或多个副本中运行。Sites/静态托管/现有 Worker 不提供团队数据库；桌面安装包也不内嵌数据库服务器。
 
