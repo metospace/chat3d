@@ -64,9 +64,11 @@ Success is `multipart/form-data` with three binary file parts, never JSON/base64
 
 | Field | Filename | Content type | Maximum |
 | --- | --- | --- | --- |
-| `blend` | `result.blend` | `application/octet-stream` | 32 MiB |
-| `glb` | `result.glb` | `model/gltf-binary` | 20 MiB |
+| `blend` | `result.blend` | `application/octet-stream` | No generation-specific byte cap |
+| `glb` | `result.glb` | `model/gltf-binary` | GLB header length field |
 | `render` | `render.png` | `image/png` | 8 MiB |
+
+Native IPC frames still use unsigned 32-bit byte lengths. Model import continues to follow the normal GLB and project file rules. The PNG allowance is for inspection only and does not limit model geometry.
 
 Failures remain JSON `{ "error": "..." }` with a non-success status. There are no partial-success bundles. Responses use `Cache-Control: no-store`. The MCP `run_blender_python` tool returns the same three byte streams as embedded base64 resources named `scenivo-blender:///result.blend`, `scenivo-blender:///result.glb`, and `scenivo-blender:///render.png`, with the content types above. `build_model` is unchanged: one embedded `scenivo-blender:///model.glb` resource, and its HTTP bridge still returns a binary GLB.
 

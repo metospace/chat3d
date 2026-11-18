@@ -30,17 +30,11 @@ export async function runBlenderScript(args:BlenderScriptRequest,confirm:Confirm
   onProgress?.({stage:'starting',message:'已向本机服务提交完整脚本，等待 Blender 返回文件'});
   const response=await fetch('/api/blender/python',{method:'POST',mode:'same-origin',signal,headers:{'Content-Type':'application/json','X-Chat3D-Python':status.token},body:JSON.stringify({script})});
   if(!response.ok){const body=await response.json().catch(()=>null);throw Error('Blender Python 执行失败：'+(typeof body?.error==='string'?body.error:'HTTP '+response.status));}
-  const mib=1024*1024,limit=64*mib;
-  if(Number(response.headers.get('Content-Length'))>limit||!response.body)throw Error('Blender 输出超过传输上限。');
-  const reader=response.body.getReader(),chunks:Uint8Array<ArrayBuffer>[]=[];let size=0;
-  try{while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>limit)throw Error('Blender 输出超过传输上限。');chunks.push(value);}}
-  finally{void reader.cancel().catch(()=>{});}
-  signal?.throwIfAborted();
   onProgress?.({stage:'reading',message:'正在接收原始模型与效果图'});
-  const form=await new Response(new Blob(chunks),{headers:{'Content-Type':response.headers.get('Content-Type')??''}}).formData();
-  const part=(key:string,mime:string,max:number)=>{const value=form.get(key);if(!(value instanceof Blob)||value.type!==mime||!value.size||value.size>max*mib)throw Error('Blender 未返回完整的原始模型和效果图。');return value;};
+  const form=await response.formData();
+  const part=(key:string,mime:string,maxBytes?:number)=>{const value=form.get(key);if(!(value instanceof Blob)||value.type!==mime||!value.size||(maxBytes!==undefined&&value.size>maxBytes))throw Error('Blender 未返回完整的原始模型和效果图。');return value;};
   signal?.throwIfAborted();
-  const result={name,script,blend:part('blend','application/octet-stream',32),glb:part('glb','model/gltf-binary',20),render:part('render','image/png',8)};
+  const result={name,script,blend:part('blend','application/octet-stream'),glb:part('glb','model/gltf-binary'),render:part('render','image/png',8*1024*1024)};
   onProgress?.({stage:'completed',message:'原始模型与效果图已返回'});
   return result;
 }

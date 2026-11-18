@@ -106,44 +106,20 @@ try{
   assert.ok(tools.has('edit_scene'));
   assert.ok(!JSON.stringify(tools.get('edit_scene').parameters).includes(JSON.stringify('pattern')+':'+JSON.stringify('\\S')));
  });
- await test('task budgets normalize invalid input and preserve bounded defaults',async()=>{
-  const {normalizeTaskBudget,taskBudgetReason}=await server.ssrLoadModule('/src/ai/taskBudget.ts');
-  assert.deepEqual(normalizeTaskBudget(),{maxMinutes:10,maxRounds:24,maxReportedTokens:2000000});
-  assert.deepEqual(normalizeTaskBudget({maxMinutes:Infinity,maxRounds:0,maxReportedTokens:NaN}),{maxMinutes:10,maxRounds:1,maxReportedTokens:2000000});
-  assert.match(taskBudgetReason(normalizeTaskBudget(),1800000,0,0),/分钟上限/);
-  assert.match(taskBudgetReason(normalizeTaskBudget(),0,0,2_000_000),/软上限/);
-  assert.match(taskBudgetReason(normalizeTaskBudget(),0,0,2_000_000),/不是单个资产的价格或账单/);
-  assert.match(taskBudgetReason(normalizeTaskBudget(),0,0,2_000_000),/继续/);
- });
- await test('productive task stops at configured round cap and keeps an incomplete atomic draft',async()=>{
-  const f=fake([[edit],[{name:'edit_scene',args:{summary:'second',operations:[{...create,name:'second',tempId:'second'}]}}],[edit]]);
-  const o=opts(f);o.config={...cfg,taskBudget:{maxRounds:2}};const r=await runModelingAgent(o);
-  assert.equal(f.calls,2);assert.equal(r.result.doc.nodes.length,2);assert.equal(r.batch.incomplete,true);assert.match(r.batch.summary,/2 轮上限/);
- });
- await test('reported token cap blocks returned tools and the next request without losing earlier work',async()=>{
-  const f=fake([[edit],[{name:'edit_scene',args:{summary:'second',operations:[{...create,name:'second',tempId:'second'}]}}]]);
-  const o=opts(f);o.config={...cfg,taskBudget:{maxReportedTokens:60}};const r=await runModelingAgent(o);
-  assert.equal(f.calls,2);assert.equal(r.result.doc.nodes.length,1);assert.equal(r.activity.inputTokens+r.activity.outputTokens,60);assert.match(r.batch.summary,/Token 上限/);assert.equal(r.batch.incomplete,true);
- });
- await test('elapsed deadline retains a previous edit and prevents further model calls',async()=>{
-  const realNow=Date.now;let advanced=false;const f=fake([[edit],[edit]]);const o=opts(f);o.config={...cfg,taskBudget:{maxMinutes:1}};o.onPreview=()=>{advanced=true;};
-  Date.now=()=>realNow()+(advanced?61000:0);
-  try{const r=await runModelingAgent(o);assert.equal(f.calls,1);assert.equal(r.result.doc.nodes.length,1);assert.match(r.batch.summary,/分钟上限/);}finally{Date.now=realNow;}
- });
- await test('budget exhaustion before any edit is explicit and does not invent a preview',async()=>{
-  const f=fake([[edit]]);const o=opts(f);o.config={...cfg,taskBudget:{maxReportedTokens:1}};
-  await assert.rejects(()=>runModelingAgent(o),/Token 上限/);assert.equal(f.calls,1);
- });
- await test('wall-clock timer aborts an in-flight request and preserves earlier draft with incomplete usage',async()=>{
-  const originalTimeout=globalThis.setTimeout;let deadlineCallback;globalThis.setTimeout=(fn,ms,...args)=>{if(ms>59000&&ms<=60000){deadlineCallback=fn;return originalTimeout(()=>{},120000);}return originalTimeout(fn,ms,...args);};
-  let first=true;const f=fake([[edit]]);const o=opts(f);o.config={...cfg,taskBudget:{maxMinutes:1}};o.streamFn=(m,context,streamOptions)=>{if(first){first=false;return f.fn(m,context,streamOptions);}const stream=createAssistantMessageEventStream();queueMicrotask(()=>{deadlineCallback();const error={role:'assistant',content:[],api:'openai-completions',provider:'mock',model:'mock',stopReason:'aborted',errorMessage:'cancelled',timestamp:Date.now(),usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}};stream.push({type:'error',reason:'aborted',error});});return stream;};
-  try{const r=await runModelingAgent(o);assert.equal(r.result.doc.nodes.length,1);assert.equal(r.activity.usageIncomplete,true);assert.equal(r.batch.incomplete,true);assert.match(r.batch.summary,/分钟上限/);}finally{globalThis.setTimeout=originalTimeout;}
- });
- await test('parallel child requests share one parent round budget rather than multiplying it',async()=>{
-  const items=[{name:'one',brief:'独立柜体',position:[0,0,0],sceneRole:'equipment'},{name:'two',brief:'独立柜体',position:[2,0,0],sceneRole:'equipment'}];
-  const f=fake([[edit,{name:'build_components_parallel',args:{style:'统一',items}}],[edit]]),children=[];const o=opts(f);o.captureAvailable=()=>false;o.config={...cfg,parallelDrafts:true,taskBudget:{maxRounds:2}};
-  o.workerStreamFn=name=>{const child=fake([[{name:'edit_scene',args:{summary:'独立部件',operations:[{...create,name}]}},{name:'submit_data_preview',args:{summary:'数据未验收'}}]]);children.push(child);return child.fn;};
-  const r=await runModelingAgent(o);assert.equal(f.calls+children.reduce((n,c)=>n+c.calls,0),2);assert.equal(r.batch.incomplete,true);assert.match(r.batch.summary,/轮上限/);
+ await test('productive generation continues past former elapsed, round and usage ceilings',async()=>{
+  const steps=Array.from({length:27},(_,i)=>[{name:'edit_scene',args:{summary:`添加部件 ${i}`,operations:[{...create,name:`部件 ${i}`,tempId:`part-${i}`}]}}]);
+  const f=fake([...steps,[capture],[review,submit]]),o=opts(f);
+  const clock=Date.now;let elapsed=0;
+  o.onPreview=()=>{elapsed+=61_000;};
+  const stream=f.fn;
+  o.streamFn=async(m,context)=>{
+   const source=await stream(m,context);
+   const done=source.result();
+   return {result:async()=>({...await done,usage:{...(await done).usage,input:100_000}}),[Symbol.asyncIterator]:()=>source[Symbol.asyncIterator]()};
+  };
+  Date.now=()=>clock()+elapsed;
+  try{const r=await runModelingAgent(o);assert.equal(r.batch.taskStatus,'submitted');assert.equal(f.calls,29);assert.equal(r.result.doc.nodes.length,27);assert.ok(r.activity.inputTokens>2_000_000);}
+  finally{Date.now=clock;}
  });
  await test('incremental agent audit preserves unchanged shape evidence and accepts only missing relationship checks',async()=>{
  const base=createInitialDoc(),doc=applyBatch(base,{operations:[{...create,name:'A',tempId:'a'},{...create,name:'B',tempId:'b',transform:{...create.transform,position:[3,0,0]}}]}).doc;const a=doc.nodes[0],b=doc.nodes[1];const checks=['silhouette','structure','connections','materials','details','context'].map(criterion=>({criterion,status:'pass',evidence:'当前两张测试图和真实部件共同支持',nodeIds:[a.id]}));const f=fake([[{name:'capture_multiview',args:{componentId:a.id,views:['front','back']}}],[{name:'audit_model_detail',args:{componentId:a.id,checks}}],[{name:'edit_scene',args:{summary:'move unrelated B',operations:[{op:'translateAssembly',targetId:b.id,value:[1,0,0]}]}}],[{name:'audit_model_detail',args:{componentId:a.id,checks:checks.filter(c=>['connections','context'].includes(c.criterion)).map(c=>({...c,status:'unknown',evidence:'邻接布局发生变化，仍需当前图片复查'}))}}],'仍需关系检查']);const r=await runModelingAgent({...opts(f,doc),qualityBaseline:base});const audit=r.activity.detailAcceptance.reviews.find(x=>x.componentId===a.id);assert.ok(audit);assert.equal(audit.visualEvidence,false);assert.equal(audit.evidenceRevision,doc.revision);assert.equal(audit.checks.find(c=>c.criterion==='structure').status,'pass');assert.equal(audit.checks.find(c=>c.criterion==='context').status,'unknown');assert.equal(audit.reusedCriteria.length,4);
@@ -338,7 +314,7 @@ try{
  await test('typed component movement uses explicit deltas and rejects duplicate group movement atomically',async()=>{const d=applyBatch(createInitialDoc(),{operations:[{op:'createAssembly',name:'设备',parts:[{name:'a',geometry:create.geometry,transform:create.transform},{name:'b',geometry:create.geometry,transform:{...create.transform,position:[0,1,0]}}]}]}).doc;const call={name:'move_components',args:{items:[{targetId:d.nodes[0].id,delta:[2,0,0]}]}};const f=fake([[call,{name:'submit_data_preview',args:{summary:'组件平移已完成，位置待视觉核对'}}]]);const o=opts(f,d);o.captureAvailable=()=>false;const r=await runModelingAgent(o);assert.ok(r.result.doc.nodes.every(n=>n.transform.position[0]===2));const duplicate=fake([[{name:'move_components',args:{items:[...call.args.items,{targetId:d.nodes[1].id,delta:[3,0,0]}]}}],'重复组件已拒绝']);const rr=await runModelingAgent(opts(duplicate,d));assert.deepEqual(rr.result.doc,d);assert.equal(rr.batch.operations.length,0);});
  await test('production Pi OpenAI adapter sends native tool schema and returns screenshot for the next request',async()=>{
    let wire=[];globalThis.fetch=async(url,init)=>{if(forceTransportError)throw new Error('本站模型代理响应异常（HTTP 403）。访问会话已失效');const body=JSON.parse(init.body);wire.push(body);const actions=wire.length===1?[plan,edit,capture]:[review,submit];const tc=actions.map((a,i)=>({index:i,id:`wire_${wire.length}_${i}`,type:'function',function:{name:a.name,arguments:JSON.stringify(a.args)}}));const raw='data: '+JSON.stringify({id:'test',object:'chat.completion.chunk',choices:[{index:0,delta:{role:'assistant',tool_calls:tc},finish_reason:null}]})+'\n\ndata: '+JSON.stringify({id:'test',object:'chat.completion.chunk',choices:[{index:0,delta:{},finish_reason:'tool_calls'}],usage:{prompt_tokens:30,completion_tokens:20,total_tokens:50}})+'\n\ndata: [DONE]\n\n';return new Response(raw,{headers:{'content-type':'text/event-stream'}})};
-   const o=opts(fake([]));delete o.streamFn;const r=await runModelingAgent(o);assert.equal(wire.length,2);assert.ok(wire[0].tools.some(t=>t.function.name==='edit_scene'));assert.ok(wire.every(body=>body.tools.every(tool=>tool.type==='function')));assert.equal(wire[0].stream,true);assert.equal(wire[0].max_tokens,8192);assert.ok(JSON.stringify(wire[1].messages).includes('data:image/jpeg;base64,YWJj'));assert.equal(r.result.doc.nodes.length,1);assert.equal(r.activity.outputTokens,40);
+   const o=opts(fake([]));delete o.streamFn;const r=await runModelingAgent(o);assert.equal(wire.length,2);assert.ok(wire[0].tools.some(t=>t.function.name==='edit_scene'));assert.ok(wire.every(body=>body.tools.every(tool=>tool.type==='function')));assert.equal(wire[0].stream,true);assert.ok(wire.every(body=>!Object.hasOwn(body,'max_tokens')&&!Object.hasOwn(body,'max_completion_tokens')));assert.ok(JSON.stringify(wire[1].messages).includes('data:image/jpeg;base64,YWJj'));assert.equal(r.result.doc.nodes.length,1);assert.equal(r.activity.outputTokens,40);
    const unsupportedKeywords=value=>value!==null&&typeof value==='object'&&Object.entries(value).some(([key,child])=>/^~/.test(key)||key==='oneOf'||key==='uniqueItems'||(key==='items'&&Array.isArray(child))||unsupportedKeywords(child));
    const firstTools=wire[0].tools.map(tool=>tool.function);
    const editScene=firstTools.find(tool=>tool.name==='edit_scene');
@@ -394,7 +370,7 @@ try{
      const r=await runModelingAgent(o);assert.equal(wire.length,2);assert.equal(r.result.doc.nodes.length,1);assert.equal(r.activity.dataDraftSubmitted,true);
      for(const body of wire) {
        assert.equal(body.reasoning_effort,reasoningEffort);assert.equal(Object.hasOwn(body,'reasoning_effort'),reasoningEffort!==undefined);
-       assert.equal(body.max_tokens,8192);assert.equal(body.stream,true);assert.equal(body.store,undefined);assert.ok(body.tools.some(t=>t.function.name==='edit_scene'));
+       assert.equal(body.stream,true);assert.equal(body.store,undefined);assert.ok(body.tools.some(t=>t.function.name==='edit_scene'));
        assert.equal(Object.hasOwn(body,'thinking'),false);assert.equal(Object.hasOwn(body,'enable_thinking'),false);assert.equal(Object.hasOwn(body,'reasoning'),false);
      }
      assert.ok(wire[1].messages.some(m=>m.role==='tool'),'the second body is a real tool-result continuation');
@@ -415,7 +391,7 @@ try{
      const o=opts(fake([]));o.config=live;o.captureAvailable=()=>false;o.streamFn=sdk('parent');o.workerStreamFn=sdk;
      const r=await runModelingAgent(o);assert.equal(r.result.doc.nodes.length,2);assert.equal(r.activity.dataDraftSubmitted,true);assert.equal(wire.length,6);
      assert.deepEqual([...rounds.keys()].sort(),['parent','设备乙','设备甲'].sort());assert.ok([...rounds.values()].every(n=>n===2));
-     for(const {body} of wire){assert.equal(body.reasoning_effort,reasoningEffort);assert.equal(Object.hasOwn(body,'reasoning_effort'),reasoningEffort!==undefined);assert.equal(body.max_tokens,8192);}
+     for(const {body} of wire){assert.equal(body.reasoning_effort,reasoningEffort);assert.equal(Object.hasOwn(body,'reasoning_effort'),reasoningEffort!==undefined);}
    }
  });
  await test('reasoning payload overlay preserves existing async mutation and replacement hooks',async()=>{
@@ -432,7 +408,7 @@ try{
        o.streamFn=(model,context,options)=>stream(model,context,{...options,apiKey:cfg.apiKey,maxTokens:8192,maxRetries:0,fetch:async(_url,init)=>{
          wire.push(JSON.parse(init.body));return new Response('data: '+JSON.stringify({id:'hook',object:'chat.completion.chunk',choices:[{index:0,delta:{role:'assistant',content:'请确认实际尺寸'},finish_reason:null}]})+'\n\ndata: '+JSON.stringify({id:'hook',object:'chat.completion.chunk',choices:[{index:0,delta:{},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
        }});
-       await runModelingAgent(o);assert.equal(hooked,1);assert.equal(wire.length,1);assert.equal(wire[0].temperature,.17);assert.equal(wire[0].hook_marker,replace?'replacement':'mutation');assert.equal(wire[0].reasoning_effort,reasoningEffort);assert.equal(Object.hasOwn(wire[0],'reasoning_effort'),reasoningEffort!==undefined);assert.equal(wire[0].max_tokens,8192);
+       await runModelingAgent(o);assert.equal(hooked,1);assert.equal(wire.length,1);assert.equal(wire[0].temperature,.17);assert.equal(wire[0].hook_marker,replace?'replacement':'mutation');assert.equal(wire[0].reasoning_effort,reasoningEffort);assert.equal(Object.hasOwn(wire[0],'reasoning_effort'),reasoningEffort!==undefined);
      }
    } finally {Agent.prototype.prompt=prompt;}
  });
@@ -477,7 +453,12 @@ try{
  await test('AI template creation is refused without any scene side effects',async()=>{const f=fake([[plan,{name:'edit_scene',args:{summary:'preset',operations:[{op:'createTemplate',templateId:'smt_workshop',parameters:{}}]}}],'需要按描述规划工艺']);const r=await runModelingAgent(opts(f));assert.equal(r.result.doc.nodes.length,0);assert.equal(r.batch.operations.length,0);assert.ok(f.contexts[1].messages.some(m=>m.role==='toolResult'&&m.isError));});
  await test('generic and machining requests never create an automatic SMT baseline',async()=>{for(const text of ['做一个车间沙盘，有产线有设备操作人员','做一个机加工产线车间沙盘','生成一个 SMT 车间']){const f=fake(['需要按描述规划工艺']);const o=opts(f);o.text=text;o.images=[];let preview;o.onPreview=d=>preview=d;const r=await runModelingAgent(o);assert.equal(preview,undefined);assert.equal(r.result.doc.nodes.length,0);assert.equal(r.batch.operations.length,0);assert.ok(!JSON.stringify(f.contexts[0]).includes('A-04'));}});
  await test('free geometry path still works without injecting any preset',async()=>{const f=fake([[plan,edit,inspect,capture],[review,submit]]);const o=opts(f);o.text='做一个机加工产线车间沙盘';o.images=[];const r=await runModelingAgent(o);assert.equal(r.result.doc.nodes.length,1);assert.equal(r.batch.operations[0].op,'createPrimitive');assert.ok(!r.batch.summary.includes('以 SMT 示意车间为起点'));});
- await test('agent can generate a custom repeated assembly then review it without presets',async()=>{const f=fake([[plan,{name:'edit_scene',args:{summary:'自定义输送支架',operations:[{op:'createAssembly',name:'用户要求的支架',parts:[{name:'立柱',geometry:{type:'box',params:{width:.1,height:1,depth:.1}},transform:{position:[0,.5,0]},repeat:{count:8,step:[.5,0,0]}}]}]}},capture],[review,submit]]);const r=await runModelingAgent(opts(f));assert.equal(r.result.doc.nodes.length,8);assert.equal(r.batch.operations[0].op,'createAssembly');assert.equal(f.calls,2);});
+ await test('agent generates a repeated custom assembly and submits after complementary shape review',async()=>{
+  let current;
+  const f=fake([[plan,{name:'edit_scene',args:{summary:'自定义输送支架',operations:[{op:'createAssembly',name:'用户要求的支架',parts:[{name:'立柱',geometry:{type:'box',params:{width:.1,height:1,depth:.1}},transform:{position:[0,.5,0]},repeat:{count:8,step:[.5,0,0]}}]}]}},{name:'capture_multiview',args:{views:['front','side']}}],()=>[{name:'review_model',args:{...review.args,detailReviews:[{componentId:current.nodes[0].assemblyId,checks:[{criterion:'silhouette',status:'pass',evidence:'由正侧视核对八根立柱的总体跨度和高度',nodeIds:current.nodes.map(n=>n.id)},{criterion:'structure',status:'pass',evidence:'各立柱间距和连续重复布局均可识别',nodeIds:current.nodes.map(n=>n.id)}]}],completion:submit.args}}]]);
+  const r=await runModelingAgent({...opts(f),onPreview:d=>current=d});
+  assert.equal(r.result.doc.nodes.length,8);assert.equal(r.batch.operations[0].op,'createAssembly');assert.equal(r.batch.taskStatus,'submitted');
+ });
  await test('older successful edit payloads are compacted with paired results, latest edits and failed calls preserved',()=>{
    const assistant=(id)=>({role:'assistant',content:[{type:'toolCall',id,name:'edit_scene',arguments:{summary:'主体细化',operations:Array(100).fill({op:'createPrimitive',name:'历史结构'.repeat(100)})}}],timestamp:0});
    const result=(id,isError=false)=>({role:'toolResult',toolName:'edit_scene',toolCallId:id,isError,content:[{type:'text',text:'真实ID与场景'}],timestamp:0});

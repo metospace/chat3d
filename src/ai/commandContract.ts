@@ -3,7 +3,6 @@ import {Check, Errors} from 'typebox/value';
 import type {Command} from '../domain/commands';
 import {SCENE_ROLES, validateGeometry, validateQuaternion, type Geometry, type Quaternion} from '../domain/types';
 import {PHYSICAL_MATERIAL_LIMITS} from '../domain/physicalMaterial';
-import {STRUCTURED_PART_LIMIT} from '../domain/structureLimits';
 import {structuredGeometrySchema} from './structuredGeometrySchema';
 
 export interface CommandIssue {path:(string|number)[];code:string;message:string;expected?:string}
@@ -33,8 +32,8 @@ function closedGeometry(schema:Schema):Schema {
  return result;
 }
 const geometry=closedGeometry(structuredGeometrySchema as Schema);
-const part=object({name:text(100),geometry,materialId:optional(text()),label:optional(Type.String({maxLength:80})),transform:optional(createTransform),repeat:optional(object({count:Type.Integer({minimum:1,maximum:STRUCTURED_PART_LIMIT}),step:vec3()}))},'A local assembly part. Omitted transform components and material use creation defaults.');
-const parts=Type.Array(part,{minItems:1,maxItems:100,description:'1–100 definitions; expanded repeats must total no more than 2000 parts.'});
+const part=object({name:text(100),geometry,materialId:optional(text()),label:optional(Type.String({maxLength:80})),transform:optional(createTransform),repeat:optional(object({count:Type.Integer({minimum:1,maximum:Number.MAX_SAFE_INTEGER}),step:vec3()}))},'A local assembly part. Omitted transform components and material use creation defaults.');
+const parts=Type.Array(part,{minItems:1,maxItems:100,description:'1–100 input definitions; repeat expands the declared count.'});
 const sceneRole=Type.Union(SCENE_ROLES.map(role=>Type.Literal(role)));
 const metadata={sceneRole:optional(sceneRole),planKey:optional(Type.String({maxLength:120})),zone:optional(Type.String({maxLength:120}))};
 const target={targetId:text()};
@@ -165,14 +164,6 @@ function relationalIssues(value:unknown,path:(string|number)[],issues:CommandIss
   for(const error of validateGeometry(input.geometry as Geometry))issues.push({path:[...path,'geometry'],code:'geometry',message:error.message,expected:'Geometry parameters must satisfy relational shape constraints.'});
  }
  if(Array.isArray(input.rotationQuaternion)&&Check(quaternion(),input.rotationQuaternion))for(const _error of validateQuaternion(input.rotationQuaternion as Quaternion,'rotationQuaternion'))issues.push({path:[...path,'rotationQuaternion'],code:'quaternion',message:'Quaternion must be normalized (norm within 0.001 of 1).',expected:'Normalized [x,y,z,w] quaternion.'});
- if(Array.isArray(input.parts)){
-  let total=0;
-  for(const child of input.parts)if(Check(part,child)){
-   const definition=child as {repeat?:{count:number}};
-   total+=definition.repeat?.count??1;
-  }
-  if(total>2000)issues.push({path:[...path,'parts'],code:'partBudget',message:'Expanded assembly exceeds 2000 parts.',expected:'Sum of repeat.count (or 1 for unrepeated parts) ≤2000.'});
- }
  for(const [key,child] of Object.entries(input))if(key!=='geometry')relationalIssues(child,[...path,key],issues);
 }
 

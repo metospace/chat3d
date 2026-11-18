@@ -5,9 +5,13 @@ globalThis.localStorage={getItem:k=>memory.get(k)??null,setItem:(k,v)=>memory.se
 const server=await createServer({server:{middlewareMode:true},appType:'custom'});
 try {
   const {saveModelConfig,loadModelConfig,modelConfigStorageError,MODEL_CONFIG_KEY:key}=await server.ssrLoadModule('/src/ai/modelConfigStorage.ts');
-  const config={baseURL:'https://provider.test/v1',model:'test',apiKey:'test-only-secret',taskBudget:{maxMinutes:30,maxRounds:80,maxReportedTokens:3000000}};
-  saveModelConfig(config);assert.ok(!memory.get(key).includes(config.apiKey));assert.equal(loadModelConfig().apiKey,'');assert.equal(loadModelConfig().taskBudget.maxRounds,80);
+  const config={baseURL:'https://provider.test/v1',model:'test',apiKey:'test-only-secret'};
+  saveModelConfig(config);assert.ok(!memory.get(key).includes(config.apiKey));assert.equal(loadModelConfig().apiKey,'');
   saveModelConfig({...config,rememberApiKey:true});assert.equal(loadModelConfig().apiKey,config.apiKey);
+  const legacy={...config,rememberApiKey:true,taskBudget:{maxMinutes:30,maxRounds:80,maxReportedTokens:3000000}};
+  memory.set(key,JSON.stringify(legacy));const loaded=loadModelConfig(),migrated=JSON.parse(memory.get(key));
+  assert.equal(Object.hasOwn(loaded,'taskBudget'),false);assert.equal(Object.hasOwn(migrated,'taskBudget'),false);assert.equal(migrated.apiKey,config.apiKey);
+  saveModelConfig(legacy);assert.equal(Object.hasOwn(JSON.parse(memory.get(key)),'taskBudget'),false);
   saveModelConfig({...config,rememberApiKey:false});assert.ok(!memory.get(key).includes(config.apiKey));
   for(const reasoningEffort of ['low','medium','high','xhigh']) {
     saveModelConfig({...config,reasoningEffort});assert.equal(JSON.parse(memory.get(key)).reasoningEffort,reasoningEffort);assert.equal(loadModelConfig().reasoningEffort,reasoningEffort);
@@ -23,5 +27,5 @@ try {
   memory.set(key,JSON.stringify({...config,rememberApiKey:true}));localStorage.setItem=()=>{throw Error('quota');};
   saveModelConfig(config);assert.equal(memory.has(key),false);assert.ok(modelConfigStorageError());
   localStorage.removeItem=()=>{throw Error('denied');};saveModelConfig(null);assert.match(modelConfigStorageError(),/旧密钥可能/);
-  console.log('PASS memory-only defaults, opt-in persistence, legacy migration, preserved budget and storage failure reporting');
+  console.log('PASS memory-only defaults, opt-in persistence, legacy migration, removed legacy budget and storage failure reporting');
 } finally {delete globalThis.localStorage;await server.close();}

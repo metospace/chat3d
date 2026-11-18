@@ -44,7 +44,7 @@ export function StudioSettings({onModel,onBackup,onHistory,onAssets,onTeam}:{onM
   <Tabs className="settings-category-tabs" aria-label="设置分类" items={[
    {key:'general',label:'通用',children:section('通用',<>
     <div className="settings-option"><span className="settings-option-icon"><GearIcon/></span><div><h3>外观</h3><p>选择浅色、深色或跟随系统</p></div><AppearanceSettings/></div>
-    <div className="settings-option"><span className="settings-option-icon"><GearIcon/></span><div><h3>模型与执行</h3><p>连接模型服务，调整生成方式与任务预算</p></div><Button onClick={onModel}>模型配置</Button></div>
+    <div className="settings-option"><span className="settings-option-icon"><GearIcon/></span><div><h3>模型与执行</h3><p>连接模型服务，调整生成方式与推理强度</p></div><Button onClick={onModel}>模型配置</Button></div>
    </>)},
    {key:'data',label:'数据管理',children:<>{section('数据管理',<>
     <div className="settings-option"><span className="settings-option-icon"><DownloadIcon/></span><div><h3>备份与恢复</h3><p>导出项目与文字对话；恢复时新增项目，保留原件</p></div><Button onClick={onBackup}>管理项目备份</Button></div>

@@ -25,6 +25,8 @@
 .product-v3 .home-idea-footnote{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 4px 0;color:var(--sc-ink-muted);font-size:12px;flex-wrap:wrap}
 .product-v3 .home-idea-footnote .ant-btn{font-size:12px;height:auto;padding:0;color:var(--sc-ink-muted)}
 .product-v3 .home-idea-footnote .ant-btn-link{color:var(--sc-accent)}
+.product-v3 .home-file-actions{display:flex;align-items:center;flex-wrap:wrap;gap:12px}
+.product-v3 .home-file-actions .local-glb-trigger{color:var(--sc-accent)}
 .product-v3 .home-resume-area{border-top:1px solid var(--sc-border-subtle);padding-top:28px}
 .product-v3 .home-resume-area .home-current-tasks{margin-bottom:28px}
 .product-v3 .home-recent-heading{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:20px}

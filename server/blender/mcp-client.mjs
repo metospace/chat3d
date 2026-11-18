@@ -15,7 +15,7 @@ function decodePythonResources(content) {
   const artifacts = {};
   for (const {field,filename,mimeType,maxBytes} of pythonArtifacts) {
     const part = content.find(item=>item?.type === 'resource' && item.resource?.uri === 'scenivo-blender:///'+filename)?.resource;
-    if (part?.mimeType !== mimeType || typeof part.blob !== 'string' || part.blob.length > 4*Math.ceil(maxBytes/3)) throw Error('Invalid MCP '+filename+' resource');
+    if (part?.mimeType !== mimeType || typeof part.blob !== 'string' || (maxBytes!==undefined && part.blob.length > 4*Math.ceil(maxBytes/3))) throw Error('Invalid MCP '+filename+' resource');
     artifacts[field] = validatePythonArtifact(field,Buffer.from(part.blob,'base64'));
   }
   return artifacts;

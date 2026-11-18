@@ -29,7 +29,8 @@ import {TeamStudioPage} from './ui/TeamStudioPage';
 import {LibraryProjectSaveDialog} from './ui/LibraryMetadataDialog';
 import {AssetLibrary} from './ui/AssetLibrary';
 import {probeServerRenderer} from './scene/serverCapture';
-import {assertGlbSize,importGlb} from './scene/importGlb';
+import {importGlb} from './scene/importGlb';
+import {assertGlbSize} from './scene/glbLimit';
 import {WorkspaceTools} from './ui/WorkspaceTools';
 // React owns editor controls; the Three.js viewport remains document-driven.
 import { useCallback, useEffect, useRef, useState } from 'react';

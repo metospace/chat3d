@@ -1,9 +1,8 @@
 import {AccessibleModal as Modal} from './kit/AccessibleModal';
 import {modelConfigStorageError} from '../ai/modelConfigStorage';
-import {normalizeTaskBudget,TASK_BUDGET_PRESETS} from '../ai/taskBudget';
 import {SiteAccessRecovery} from './SiteAccessRecovery';
 import {AGENT_LIMITS} from '../ai/agentPolicy';
-import {Button,Checkbox,Input,InputNumber,Select,Tooltip} from 'antd';
+import {Button,Checkbox,Input,Select,Tooltip} from 'antd';
 import {Cross1Icon,ReloadIcon,InfoCircledIcon} from '@radix-ui/react-icons';
 import { useEffect, useRef, useState } from 'react';
 import { ModelConfig, fetchModels, testConnection } from '../ai/provider';
@@ -17,7 +16,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [model, setModel] = useState(config?.model ?? '');
   const [agentMode, setAgentMode] = useState<'pi'|'single'>(config?.agentMode ?? 'pi');
   const [reasoningEffort,setReasoningEffort]=useState<NonNullable<ModelConfig['reasoningEffort']>|'default'>(config?.reasoningEffort??'default');
-  const [taskBudget,setTaskBudget]=useState(()=>normalizeTaskBudget(config?.taskBudget));
   const [parallelDrafts,setParallelDrafts]=useState(config?.parallelDrafts===true);
   const [stream, setStream] = useState(config?.agentMode === 'single' ? config.stream !== false : true);
   const [models, setModels] = useState<string[] | null>(null);
@@ -71,7 +69,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   };
   const save = () => {
     if (!valid) return;
-    const cfg: ModelConfig = {rememberApiKey,reasoningEffort:reasoningEffort==='default'?undefined:reasoningEffort,taskBudget:normalizeTaskBudget(taskBudget),baseURL:baseURL.trim(),apiKey:apiKey.trim(),model:model.trim(),useMock:false,stream,agentMode,parallelDrafts:agentMode==='pi'&&parallelDrafts};
+    const cfg: ModelConfig = {rememberApiKey,reasoningEffort:reasoningEffort==='default'?undefined:reasoningEffort,baseURL:baseURL.trim(),apiKey:apiKey.trim(),model:model.trim(),useMock:false,stream,agentMode,parallelDrafts:agentMode==='pi'&&parallelDrafts};
     useEditorStore.getState().setAiConfig(cfg);
     const storageFailure=modelConfigStorageError();
     if(storageFailure){setError(storageFailure);return;}
@@ -91,14 +89,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           {!fetching && models !== null && !models.length && !originBlocked && !manual && <Button type="link" className="settings-manual" onClick={()=>setManual(true)}>服务不提供列表？手动填写模型名</Button>}
         </div>
         <label className="settings-field"><span>推理强度 <Tooltip title="默认不传参数，由服务决定。低 / 中 / 高 / 超高需要模型与网关支持 reasoning_effort，可能影响耗时与费用；不支持时请选择默认。也可在模型选择面板中直接切换。"><InfoCircledIcon aria-label="推理强度说明" tabIndex={0}/></Tooltip></span><Select aria-label="推理强度" className="settings-select" value={reasoningEffort} onChange={value=>{sequence.current++;controller.current?.abort();setFetching(false);setTesting(false);setResult(null);setReasoningEffort(value)}} options={[{value:'default',label:'默认 · 跟随服务'},{value:'low',label:'低'},{value:'medium',label:'中'},{value:'high',label:'高'},{value:'xhigh',label:'超高'}]}/></label>
-        <details className="settings-advanced"><summary>高级设置 · 执行方式与流式输出</summary><div className="settings-stack">        <label className="settings-field"><span>建模执行方式</span><Select aria-label="建模执行方式" className="settings-select" value={agentMode} onChange={value=>{setAgentMode(value);if(value==='pi')setStream(true);}} options={[{value:'pi',label:'连续建模（推荐）'},{value:'single',label:'单次生成（兼容模式）'}]}/><span className="settings-hint">连续建模需要模型支持图片、工具调用与流式输出；在任务预算内有有效进展就继续，到限后保留未验收草稿。连续 {AGENT_LIMITS.noProgressTurns} 轮无进展或 {AGENT_LIMITS.consecutiveErrorTurns} 轮工具失败且无进展会暂停；连续 {AGENT_LIMITS.idleTimeoutMs/60000} 分钟无活动会停止。每轮最多 {AGENT_LIMITS.outputPerTurn} 输出 Token。会将场景截图发送至你配置的同一接口，实际费用以网关为准。</span></label>
-        <fieldset disabled={agentMode!=='pi'} className="settings-budget"><legend>每次建模任务预算</legend>
-          <div className="settings-presets" role="group" aria-label="预算预设">{([['small','小改动'],['standard','常规建模'],['extended','复杂场景']] as const).map(([key,label])=><Button key={key} type="default" aria-pressed={taskBudget.maxMinutes===TASK_BUDGET_PRESETS[key].maxMinutes&&taskBudget.maxRounds===TASK_BUDGET_PRESETS[key].maxRounds&&taskBudget.maxReportedTokens===TASK_BUDGET_PRESETS[key].maxReportedTokens} onClick={()=>setTaskBudget({...TASK_BUDGET_PRESETS[key]})}>{label}</Button>)}</div>
-          <label className="settings-field"><span>时间上限（分钟）</span><InputNumber className={inputClass} aria-label="任务时间上限（分钟）" min={1} max={120} value={taskBudget.maxMinutes} onChange={value=>setTaskBudget(b=>({...b,maxMinutes:Number(value)}))}/></label>
-          <label className="settings-field"><span>模型请求轮数上限</span><InputNumber className={inputClass} aria-label="任务轮数上限" min={1} max={200} value={taskBudget.maxRounds} onChange={value=>setTaskBudget(b=>({...b,maxRounds:Number(value)}))}/></label>
-          <label className="settings-field"><span>已报告 Token 上限</span><InputNumber className={inputClass} aria-label="任务已报告Token上限" min={1} max={20000000} value={taskBudget.maxReportedTokens} onChange={value=>setTaskBudget(b=>({...b,maxReportedTokens:Number(value)}))}/></label>
-          <p className="settings-hint">含实验并行子任务。每次发送或继续生成使用一份新预算，执行中补充要求不重置；修改配置从下一次任务生效。「已报告 Token 上限」是本机本次任务的软上限（模型回报的输入+输出合计），不是单个资产的价格或账单；实际费用以服务方为准。Token 在服务返回用量后检查，可能超过限额一个在途请求（并行时为多个）；未报告用量时依靠时间和轮数限制。到限会暂停并保留草稿，可用「继续调整」开新一轮额度，不代表验收通过。</p>
-        </fieldset>
+        <details className="settings-advanced"><summary>高级设置 · 执行方式与流式输出</summary><div className="settings-stack">        <label className="settings-field"><span>建模执行方式</span><Select aria-label="建模执行方式" className="settings-select" value={agentMode} onChange={value=>{setAgentMode(value);if(value==='pi')setStream(true);}} options={[{value:'pi',label:'连续建模（推荐）'},{value:'single',label:'单次生成（兼容模式）'}]}/><span className="settings-hint">连续建模需要模型支持图片、工具调用与流式输出；有有效进展就继续，应用不限制任务总时长、请求轮数或 Token 总量。连续 {AGENT_LIMITS.noProgressTurns} 轮无进展或 {AGENT_LIMITS.consecutiveErrorTurns} 轮工具失败且无进展会暂停；连续 {AGENT_LIMITS.idleTimeoutMs/60000} 分钟无活动会停止。单次响应的输出上限由模型服务决定。会将场景截图发送至你配置的同一接口，持续生成可能增加用量与费用，实际费用以服务方为准。</span></label>
         <Checkbox disabled={agentMode!=='pi'} checked={parallelDrafts} onChange={e=>setParallelDrafts(e.target.checked)}><span>实验：独立组件并行建模</span></Checkbox>
         <p className="settings-hint">最多两个子代理，仅接收组件任务；主代理合并后统一验收。总 Token 包含子代理，可能增加用量；简单任务仍串行。</p>
         <Checkbox disabled={agentMode==='pi'} checked={stream} onChange={e=>setStream(e.target.checked)}><span>实时接收模型输出</span></Checkbox>

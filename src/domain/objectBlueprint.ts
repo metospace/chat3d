@@ -1,4 +1,3 @@
-import {STRUCTURED_PART_LIMIT} from './structureLimits';
 import {matchesGeometryApproach} from './geometryApproach';
 import {inspectReferenceProportions,validateReferenceProportions} from './referenceShape';
 import type {SceneDocument} from './types';
@@ -31,7 +30,7 @@ export function validateBlueprints(items:ObjectBlueprint[]):void{
 export function validateFeatureBindings(doc:SceneDocument,blueprints:ObjectBlueprint[],bindings:FeatureBinding[]):void{
  if(!Array.isArray(bindings)||bindings.length>128||new Set(bindings.map(b=>b.blueprintKey+':'+b.componentId)).size!==bindings.length)throw Error('特征关联对象数量或唯一性无效');
  for(const b of bindings){const plan=blueprints.find(p=>p.key===b.blueprintKey);if(!plan)throw Error('结构方案不存在');const nodes=new Set(doc.nodes.filter(n=>(n.assemblyId??n.id)===b.componentId).map(n=>n.id));if(!nodes.size)throw Error('关联组件不存在');if(!b.features.length||new Set(b.features.map(f=>f.key)).size!==b.features.length)throw Error('特征关联不能为空或重复');
-  for(const f of b.features)if(!plan.features.some(p=>p.key===f.key)||!f.nodeIds.length||f.nodeIds.length>STRUCTURED_PART_LIMIT||new Set(f.nodeIds).size!==f.nodeIds.length||f.nodeIds.some(id=>!nodes.has(id)))throw Error('结构特征必须关联该组件当前存在的真实部件');
+  for(const f of b.features)if(!plan.features.some(p=>p.key===f.key)||!f.nodeIds.length||new Set(f.nodeIds).size!==f.nodeIds.length||f.nodeIds.some(id=>!nodes.has(id)))throw Error('结构特征必须关联该组件当前存在的真实部件');
  }
 }
 export function inspectBlueprintCoverage(doc:SceneDocument,blueprints:ObjectBlueprint[],bindings:FeatureBinding[]){

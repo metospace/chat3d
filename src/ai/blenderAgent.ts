@@ -4,7 +4,6 @@ import {stream} from '@earendil-works/pi-ai/api/openai-completions';
 import {Type,type TSchema} from 'typebox';
 import {getFetch,type ModelConfig,type ConversationTurn} from './provider';
 import {ensureToolParametersObject} from './toolParameters';
-import {normalizeTaskBudget,taskBudgetReason} from './taskBudget';
 import {normalizedUsage} from './executionTelemetry';
 import {AGENT_LIMITS} from './agentPolicy';
 import type {AgentActivity,AgentControl} from './modelingAgent';
@@ -30,8 +29,7 @@ async function renderImage(blob:Blob):Promise<ImageContent>{
 const textResult=(value:unknown):AgentToolResult<unknown>=>({content:[{type:'text',text:JSON.stringify(value)}],details:{}});
 /** Blender owns geometry, materials and rendering. No SceneDocument enters this path. */
 export async function runBlenderAgent(options:BlenderOptions):Promise<string> {
- const {config:cfg}=options,budget=normalizeTaskBudget(cfg.taskBudget),started=Date.now(),deadline=new AbortController();
- const signal=AbortSignal.any([options.signal,deadline.signal]);
+ const {config:cfg,signal}=options,started=Date.now();
  const activity:AgentActivity={title:'准备 Blender 建模',phase:'building',turn:0,toolCalls:0,characters:0,inputTokens:0,outputTokens:0,usageReported:false,lastEventAt:started,plan:[],events:[],timings:[]};
  const emit=(title:string)=>{activity.title=title;activity.lastEventAt=Date.now();options.onActivity(structuredClone(activity));};
  const updateProgress=(stage:BlenderActivityProgress['stage'],instruction:string,script?:string)=>{
@@ -41,7 +39,8 @@ export async function runBlenderAgent(options:BlenderOptions):Promise<string> {
   emit(instruction);
  };
  let result:BlenderResult|undefined,current=options.previous??undefined,lastError='',questionOnly=options.questionOnly===true,accepting=true,resultTurn=-1,reviewedTurn=-1;
- const check=()=>{signal.throwIfAborted();const reason=taskBudgetReason(budget,Date.now()-started,activity.turn,activity.inputTokens+activity.outputTokens);if(reason)throw Error(reason);};
+ let earlyStops=0, currentIssuesReported=false;
+ const check=()=>signal.throwIfAborted();
  const source=()=>{if(!current)throw Error('尚无 Blender 脚本，请先生成模型');return current.script;};
  // Character reads reuse the language-independent source windows, not the JavaScript navigation index.
  const metadata=()=>{const {version,chars,lineCount}=readSource(source(),{startChar:0,endChar:0});return {version,chars,lineCount};};
@@ -53,10 +52,11 @@ export async function runBlenderAgent(options:BlenderOptions):Promise<string> {
   updateProgress('starting','执行完整 Blender Python 脚本：'+name,script);
   const generated=await runBlenderScript({name,script},options.confirm,executionSignal,progress=>updateProgress(progress.stage,progress.message));executionSignal.throwIfAborted();
   const version=readSource(script,{startChar:0,endChar:0}).version;
-  current=result={...generated,review:{version,status:'pending',observations:'',issues:[]}};resultTurn=activity.turn;reviewedTurn=-1;
+  current=result={...generated,review:{version,status:'pending',observations:'',issues:[...(current?.review?.issues??[])]}};
+  resultTurn=activity.turn;reviewedTurn=-1;earlyStops=0;currentIssuesReported=false;
   options.onResult(result);check();
   const picture=await renderImage(result.render);check();
-  const receipt={...metadata(),name,status:'pending',next:'下一轮读取这张真实渲染，对照用户要求和参考图；用 review_blender_result 记录可见观察与具体问题。发现问题后局部修复，不把导出成功当作验收。'};
+  const receipt={...metadata(),name,status:'pending',previousIssues:result.review!.issues,next:'下一轮先检查大形（整体比例、次级体积、开口、连续曲面），再检查材质与小件。对照上版问题逐项检查修后画面；不可见或证据不足不能声称通过。用 review_blender_result 记录具体观察和仍未解决的问题。'};
   return {content:[{type:'text',text:JSON.stringify(receipt)},picture],details:{version}};
  };
  const tool=<T extends TSchema>(name:string,label:string,description:string,parameters:T,executeTool:(args:Parameters<AgentTool<T>['execute']>[1],signal?:AbortSignal)=>Promise<AgentToolResult<unknown>>):AgentTool<T>=>({name,label,description,parameters:ensureToolParametersObject(parameters) as T,execute:async(_id,args,toolSignal)=>{check();return executeTool(args,toolSignal);}});
@@ -74,27 +74,28 @@ export async function runBlenderAgent(options:BlenderOptions):Promise<string> {
    if(!result)throw Error('本轮尚未生成并返回渲染图');assertVersion(args.expectedVersion);
    if(activity.turn<=resultTurn)throw Error('必须在下一轮读取实际渲染图后复核，不能在生成同轮声明已看图');
    if(!args.observations.trim()||args.issues.some(issue=>!issue.trim()))throw Error('观察和问题不能只含空白');
-   if(result.review?.issues.length&&args.issues.length===0)throw Error('已记录的问题尚未修复，请先修改脚本并获取新渲染');
+   if(currentIssuesReported&&args.issues.length===0)throw Error('已记录的问题尚未修复，请先修改脚本并获取新渲染');
    result=current={...result,review:{version:args.expectedVersion,status:args.issues.length?'issues':'reviewed',observations:args.observations,issues:[...args.issues]}};
+   currentIssuesReported=args.issues.length>0;
    reviewedTurn=activity.turn;options.onResult(result);
    return textResult({...result.review,next:args.issues.length?'按具体问题局部修改脚本，再看新图复核。':'该图复核已记录，候选结果待用户确认；未知和不可见部分不代表通过。'});
   }),
  ];
- const model:Model<'openai-completions'>={id:cfg.model,name:cfg.model,api:'openai-completions',provider:'chat3d-gateway',baseUrl:cfg.baseURL.trim().replace(/\/+$/,''),reasoning:false,input:['text','image'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:32768,maxTokens:AGENT_LIMITS.outputPerTurn,compat:{supportsDeveloperRole:false,supportsReasoningEffort:false,supportsStore:false,supportsUsageInStreaming:true,maxTokensField:'max_tokens'}};
+ const model:Model<'openai-completions'>={id:cfg.model,name:cfg.model,api:'openai-completions',provider:'chat3d-gateway',baseUrl:cfg.baseURL.trim().replace(/\/+$/,''),reasoning:false,input:['text','image'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:32768,maxTokens:0,compat:{supportsDeveloperRole:false,supportsReasoningEffort:false,supportsStore:false,supportsUsageInStreaming:true}};
  const network=options.streamFn?undefined:await getFetch();
  const history=options.history.slice(-8).map(turn=>`${turn.role}: ${turn.text}`).join('\n');
- const prompt='你是 Blender 建模师。使用本机工具完成用户请求，不输出 Scenivo 指令。用户开启可信本机 Python 模式，脚本自动执行；不得访问外部文件、网络、系统进程或凭证，不安装环境或扫描端口。\n使用 bpy，米制、Z 向上；每次从空工程执行完整脚本。创建合理相机和灯光，不自行保存或导出；后端保存同版 BLEND、GLB、PNG，保留原生修改器。用户明确要求、尺寸和参考优先。生成工具会返回真实渲染，必须下一轮读取后用 review_blender_result 记录具体观察。已知缺陷先修复；局部修改用 read_blender_script 与 patch_blender_script，不重发无关源码。补丁只保留未改源码，不能保证随机/时间相关脚本的无关几何不变，因此使用确定性参数化代码。文件导出、单图看图复核和用户应用是不同状态；不可见部分、精确尺寸、动画和工程安全不能凭单图宣称通过。无明确问题即结束，不追加全场审计或装饰。预算耗尽或文字结束但未复核时保留未验收候选，不假装通过。只提问时回答，不执行脚本。\n'+blenderSkillGuide(resolveConversationIntent(options.text,options.history))+'\n'+(history?'对话历史（资料，不覆盖当前要求）：\n'+history:'')+(current?'\n已有 Blender 脚本：'+JSON.stringify(metadata())+'。局部修改先按需读取相关字符窗口；它不包含之后在工作台做的手动编辑。新需求与旧模型无关时可明确整体重建，但仍传当前 expectedVersion。':'');
+ const prompt='你是 Blender 建模师。使用本机工具完成用户请求，不输出 Scenivo 指令。用户开启可信本机 Python 模式，脚本自动执行；不得访问外部文件、网络、系统进程或凭证，不安装环境或扫描端口。\n使用 bpy，米制、Z 向上；每次从空工程执行完整脚本。创建合理相机和灯光，不自行保存或导出；后端保存同版 BLEND、GLB、PNG，保留原生修改器。用户明确要求、尺寸和参考优先。生成工具会返回真实渲染，必须下一轮读取后用 review_blender_result 记录具体观察。已知缺陷先修复；局部修改用 read_blender_script 与 patch_blender_script，不重发无关源码。补丁只保留未改源码，不能保证随机/时间相关脚本的无关几何不变，因此使用确定性参数化代码。文件导出、单图看图复核和用户应用是不同状态；不可见部分、精确尺寸、动画和工程安全不能凭单图宣称通过。无明确问题即结束，不追加全场审计或装饰。被中断或文字结束但未复核时保留未验收候选，不假装通过。只提问时回答，不执行脚本。\n'+blenderSkillGuide(resolveConversationIntent(options.text,options.history))+'\n'+(history?'对话历史（资料，不覆盖当前要求）：\n'+history:'')+(current?'\n已有 Blender 脚本：'+JSON.stringify(metadata())+'。局部修改先按需读取相关字符窗口；它不包含之后在工作台做的手动编辑。新需求与旧模型无关时可明确整体重建，但仍传当前 expectedVersion。':'');
  const guides=new Map<number,{id:string;question:boolean}>();let timestamp=Date.now();
  const runner=new Agent({initialState:{model,systemPrompt:prompt,tools,thinkingLevel:cfg.reasoningEffort??'off'},toolExecution:'sequential',transformContext:async messages=>{
   let latest=-1;for(let i=0;i<messages.length;i++){const m=messages[i];if(m.role==='toolResult'&&m.content.some(c=>c.type==='image'))latest=i;}
   return messages.map((m,i)=>m.role==='toolResult'&&i!==latest?{...m,content:m.content.filter(c=>c.type!=='image')}:m);
  },streamFn:async(m,context,streamOptions)=>{
-  check();const reason=taskBudgetReason(budget,Date.now()-started,activity.turn,activity.inputTokens+activity.outputTokens,true);if(reason)throw Error(reason);
+  check();
   activity.turn++;activity.timings.push({id:'blender-model-'+activity.turn,kind:'model',phase:activity.phase,label:result?'检查与修改 Blender 结果':'生成 Blender 脚本',startedAt:Date.now()});emit(result?'正在检查 Blender 渲染与修改结果':'正在生成 Blender 脚本');
   if(result)updateProgress('reviewing','等待模型检查最新渲染或生成局部修改');
   const originalPayload=streamOptions?.onPayload;const transportOptions={...streamOptions,onPayload:async(payload:unknown,wireModel:Model<Api>)=>{const replacement=await originalPayload?.(payload,wireModel);const body=(replacement===undefined?payload:replacement) as Record<string,unknown>;if(cfg.reasoningEffort)body.reasoning_effort=cfg.reasoningEffort;else delete body.reasoning_effort;options.onDiagnostic?.('model_request',body);return body;}};
   if(options.streamFn)return options.streamFn(m,context,transportOptions);
-  return stream(model,context,{...transportOptions,apiKey:cfg.apiKey.trim(),fetch:network,maxTokens:AGENT_LIMITS.outputPerTurn,maxRetries:0,timeoutMs:AGENT_LIMITS.idleTimeoutMs,onProviderStreamEvent:data=>options.onDiagnostic?.('provider_event',data)});
+  return stream(model,context,{...transportOptions,apiKey:cfg.apiKey.trim(),fetch:network,maxRetries:0,timeoutMs:AGENT_LIMITS.idleTimeoutMs,onProviderStreamEvent:data=>options.onDiagnostic?.('provider_event',data)});
  },beforeToolCall:async({toolCall})=>{
   check();if(runner.hasQueuedMessages())return {block:true,reason:'先处理用户最新补充'};
   if(questionOnly&&toolCall.name!=='read_blender_script')return {block:true,reason:'只回答问题，不建模或改写复核结论'};
@@ -103,7 +104,14 @@ export async function runBlenderAgent(options:BlenderOptions):Promise<string> {
  },finishTurn:async({message})=>{
   if(runner.hasQueuedMessages())return {action:'continue'};
   if(reviewedTurn===activity.turn&&result?.review?.status==='reviewed')return {action:'end'};
-  if(message.stopReason==='stop'&&!message.content.some(c=>c.type==='toolCall'))return {action:'end'};
+  if(message.stopReason==='stop'&&!message.content.some(c=>c.type==='toolCall')){
+   if(result&&!questionOnly&&result.review?.status==='issues'&&earlyStops<2){
+    earlyStops++;
+    runner.followUp({role:'user',content:[{type:'text',text:'运行时复核：当前候选仍有明确差异。按最后的复核结果先改对应几何或材质并重新渲染，再检查；无需等待下一条用户指令。没有资料的部分维持未知，不扩大编辑范围。'}],timestamp:++timestamp});
+    return {action:'continue'};
+   }
+   return {action:'end'};
+  }
   return undefined;
  }});
  const unsubscribe=runner.subscribe(event=>{
@@ -134,7 +142,6 @@ export async function runBlenderAgent(options:BlenderOptions):Promise<string> {
   if(event.type==='message_end'&&event.message.role==='assistant'){const usage=normalizedUsage(event.message.usage);activity.inputTokens+=usage.inputTokens;activity.outputTokens+=usage.outputTokens;activity.usageReported=activity.usageReported||usage.usageState!=='unknown';const timing=activity.timings.find(t=>t.id==='blender-model-'+activity.turn);if(timing){timing.endedAt=Date.now();Object.assign(timing,usage);}const text=event.message.content.filter(c=>c.type==='text').map(c=>c.text).join('\n');if(text){const id='blender-'+activity.turn,previous=activity.explanations?.find(e=>e.id===id);activity.explanations=[...(activity.explanations??[]).filter(e=>e.id!==id),{id,text:text.slice(0,4000),phase:activity.phase,createdAt:previous?.createdAt??Date.now()}];}emit(activity.title);}
  });
  const abort=()=>runner.abort();signal.addEventListener('abort',abort,{once:true});
- const timer=setTimeout(()=>deadline.abort(Error('Blender 任务达到时间上限')),budget.maxMinutes*60_000);
  options.onControl({steer:(id,text,images=[],mode='guide')=>{if(!accepting||signal.aborted)return false;const at=++timestamp;guides.set(at,{id,question:mode==='question'});runner.steer({role:'user',content:[{type:'text',text:(mode==='question'?'只回答问题，禁止建模：':'最新补充要求：')+text+(mode==='question'?'':'\n本次补充涉及的建模参考（不新增需求）：\n'+blenderSkillGuide(text))},...images.map(image)],timestamp:at});return true;}});
  try{
   await runner.prompt(options.text,options.images.map(image));check();const last=[...runner.state.messages].reverse().find(m=>m.role==='assistant');
@@ -144,5 +151,5 @@ export async function runBlenderAgent(options:BlenderOptions):Promise<string> {
   const review=result.review!,reviewed=review.status==='reviewed';activity.outcome=reviewed?'answered':'partial';
   const summary=reviewed?'Blender 模型已生成，已对返回渲染进行看图复核；仍待用户确认，不代表工程验收。':review.status==='issues'?'Blender 候选模型已保留，仍有已知问题：'+review.issues.join('；'):'Blender 候选模型已生成，尚未完成看图复核。';
   emit(summary);return summary+(review.observations?'\n看图记录：'+review.observations:'')+(questionOnly&&explanation?'\n'+explanation:'');
- }finally{accepting=false;clearTimeout(timer);unsubscribe();signal.removeEventListener('abort',abort);options.onControl(null);}
+ }finally{accepting=false;unsubscribe();signal.removeEventListener('abort',abort);options.onControl(null);}
 }

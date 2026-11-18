@@ -450,8 +450,7 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
     case 'importManualComponent':
     case 'importComponentDraft':
     case 'importMeshComponent': {
-      if(!Array.isArray(op.nodes)||!op.nodes.length||(op.op!=='importManualComponent'&&op.nodes.length>1000)||!Array.isArray(op.materials)||(op.op!=='importManualComponent'&&op.materials.length>100))return {doc,error:new Error('网格组件数量或材质数量无效')};
-      if(op.op==='importManualComponent'){try{serializeProject({...doc,nodes:[...doc.nodes,...op.nodes],materials:[...doc.materials,...op.materials]},MANUAL_PLACEMENT_OVERFLOW);}catch(e){return {doc,error:e instanceof Error?e:new Error(MANUAL_PLACEMENT_OVERFLOW)};}}
+      if(!Array.isArray(op.nodes)||!op.nodes.length||!Array.isArray(op.materials)||(op.op==='importMeshComponent'&&(op.nodes.length>1000||op.materials.length>100)))return {doc,error:new Error('网格组件数量或材质数量无效')};
       const imported:SceneDocument={...doc,nodes:op.nodes,materials:op.materials,assets:[],animation:op.animation};
       const errors=validateDocument(imported);if(errors.length||op.nodes.some(n=>!n.geometry||n.kind!=='primitive'||(op.op==='importMeshComponent'&&n.geometry.type!=='mesh')||n.parentId!==null))return {doc,error:errors[0]??new Error('网格组件只能包含平级三角网格')};
       const materialMap=new Map(op.materials.map(m=>[m.id,makeId()]));materials=[...materials,...op.materials.map(m=>({...m,id:materialMap.get(m.id)!}))];
@@ -462,10 +461,11 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
        const tracks=structuredClone(op.animation.tracks).map(track=>({...track,id:makeId(),targetIds:track.targetIds.map(id=>nodeMap.get(id)!),...(track.sourceId?{sourceId:nodeMap.get(track.sourceId)!}:{})}));
        animation=animation?{...animation,duration:Math.max(animation.duration,op.animation.duration),tracks:[...animation.tracks,...tracks]}:{...structuredClone(op.animation),tracks};
       }
-      createdIds=copies.map(n=>n.id);nodes.push(...copies);break;
+      for(const node of copies)nodes.push(node);
+      createdIds=copies.map(n=>n.id);break;
     }
     case 'createAssembly': {
-      try{const parts=buildAssembly(op);createdIds=parts.map(n=>n.id);if(op.tempId)tempIdMap.set(op.tempId,parts[0].id);nodes.push(...parts);}catch(e){return {doc,error:e instanceof Error?e:new Error('组合创建失败')};}break;
+      try{const parts=buildAssembly(op);createdIds=parts.map(n=>n.id);if(op.tempId)tempIdMap.set(op.tempId,parts[0].id);for(const node of parts)nodes.push(node);}catch(e){return {doc,error:e instanceof Error?e:new Error('组合创建失败')};}break;
     }
     case 'duplicateAssembly': {
       const anchor=findNode(doc,op.targetId)!;const members=anchor.assemblyId?doc.nodes.filter(n=>n.assemblyId===anchor.assemblyId):[anchor];
@@ -494,7 +494,6 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
       }
       try{
         const parts=buildAssembly({...(op.op==='replaceAssemblyParts'?{blueprint:op.blueprint}:{}),name,parts:op.parts,position:op.origin,yaw:op.yaw,sceneRole:anchor.sceneRole,planKey:anchor.planKey,zone:anchor.zone}).map(n=>({...n,assemblyId,assemblyName:name}));
-        if(ids.size-removed.size+parts.length>2000)return {doc,error:new Error('单个组件不能超过2000个零件')};
         // Keep the assembly anchor addressable when its old geometry is replaced.
         if(removed.has(assemblyId))parts[0].id=assemblyId;
         if(op.op==='replaceAssemblyParts'){
@@ -503,7 +502,7 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
         }
         for(let i=nodes.length-1;i>=0;i--)if(removed.has(nodes[i].id))nodes.splice(i,1);
         for(const n of nodes)if(ids.has(n.id)){n.assemblyId=assemblyId;n.assemblyName=name;}
-        nodes.push(...parts);createdIds=parts.map(n=>n.id);
+        for(const node of parts)nodes.push(node);createdIds=parts.map(n=>n.id);
         if(op.op==='replaceAssemblyParts'&&op.blueprint){const plan=op.blueprint,previous=doc.nodes.find(n=>ids.has(n.id)&&n.modelStructure?.blueprint?.key===plan.key)?.modelStructure?.blueprint;const stable=new Set(plan.features.filter(f=>previous?.features.some(p=>p.key===f.key&&p.name===f.name&&p.role===f.role)).map(f=>f.key)),newIds=new Set(parts.map(n=>n.id));for(const n of nodes)if((n.assemblyId??n.id)===assemblyId&&n.modelStructure?.blueprintKey===plan.key){if(!newIds.has(n.id))n.modelStructure.featureKeys=n.modelStructure.featureKeys.filter(k=>stable.has(k));if(n.modelStructure.blueprint)n.modelStructure.blueprint=structuredClone(plan);}}
         // Ordinary replacement must not erase the only saved blueprint. New parts
         // remain explicitly unbound; never inherit the replaced feature by ID reuse.
@@ -620,7 +619,10 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
   if(['setTransform','translate','rotate','scale','translateAssembly','transformAssembly'].includes(op.op)){
     try{newDoc.animation=transformAnimation(doc.animation,doc.nodes,nodes);if(newDoc.animation!==doc.animation)beforeSnapshot.animation=structuredClone(doc.animation??null);}catch(e){return {doc,error:e instanceof Error?e:new Error('动画变换失败')};}
   }
-  if(op.op==='importManualComponent'){try{serializeProject(newDoc,MANUAL_PLACEMENT_OVERFLOW);}catch(e){return {doc,error:e instanceof Error?e:new Error(MANUAL_PLACEMENT_OVERFLOW)};}}
+  if(op.op==='importManualComponent'||op.op==='importComponentDraft'||op.op==='createAssembly'||op.op==='appendAssemblyParts'||op.op==='replaceAssemblyParts'){
+    const overflow=op.op==='importManualComponent'?MANUAL_PLACEMENT_OVERFLOW:undefined;
+    try{serializeProject(newDoc,overflow);}catch(e){return {doc,error:e instanceof Error?e:new Error(overflow??'组件无法保存为项目')};}
+  }
   const errs = validateDocument(newDoc);
   if (errs.length > 0) {
     return { doc, error: new Error(`提交后文档校验失败: ${errs.map((e) => e.message).join('; ')}`) };
@@ -668,8 +670,8 @@ export function applyBatch(doc: SceneDocument, batch: { operations: Command[] })
       errors.push(new Error(`操作 ${op.op} 失败: ${r.error.message}`));
       break; // 整批拒绝，current 不写回，正式场景与撤销栈都不变化
     }
-    // Explicit manual aggregate copies use the project byte budget, not the AI generation batch budget.
-    if(op.op!=='duplicateSelection'&&op.op!=='importManualComponent')actualNewNodes+=r.createdIds?.length??0;
+    // Modeled assemblies and aggregate imports use project storage limits, not the copy/edit work budget.
+    if(op.op!=='duplicateSelection'&&op.op!=='importManualComponent'&&op.op!=='importComponentDraft'&&op.op!=='createAssembly'&&op.op!=='appendAssemblyParts'&&op.op!=='replaceAssemblyParts')actualNewNodes+=r.createdIds?.length??0;
     if(actualNewNodes>DEFAULT_BUDGET.maxNewNodes){errors.push(new Error(`本批实际新增 ${actualNewNodes} 个节点超过 ${DEFAULT_BUDGET.maxNewNodes}，请分批执行；本批未应用`));break;}
     current = r.doc;
     if (r.inverse) {

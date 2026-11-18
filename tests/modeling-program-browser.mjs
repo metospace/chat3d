@@ -30,7 +30,54 @@ try{
   const clean=async()=>{await page.waitForFunction(()=>document.querySelectorAll('iframe').length===0);assert.equal(workers.size,0);};
   const result=await run(base);assert.equal(result.nodes.length,2);assert.ok(result.nodes.every(n=>n.geometry.type==='mesh'&&n.geometry.params.normals.length&&n.geometry.params.uvs.length));assert.equal(new Set(result.nodes.map(n=>n.assemblyId)).size,1);assert.deepEqual(result.nodes[0].transform.position,[1,2,3]);assert.equal(result.materials[0].clearcoat,.4);
   assert.deepEqual(await page.evaluate(doc=>window.qa.validate(doc).map(e=>e.message),result),[]);await clean();check('real opaque worker builds valid editable curved multi-mesh document and cleans up');
+  const patched=await page.evaluate(async ({base,generated})=>{
+    const {runModelingAgent}=await import('/src/ai/modelingAgent.ts');
+    const {readSource}=await import('/src/ai/modelingProgramSource.ts');
+    const {applyBatch}=await import('/src/domain/commands.ts');
+    const {parseProject,serializeProject}=await import('/src/domain/project.ts');
+    const plan={key:'curved',name:'Curved test assembly',purpose:'curved structure',detailLevel:'closeup',detailReason:'check editable curves',silhouette:'rim and shell',negativeSpaces:[],views:['front','side'],features:[{key:'body',name:'rim and shell',role:'form',geometryApproach:'mesh'}]};
+    const empty={...generated,nodes:[],materials:[]};
+    const source=`/*${'x'.repeat(256*1024)}*/\n${base}`;
+    const replay=async(document,text,steps)=>{
+      let turn=0;
+      const result=await runModelingAgent({text,document,config:{baseURL:'https://fixture.invalid/v1',apiKey:'unused',model:'fixture'},selection:[],captureAvailable:()=>false,streamFn:async model=>{
+        const step=steps[turn++],reason=step?'toolUse':'stop';
+        const message={role:'assistant',api:model.api,provider:model.provider,model:model.id,content:step?[{type:'toolCall',id:step.name,name:step.name,arguments:step.args}]:[{type:'text',text:'Ready for visual review'}],stopReason:reason,timestamp:Date.now(),usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}};
+        return {result:async()=>message,async *[Symbol.asyncIterator](){yield {type:'start',partial:message};yield {type:'done',reason,message};}};
+      }});
+      const failed=result.activity.timings.find(t=>t.kind==='tool'&&t.failed);
+      if(failed)throw Error(failed.toolName+': '+failed.detail);
+      const committed=applyBatch(document,result.batch);
+      if(committed.errors.length)throw committed.errors[0];
+      return {doc:committed.doc,ops:result.batch.operations.map(op=>op.op),timings:result.activity.timings};
+    };
+    const built=await replay(empty,'Build the curved test assembly',[
+      {name:'plan_object_structure',args:{objects:[plan]}},
+      {name:'build_modeling_program',args:{name:plan.name,summary:'Build the curved rim and shell',blueprintKey:plan.key,source,stage:'silhouette',features:[{key:'body',partNames:['Curved rim','Lathed shell']}]}},
+    ]);
+    const initialNode=built.doc.nodes[0];
+    const initialSource=parseProject(serializeProject(built.doc)).nodes[0].modelingProgram.source;
+    const profile=Array.from({length:850},(_,i)=>`new THREE.Vector2(${.12+.04*Math.sin(i*.01)},${i/850})`).join(',');
+    const replace=`const insert=new THREE.Mesh(new THREE.LatheGeometry([${profile}],16),new THREE.MeshStandardMaterial());insert.name='Curved insert';root.add(insert);return new Promise(resolve=>setTimeout(()=>resolve(root),15500));`;
+    const args={componentId:initialNode.assemblyId,expectedVersion:readSource(initialSource).version,stage:'detailed',summary:'Add the curved insert',patches:[{find:'return root;',replace}],features:[{key:'body',partNames:['Curved rim','Lathed shell','Curved insert']}]};
+    const rebuilt=await replay(built.doc,'Complete the insert in this draft',[{name:'patch_modeling_program',args}]);
+    const saved=parseProject(serializeProject(rebuilt.doc)).nodes[0].modelingProgram;
+    const timing=rebuilt.timings.find(t=>t.toolName==='patch_modeling_program');
+    return {initialSourceMatches:initialSource===source,initialBytes:new TextEncoder().encode(initialSource).byteLength,initialOps:built.ops,
+      patchedSourceMatches:saved.source===source.replace('return root;',replace),patchedBytes:new TextEncoder().encode(saved.source).byteLength,
+      replaceChars:replace.length,parts:rebuilt.doc.nodes.map(n=>n.name),stage:saved.stage,ops:rebuilt.ops,elapsed:timing.endedAt-timing.startedAt};
+  },{base,generated:result});
+  assert.equal(patched.initialSourceMatches,true);assert.deepEqual(patched.initialOps,['importComponentDraft']);
+  assert.equal(patched.patchedSourceMatches,true);assert.ok(patched.initialBytes>256*1024&&patched.patchedBytes>256*1024);
+  assert.ok(patched.replaceChars>12000);assert.ok(patched.elapsed>=15000);
+  assert.deepEqual(patched.parts,['Curved rim','Lathed shell','Curved insert']);
+  assert.equal(patched.stage,'detailed');assert.deepEqual(patched.ops,['delete','importComponentDraft']);
+  await clean();check('agent builds and commits long source; a large patch runs beyond 15 seconds and commits the rebuilt component');
   await assert.rejects(run('throw new Error("expected failure");'),/expected failure/);await clean();check('thrown model errors reject without returning partial document');
+  const reversed='const material = new THREE.MeshStandardMaterial();\nconst shape = new THREE.BoxGeometry();\nconst add = (g, m) => new THREE.Mesh(g, m);\nreturn add(material, shape);';
+  await assert.rejects(run(reversed), error=>/第 4 行/.test(error.message)&&/Mesh\(geometry, material\)/.test(error.message));await clean();
+  const corrected=await run(reversed.replace('add(material, shape)','add(shape, material)'));assert.equal(corrected.nodes[0].geometry.type,'mesh');await clean();
+  check('reversed geometry and material report the generated call site and the corrected script builds');
   await assert.rejects(run('return new THREE.InstancedMesh(new THREE.BoxGeometry(),new THREE.MeshStandardMaterial(),2);'),/实例/);await clean();
   await assert.rejects(run('const m=new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshStandardMaterial());m.material.map=new THREE.Texture();return m;'),/贴图/);await clean();check('unsupported geometry/material content rejects in real worker');
   const isolated=await run(`if(typeof window!=='undefined'||typeof document!=='undefined'||typeof parent!=='undefined'||typeof localStorage!=='undefined'||typeof globalThis.__TAURI_INTERNALS__!=='undefined'||typeof privateModelingSecret!=='undefined')throw Error('page API leaked');if(location.origin!=='null')throw Error('worker origin was not opaque: '+location.origin);for(const name of ['fetch','XMLHttpRequest','WebSocket','Worker','importScripts','indexedDB','caches']){let blocked=false;try{globalThis[name]('/private-modeling-probe');}catch{blocked=true;}if(!blocked)throw Error(name+' was not blocked');}${base}`);assert.equal(isolated.nodes.length,2);await clean();check('worker has opaque origin and cannot access page, app, storage or network APIs');
@@ -39,9 +86,7 @@ try{
   const aborted=await page.evaluate(async()=>{const controller=new AbortController();const task=window.qa.run('while(true){}',controller.signal);await new Promise(resolve=>setTimeout(resolve,500));const frame=document.querySelector('iframe');const sandbox=frame?.getAttribute('sandbox');controller.abort();try{await task;return {unexpected:true};}catch(error){return {name:error.name,sandbox};}});
   assert.equal(aborted.name,'AbortError');assert.equal(aborted.sandbox,'allow-scripts');await clean();check('abort terminates infinite worker and removes opaque frame');
   const preAbort=await page.evaluate(async()=>{const controller=new AbortController();controller.abort();try{await window.qa.run('return null',controller.signal);}catch(error){return {name:error.name,frames:document.querySelectorAll('iframe').length};}});assert.deepEqual(preAbort,{name:'AbortError',frames:0});check('already-aborted runs allocate no sandbox');
-  const timeout=await page.evaluate(async()=>{let ticks=0;const timer=setInterval(()=>ticks++,20),start=performance.now();try{await window.qa.run('while(true){}');return {unexpected:true};}catch(error){return {message:error.message,elapsed:performance.now()-start,ticks};}finally{clearInterval(timer);}});
-  assert.match(timeout.message,/15秒/);assert.ok(timeout.elapsed>=14500&&timeout.elapsed<19000);assert.ok(timeout.ticks>100);await clean();check('infinite code times out around 15 seconds while the main UI remains responsive');
-  const validAfter=await run(base);assert.equal(validAfter.nodes.length,2);await clean();check('failure, abort and timeout leave subsequent modeling runs functional');
+  const validAfter=await run(base);assert.equal(validAfter.nodes.length,2);await clean();check('failure and abort leave subsequent modeling runs functional');
   // Optional acceptance against the user's actual builder, never copied into product code.
   if(process.env.MODELING_PROGRAM_SOURCE){
     const original=await readFile(process.env.MODELING_PROGRAM_SOURCE,'utf8');
