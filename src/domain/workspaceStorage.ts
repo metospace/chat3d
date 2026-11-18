@@ -1,4 +1,5 @@
 import {encodeIdbValue,decodeIdbValue,type IdbGraphRoot,type IdbGraphRecord} from './idbChunks';
+import {isQuotaExceededError} from './workspacePersist';
 // Browser-local workspace data only. Credentials are intentionally never part of this payload.
 const DB_NAME='chat3d.workspace.v1';
 const STORE='workspace';
@@ -79,18 +80,37 @@ export async function readWorkspace():Promise<WorkspaceReadResult|null>{
   return loaded;
  }catch{throw new Error('会话数据不完整，已有数据不会被覆盖，请从项目备份恢复。');}
 }
-function storageFailureMessage(error:DOMException|Error|null,conflict:boolean):string{
- if(conflict)return '另一个标签页已更新会话，本页不会覆盖其他标签页的数据。';
- if(error?.name==='QuotaExceededError')return '会话保存失败：浏览器本地存储空间已满。';
- if(error?.name==='DataCloneError')return '会话保存失败：部分数据无法写入本地存储。';
- if(error?.message)return `会话保存失败：${error.message}。`;
- return '会话保存失败，无法写入本地存储。';
+export class WorkspaceConflictError extends Error {
+ constructor(){super('另一个标签页已更新会话，本页不会覆盖其他标签页的数据。');}
+}
+export class WorkspaceWriteError extends Error {
+ constructor(readonly cause:Error|DOMException){
+  const context=cause.name==='QuotaExceededError'?'浏览器本地存储空间已满；':cause.name==='DataCloneError'?'部分数据无法写入本地存储；':isQuotaExceededError(cause)?'可能是本地存储空间不足；':'';
+  const detail=cause.message.trim()||(cause.name==='AbortError'?'IndexedDB 写入事务已中止，未提供更多错误信息':'浏览器未提供更多错误信息');
+  super(`会话保存失败：${context}${cause.name}: ${detail}`);
+ }
+}
+function storageFailure(error:unknown):Error{
+ if(error instanceof WorkspaceConflictError)return error;
+ return new WorkspaceWriteError(error instanceof Error||error instanceof DOMException?error:new Error(String(error)));
 }
 export async function writeWorkspace(data:Omit<WorkspaceEnvelope,'revision'>,expectedRevision:number):Promise<number>{
  const sessions=data.sessions as SessionRecord[];
  if(sessions.some(s=>!s||typeof s.id!=='string'||!s.snapshot||typeof s.snapshot!=='object')||new Set(sessions.map(s=>s.id)).size!==sessions.length)throw Error('会话保存数据无效');
- const db=await openDb(),{promise,resolve,reject}=Promise.withResolvers<number>();
-  const tx=db.transaction(STORE,'readwrite'),target=tx.objectStore(STORE),get=target.get('current');let conflict=false;let failure:DOMException|Error|null=null;
+ const db=await openDb().catch((error:unknown)=>{throw storageFailure(error);});
+ const {promise,resolve,reject}=Promise.withResolvers<number>();
+ try{
+  const tx=db.transaction(STORE,'readwrite'),target=tx.objectStore(STORE);
+  let conflict=false,syncFailure:unknown,requestFailure:DOMException|null=null;
+  const watch=<T>(request:IDBRequest<T>)=>{
+   request.onerror=()=>{
+    const error=request.error;
+    // Other pending requests can receive AbortError after the original failure.
+    if(error&&(!requestFailure||requestFailure.name==='AbortError'))requestFailure=error;
+   };
+   return request;
+  };
+  const get=watch(target.get('current'));
   const nextCache=new Map<string,Record<string,unknown>>();
   get.onsuccess=()=>{
    if((get.result?.revision??0)!==expectedRevision){conflict=true;tx.abort();return;}
@@ -99,7 +119,7 @@ export async function writeWorkspace(data:Omit<WorkspaceEnvelope,'revision'>,exp
     const previousSessions=new Map(reuse?current.sessions.map(session=>[session.id,session] as const):[]);
     const manifest:Manifest={storageVersion:3,version:1,revision:expectedRevision+1,activeId:data.activeId,sessions:[]};
     const referenced=new Set<string>();
-    const encode=(id:string,field:string|null,value:unknown)=>encodeIdbValue(value,(index,record)=>{const key=chunkKey(id,field,index);referenced.add(key);target.put(record,key);});
+    const encode=(id:string,field:string|null,value:unknown)=>encodeIdbValue(value,(index,record)=>{const key=chunkKey(id,field,index);referenced.add(key);watch(target.put(record,key));});
     if(data.recoverySessions?.length)manifest.recoveryRoot=encode('__workspace_recovery__',null,data.recoverySessions);
     for(const session of sessions){
      const {snapshot,...metadata}=session,previous=reuse?committed.get(session.id):undefined;
@@ -108,24 +128,28 @@ export async function writeWorkspace(data:Omit<WorkspaceEnvelope,'revision'>,exp
      for(const [field,value] of Object.entries(snapshot)){
       const key=fieldKey(session.id,field);referenced.add(key);
       let root=previousRoots.get(field);
-      if(!root||!previous||!Object.prototype.hasOwnProperty.call(previous,field)||previous[field]!==value){root=encode(session.id,field,value);target.put({root},key);}
+      if(!root||!previous||!Object.prototype.hasOwnProperty.call(previous,field)||previous[field]!==value){root=encode(session.id,field,value);watch(target.put({root},key));}
       else for(let index=0;index<root.recordCount;index++)referenced.add(chunkKey(session.id,field,index));
       fields.push({name:field,root});
      }
      nextCache.set(session.id,{...snapshot});
     }
     // All fragments, roots, metadata and reclamation commit together; unchanged geometry is never cloned.
-    target.put(manifest,'current');
+    watch(target.put(manifest,'current'));
     // Scan keys, not geometry values, including orphans left by earlier versions.
-    const keys=target.openKeyCursor();keys.onsuccess=()=>{
+    const keys=watch(target.openKeyCursor());keys.onsuccess=()=>{try{
      const cursor=keys.result;if(!cursor)return;
-     const key=cursor.key;if(typeof key==='string'&&key.startsWith('["session",')&&!referenced.has(key))target.delete(key);
+     const key=cursor.key;if(typeof key==='string'&&key.startsWith('["session",')&&!referenced.has(key))watch(target.delete(key));
      cursor.continue();
-    };
-   }catch(e){failure=e instanceof Error?e:new Error(String(e));tx.abort();}
+    }catch(error){syncFailure=error;tx.abort();}};
+   }catch(error){syncFailure=error;tx.abort();}
   };
   tx.oncomplete=()=>{db.close();committedRevision=expectedRevision+1;committed=nextCache;resolve(expectedRevision+1);};
-  tx.onabort=()=>{db.close();reject(new Error(storageFailureMessage(failure,conflict)));};
-  tx.onerror=()=>{failure=tx.error??failure;};
+  tx.onabort=()=>{
+   db.close();
+   const cause=syncFailure??(requestFailure?.name!=='AbortError'?requestFailure:null)??tx.error??requestFailure??new DOMException('','AbortError');
+   reject(conflict?new WorkspaceConflictError():storageFailure(cause));
+  };
+ }catch(error){db.close();throw storageFailure(error);}
  return promise;
 }

@@ -266,7 +266,7 @@ export async function relaunchInstalledUpdate() {
   try {
     await flushWorkspace();
     const workspace=useWorkspaceStore.getState();
-    if(!workspace.ready||workspace.saving||workspace.error)throw Error('工作区尚未保存成功，请先下载工作台备份并处理保存异常，再重启');
+    if(!workspace.ready||workspace.saving||workspace.error||workspace.reclaimNotice)throw Error('工作区尚未保存成功，请先下载工作台备份并处理保存异常，再重启');
     if(useAppUpdate.getState().busy||anySessionRunning())return;
     await relaunch();
   } catch(error) {

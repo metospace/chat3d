@@ -20,19 +20,19 @@ const server=await createServer({plugins:[{name:'mock-isolated-renderer',enforce
 let passed=0;
 const nextTaskButton=ui=>ui.getByRole('button',{name:'暂存补充要求'});
 const test=async(name,fn)=>{await fn();passed++;console.log('PASS',name);cleanup()};
-// Control only the production idle deadline. DOM/React timers keep using real time.
-// This makes expiry assertions independent of CPU contention during render/SSR work.
-function controlIdleTimeouts(){
+// Only intercept production model deadlines; React and waitFor keep real time.
+function controlModelTimeouts(firstDataMs){
  const realSet=globalThis.setTimeout,realClear=globalThis.clearTimeout,timers=new Map();let scheduled=0;
- globalThis.setTimeout=(fn,ms,...args)=>{if(ms!==180000)return realSet(fn,ms,...args);const handle=realSet(()=>{},2147483647);timers.set(handle,()=>fn(...args));scheduled++;return handle;};
+ globalThis.setTimeout=(fn,ms,...args)=>{if(ms!==180000&&(firstDataMs===undefined||ms!==firstDataMs))return realSet(fn,ms,...args);const handle=realSet(()=>{},2147483647);timers.set(handle,{ms,callback:()=>fn(...args)});if(ms===180000)scheduled++;return handle;};
  globalThis.clearTimeout=handle=>{timers.delete(handle);return realClear(handle);};
- return {get scheduled(){return scheduled},expire(){assert.ok(timers.size>0,'request has an active idle deadline');const pending=[...timers.entries()];timers.clear();for(const [handle,callback] of pending){realClear(handle);callback();}},restore(){for(const handle of timers.keys())realClear(handle);globalThis.setTimeout=realSet;globalThis.clearTimeout=realClear;}};
+ return {get scheduled(){return scheduled},pending(ms){return [...timers.values()].filter(timer=>timer.ms===ms).length},expire(ms=180000){const pending=[...timers].filter(([,timer])=>timer.ms===ms);assert.ok(pending.length>0,'request has an active deadline');for(const [handle,{callback}] of pending)if(timers.delete(handle)){realClear(handle);callback();}},restore(){for(const handle of timers.keys())realClear(handle);globalThis.setTimeout=realSet;globalThis.clearTimeout=realClear;}};
 }
 try {
  const {ChatPanel}=await server.ssrLoadModule('/src/ui/ChatPanel.tsx');
  const {useEditorStore:store,createInitialDoc}=await server.ssrLoadModule('/src/store.ts');
  const {activeConversationStore}=await server.ssrLoadModule('/src/conversationStores.ts');
  const {conversationController}=await server.ssrLoadModule('/src/runtime/conversationController.ts');
+ const {FIRST_BODY_DATA_TIMEOUT_MS:firstDataMs}=await server.ssrLoadModule('/src/ai/agentPolicy.ts');
  const config={baseURL:'https://example.test/v1',apiKey:'mock-test',model:'vision-test',useMock:false,agentMode:'single'};
  const reset=()=>{store.setState({viewportStatus:'ready',doc:createInitialDoc(),selection:[],messages:[],composerText:'',composerImages:[],lastRun:null,aiStatus:'idle',aiError:null,aiConfig:config,pendingBatch:null,pendingResult:null,previewDoc:null,past:[],future:[]});conversationController(activeConversationStore()).setNotice('');requests=[]};
  const mount=()=>render(React.createElement(React.StrictMode,null,React.createElement(ChatPanel)));
@@ -188,11 +188,12 @@ try {
   reset();store.setState({aiConfig:{...config,agentMode:'pi',stream:true}});let n=0;handler=async()=>++n===1?firstDraftResponse():new Response('data: '+JSON.stringify({choices:[{index:0,delta:{content:'稍后完善'},finish_reason:null}]})+'\n\ndata: '+JSON.stringify({choices:[{index:0,delta:{},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
   const ui=mount();send(ui,'创建完整车间');await waitFor(()=>assert.ok(ui.getByRole('button',{name:'应用修改'})),{timeout:5000});assert.equal(store.getState().doc.nodes.length,0);assert.equal(store.getState().previewDoc.nodes.length,1);assert.equal(store.getState().pendingBatch.incomplete,true);fireEvent.click(ui.getByRole('button',{name:'应用修改'}));assert.equal(store.getState().doc.nodes.length,1);assert.equal(ui.getByLabelText('建模描述').value,'');assert.equal(n,2);act(()=>store.getState().undo());assert.equal(store.getState().doc.nodes.length,0);
  });
- for(const mode of ['stop','timeout'])await test(`Pi ${mode} preserves successful checkpoint and ignores late reply`,async()=>{
+ for(const mode of ['stop','timeout','no-data'])await test(`Pi ${mode} preserves successful checkpoint and ignores late reply`,async()=>{
   reset();store.setState({aiConfig:{...config,agentMode:'pi',stream:true}});let n=0,release;handler=async()=>++n===1?firstDraftResponse():new Promise(r=>release=r);
-  const clock=mode==='timeout'?controlIdleTimeouts():null;
-  try{const ui=mount();send(ui);await waitFor(()=>assert.ok(release),{timeout:5000});if(mode==='stop')fireEvent.click(ui.getByRole('button',{name:'停止生成'}));else act(()=>clock.expire());await waitFor(()=>assert.ok(ui.getByRole('button',{name:'应用修改'})));assert.equal(store.getState().doc.nodes.length,0);assert.equal(store.getState().previewDoc.nodes.length,1);
+  const clock=controlModelTimeouts(firstDataMs);
+  try{const ui=mount();send(ui);await waitFor(()=>assert.ok(release),{timeout:5000});if(mode==='stop')fireEvent.click(ui.getByRole('button',{name:'停止生成'}));else act(()=>clock.expire(mode==='no-data'?firstDataMs:180000));await waitFor(()=>assert.ok(ui.getByRole('button',{name:'应用修改'})));assert.equal(store.getState().doc.nodes.length,0);assert.equal(store.getState().previewDoc.nodes.length,1);assert.equal(clock.pending(firstDataMs),0);
    if(mode==='stop'){assert.equal(store.getState().messages.find(m=>m.run)?.run.stopResult,'checkpoint');const {TaskPanel}=await server.ssrLoadModule('/src/ui/TaskPanel.tsx');const task=render(React.createElement(TaskPanel,{onConversation(){}}));assert.match(task.getByRole('region',{name:'当前任务状态'}).textContent,/已保留阶段草稿.*查看或放弃/s);task.unmount();}
+   if(mode==='no-data'){assert.match(store.getState().pendingBatch.summary,/等待 2 分钟仍未收到模型响应数据/);assert.equal(store.getState().messages.find(m=>m.run)?.run.stopResult,undefined);assert.ok(ui.getByRole('button',{name:'恢复输入'}));assert.equal(n,2);}
    const requestId=store.getState().pendingBatch.requestId;await act(async()=>release(new Response('data: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}})));assert.equal(store.getState().pendingBatch.requestId,requestId);fireEvent.click(ui.getByRole('button',{name:'放弃修改'}));assert.equal(store.getState().pendingBatch,null);assert.equal(store.getState().doc.nodes.length,0);}finally{clock?.restore()}
  });
  await test('stopping a refinement retains the exact previous preview and offers discard',async()=>{
@@ -201,13 +202,52 @@ try {
   assert.equal(store.getState().pendingResult,parent);assert.equal(store.getState().messages.filter(m=>m.run).at(-1).run.stopResult,'previous');assert.ok(ui.getByText(/已保留之前的预览.*查看或放弃/));
   await act(async()=>release(new Response(JSON.stringify({choices:[{message:{content:output}}]}))));fireEvent.click(ui.getByRole('button',{name:'放弃修改'}));assert.equal(store.getState().doc.nodes.length,0);
  });
- await test('Pi stream activity rearms the idle deadline, then expiry preserves its checkpoint',async()=>{
+ for(const headers of [false,true])await test(`Pi no-data deadline expires before idle ${headers?'with headers alone':'before headers'}`,async()=>{
   reset();store.setState({aiConfig:{...config,agentMode:'pi',stream:true}});
-  let n=0,body;handler=async()=>++n===1?firstDraftResponse():new Response(new ReadableStream({start(c){body=c}}),{headers:{'content-type':'text/event-stream'}});
-  const clock=controlIdleTimeouts();
+  const clock=controlModelTimeouts(firstDataMs);let late=false,release,bodyCancelled=false;
+  const response=()=>new Response(new ReadableStream({cancel(){bodyCancelled=true}}),{headers:{'content-type':'text/event-stream'}});
+  handler=()=>headers?response():new Promise(resolve=>{release=()=>{late=true;resolve(response());};});
+  try{
+   const ui=mount(),prompt='创建未收到响应的测试对象';send(ui,prompt);
+   const timeline=await ui.findByRole('region',{name:'工作时间线'});
+   await waitFor(()=>{assert.equal(requests.length,1);assert.equal(clock.pending(firstDataMs),1);if(headers)assert.equal(clock.pending(180000),1,'SDK only times receipt of headers');assert.equal(timeline.dataset.modelState,'waiting');});
+   assert.match(timeline.querySelector('strong').textContent,/等待模型响应/);
+   assert.ok(firstDataMs<180000);await act(async()=>clock.expire(firstDataMs));
+   await waitFor(()=>assert.equal(store.getState().aiStatus,'error'));assert.match(store.getState().aiError,/等待 2 分钟仍未收到模型响应数据.*手动重试/);
+   assert.equal(requests[0][1].signal.aborted,true);assert.equal(clock.pending(firstDataMs),0);assert.equal(clock.pending(180000),0);
+   assert.equal(store.getState().messages.find(m=>m.run)?.run.status,'failed');assert.equal(store.getState().pendingBatch,null);assert.equal(store.getState().doc.nodes.length,0);
+   fireEvent.click(ui.getByRole('button',{name:'恢复输入'}));assert.equal(ui.getByLabelText('建模描述').value,prompt);assert.equal(requests.length,1);
+   if(!headers){assert.equal(late,false);await act(async()=>release());assert.equal(late,true);}
+   await waitFor(()=>assert.equal(bodyCancelled,true));assert.equal(store.getState().pendingBatch,null);assert.equal(requests.length,1);
+  }finally{clock.restore();}
+ });
+ for(const firstOutput of ['text','tool'])await test(`Pi SSE ${firstOutput} follows raw bytes; the later idle deadline preserves its checkpoint`,async()=>{
+  reset();store.setState({aiConfig:{...config,agentMode:'pi',stream:true}});
+  let n=0,body,pulls=0;handler=async()=>++n===1?firstDraftResponse():new Response(new ReadableStream({start(c){body=c},pull(){pulls++;}},{highWaterMark:0}),{headers:{'content-type':'text/event-stream'}});
+  const clock=controlModelTimeouts(firstDataMs);
   try{
    const ui=mount();send(ui);await waitFor(()=>assert.ok(body),{timeout:5000});
-   for(let i=0;i<8;i++){const before=clock.scheduled;await act(async()=>{body.enqueue(new TextEncoder().encode('data: '+JSON.stringify({choices:[{index:0,delta:{content:'继续细化'},finish_reason:null}]})+'\n\n'));});await waitFor(()=>assert.ok(clock.scheduled>before,'each chunk renews the idle deadline'));}
+   const timeline=await ui.findByRole('region',{name:'工作时间线'}),enc=new TextEncoder();
+   const raw=async(text)=>{const before=clock.scheduled;await act(async()=>body.enqueue(enc.encode(text)));await waitFor(()=>assert.ok(clock.scheduled>before,'each body chunk renews the idle deadline'));};
+   const frame=delta=>'data: '+JSON.stringify({choices:[{index:0,delta,finish_reason:null}]})+'\n\n';
+   await waitFor(()=>assert.equal(timeline.dataset.modelState,'waiting'));
+   assert.equal(clock.pending(firstDataMs),1);
+   await waitFor(()=>assert.ok(pulls>0));const beforeEmpty={pulls,idle:clock.scheduled};
+   await act(async()=>body.enqueue(new Uint8Array()));await waitFor(()=>assert.ok(pulls>beforeEmpty.pulls));
+   assert.equal(clock.pending(firstDataMs),1);assert.equal(clock.scheduled,beforeEmpty.idle);assert.equal(timeline.dataset.modelState,'waiting');
+   await raw(': private-heartbeat\n\n');await waitFor(()=>assert.equal(timeline.dataset.modelState,'processing'));
+   assert.equal(clock.pending(firstDataMs),0,'raw heartbeat disarms the first-data deadline');
+   await raw('data: {');await raw('"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}}\n\n');
+   await raw(frame({reasoning_content:'private-reasoning'}));await raw(frame({tool_calls:[{index:0,type:'function',function:{arguments:''}}]}));
+   assert.equal(timeline.dataset.modelState,'processing','usage, hidden reasoning and empty tool deltas are not public data');
+   if(firstOutput==='tool'){
+    await raw(frame({tool_calls:[{index:0,id:'private-tool-id',type:'function',function:{name:'capture_view',arguments:'{"view":"private-argument"}'}}]}));
+    await waitFor(()=>assert.equal(timeline.dataset.modelState,'responding'));
+    assert.match(timeline.querySelector('strong').textContent,/正在接收模型响应.*查看当前模型效果/);
+   }
+   await raw(frame({content:'继续细化'}));await waitFor(()=>{assert.equal(timeline.dataset.modelState,'responding');assert.match(timeline.textContent,/继续细化/);});
+   assert.match(timeline.querySelector('strong').textContent,/正在接收模型响应/);
+   assert.doesNotMatch(timeline.textContent,/private-heartbeat|private-reasoning|private-tool-id|private-argument|capture_view/);
    assert.equal(store.getState().aiStatus,'generating');assert.equal(store.getState().pendingBatch.incomplete,true);
    act(()=>clock.expire());
    await waitFor(()=>assert.equal(store.getState().aiStatus,'previewing'),{timeout:3000});assert.match(store.getState().pendingBatch.summary,/等待超过 3 分钟/);assert.match(store.getState().pendingBatch.summary,/已保留之前的预览/);assert.equal(store.getState().previewDoc.nodes.length,1);

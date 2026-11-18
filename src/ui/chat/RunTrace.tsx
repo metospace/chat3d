@@ -65,7 +65,7 @@ export function RunTrace({run,activity,onStop,blender=false}:{run:MessageRun;act
   </button>
   <div id={detailsId} hidden={!expanded} className="adx-progress-details">
    {history.length>0&&<ol className="adx-progress-feed" aria-label="建模进展">{history.map(entry=><ProgressRecord key={entry.id} entry={entry}/>)}</ol>}
-   {active&&<div className="adx-progress-current"><span className="adx-progress-current-label">{currentAction?'正在执行':progress.modelState==='responding'?'正在接收':'等待响应'}</span><p>{live.note}</p></div>}
+   {active&&<div className="adx-progress-current"><span className="adx-progress-current-label">{currentAction?'正在执行':progress.modelStateLabel??'处理进度'}</span><p>{live.note}</p></div>}
    {a?.blenderProgress&&<BlenderProgressPanel progress={a.blenderProgress} status={run.status} now={now}/>}
   </div>
   {active&&onStop&&<ConversationActions className="adx-run-actions" items={[{key:'stop',label:'停止生成',onClick:onStop}]}/>}

@@ -22,7 +22,7 @@ import {activeConversationStore} from '../../conversationStores';
 import {conversationController} from '../../runtime/conversationController';
 import {sceneChanges} from '../../domain/editScope';
 import {activityProgress} from '../../domain/customerProgress';
-import {generationFailureMessage,generationStopMessage,sanitizeGenerationText,STOP_USAGE_NOTE} from '../../domain/generationFailure';
+import {generationFailureMessage,generationStopMessage,sanitizeGenerationText,NO_MODEL_DATA,STOP_USAGE_NOTE} from '../../domain/generationFailure';
 import {useWorkspaceStore} from '../../workspace';
 import {useAppearance} from '../Appearance';
 import {SiteAccessRecovery} from '../SiteAccessRecovery';
@@ -265,7 +265,7 @@ function ChatSurface({onConfigure,onDashboardOpen,canvasMode=false,expanded=true
     </div>
   </div>;
   const stoppedWithoutPreview=generationStopMessage('unchanged')+STOP_USAGE_NOTE;
-  const errorNotice=(aiStatus==='error' || aiStatus==='cancelled') && <div className="adx-chat-alert" role="status"><span>{aiStatus==='error'?generationFailureMessage(aiError):stoppedWithoutPreview}</span>{lastRequest && <button type="button" className="adx-link" onClick={restore}>恢复输入</button>}</div>;
+  const errorNotice=(aiStatus==='error' || aiStatus==='cancelled' || (previewing&&aiError?.includes(NO_MODEL_DATA))) && <div className="adx-chat-alert" role="status"><span>{aiStatus==='cancelled'?stoppedWithoutPreview:generationFailureMessage(aiError,{previewRetained:previewing})}</span>{lastRequest && <button type="button" className="adx-link" onClick={restore}>恢复输入</button>}</div>;
   const messageItems=messages.filter(m=>!m.queuedTask).flatMap(m=>{
     const hasContent=!!(m.text.trim()||m.images?.length||m.batch);
     const footer=messageFooter(m);
@@ -298,7 +298,7 @@ function ChatSurface({onConfigure,onDashboardOpen,canvasMode=false,expanded=true
     {canvasMode&&expanded&&previewCard&&(reviewHost?createPortal(previewCard,reviewHost):previewCard)}
     <SiteAccessRecovery error={aiError}/>
     {newMessages && <button type="button" className="adx-scroll-latest" onClick={()=>{stickRef.current=true;setNewMessages(false);scrollToLatest();}}>查看最新消息 ↓</button>}
-    {busy&&<div className="adx-notice" aria-label="当前草稿状态" data-phase={progress.phase} data-model-state={progress.modelState}>{progress.modelEditAgeSeconds!==undefined&&<p aria-label="距上次模型修改">距上次模型修改 {progress.modelEditAgeSeconds} 秒</p>}{agentActivity&&(agentActivity.inputTokens+agentActivity.outputTokens>=100000||elapsed>=300)&&<p>任务耗时较长，可在任务记录查看详情。</p>}</div>}
+    {busy&&<div className="adx-notice" aria-label="当前草稿状态" data-phase={progress.phase} data-model-state={progress.modelState}>{canvasMode&&!expanded&&progress.modelStateLabel&&<p role="status">{progress.modelStateLabel}</p>}{progress.modelEditAgeSeconds!==undefined&&<p aria-label="距上次模型修改">距上次模型修改 {progress.modelEditAgeSeconds} 秒</p>}{agentActivity&&(agentActivity.inputTokens+agentActivity.outputTokens>=100000||elapsed>=300)&&<p>任务耗时较长，可在任务记录查看详情。</p>}</div>}
     {canvasMode&&!expanded&&previewing&&<div className="adx-compact-strip"><span>修改结果待确认</span><Button size="small" onClick={onExpand}>查看详情</Button><Button size="small" type="primary" disabled={compareBefore} onClick={commit}>应用修改</Button><Button size="small" onClick={discard}>放弃修改</Button></div>}
     {canvasMode&&!expanded&&busy&&<div className="adx-compact-strip"><Button size="small" onClick={onExpand}>查看过程</Button></div>}
     <div className="adx-composer">

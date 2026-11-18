@@ -24,6 +24,6 @@ try{
  const failures=result.activity.timings.filter(t=>t.kind==='tool'&&t.failed);assert.deepEqual(failures.map(t=>({tool:t.toolName,detail:t.detail})),[]);
  assert.equal(result.result.doc.nodes[0].geometry.params.depth,2);assert.deepEqual(result.result.doc.nodes.slice(1),doc.nodes.slice(1));assert.deepEqual(result.result.doc.materials,doc.materials);assert.equal(result.activity.referenceRepairs.length,0);
  for(const context of contexts){const generated=context.messages.filter(m=>m.role==='toolResult').flatMap(m=>m.content.filter(c=>c.type==='image'));assert.ok(generated.length<=6);const refs=context.messages.filter(m=>m.role==='user').flatMap(m=>m.content.filter(c=>c.type==='image'));assert.ok(refs.some(i=>i.data==='cmVmZXJlbmNl'));}
- assert.ok(captures>=16);assert.ok(contexts.at(-1).messages.some(m=>m.role==='toolResult'&&m.toolName==='recall_evidence'&&m.content.some(c=>c.type==='image')));
+ assert.equal(captures,19,'overview (2), repair verification (3 focused + 2 whole), then four sibling packets (12); archive recall does not render');assert.ok(contexts.at(-1).messages.some(m=>m.role==='toolResult'&&m.toolName==='recall_evidence'&&m.content.some(c=>c.type==='image')));
  console.log('PASS overview -> explicit difference -> actual local edit -> focused recheck -> archived recall; references, other components and original evidence limits preserved');
 }finally{await server.close();}

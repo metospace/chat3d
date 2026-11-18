@@ -4,7 +4,7 @@ import {OperationProgress,nextProgressPaint} from './OperationProgress';
 import {useRef,useState} from 'react';
 import {Button} from 'antd';
 import {DownloadIcon,UploadIcon,Cross1Icon} from '@radix-ui/react-icons';
-import {MAX_WORKSPACE_BACKUP_BYTES,WORKSPACE_BACKUP_SIZE_ERROR,exportWorkspaceBackup,importWorkspaceBackup} from '../workspace';
+import {MAX_WORKSPACE_BACKUP_BYTES,WORKSPACE_BACKUP_SIZE_ERROR,exportWorkspaceBackup,flushWorkspace,importWorkspaceBackup} from '../workspace';
 import {useWorkspaceStore,exportRecoverySession} from '../workspace';
 import {exportFile} from '../util/exportFile';
 export function WorkspaceTools({onClose}:{onClose:()=>void}){
@@ -18,7 +18,7 @@ export function WorkspaceTools({onClose}:{onClose:()=>void}){
   <p className="backup-lede">保存一份副本，或将已有备份恢复为新项目。</p>
   {recovery.map((item,index)=><section key={index}><p role="alert">会话 {index+1} 已隔离：{item.error}。其他项目可正常使用，原始数据仍保留。</p><Button disabled={busy} onClick={()=>void run(async()=>{const result=await exportFile(async()=>exportRecoverySession(index),'json',`scenivo-rescue-${index+1}.json`);if(result)setNotice(result);},'救援隔离会话','读取原始数据')}>下载隔离会话原始数据 {index+1}</Button></section>)}
   <div className="backup-actions"><section><span className="settings-icon"><DownloadIcon/></span><h3>导出项目</h3><p>保存所有未删除项目、动画、对话和草稿。</p><Button disabled={busy} onClick={()=>void run(async()=>{const text=exportWorkspaceBackup();await showStage('请求下载或保存文件');setNotice(await downloadJson(text,'workspace'));},'导出工作台备份','打包备份')}>下载工作台备份</Button></section><section><span className="settings-icon"><UploadIcon/></span><h3>从备份恢复</h3><p>新增项目，不覆盖当前已有内容。</p><Button disabled={busy} onClick={()=>input.current?.click()}>导入备份为新会话</Button></section></div>
-  <input ref={input} type="file" accept=".json" hidden onChange={e=>{const f=e.target.files?.[0];e.target.value='';if(!f)return;void run(async()=>{if(f.size>MAX_WORKSPACE_BACKUP_BYTES)throw Error(WORKSPACE_BACKUP_SIZE_ERROR);const text=await f.text();await showStage('校验导入并恢复为新会话');const count=importWorkspaceBackup(text);setNotice(`已新增 ${count} 个会话，原会话未覆盖`);},'恢复工作台备份','读取文件');}}/>
+  <input ref={input} type="file" accept=".json" hidden onChange={e=>{const f=e.target.files?.[0];e.target.value='';if(!f)return;void run(async()=>{if(f.size>MAX_WORKSPACE_BACKUP_BYTES)throw Error(WORKSPACE_BACKUP_SIZE_ERROR);const text=await f.text();await showStage('校验导入并恢复为新会话');const count=importWorkspaceBackup(text);if(count)await flushWorkspace();const writeError=useWorkspaceStore.getState().error;setNotice(`已新增 ${count} 个会话，原会话未覆盖${count&&writeError?'。导入内容尚未保存到本机，请保留备份文件并在工作区重试保存。':''}`);},'恢复工作台备份','读取文件');}}/>
   <div className="settings-info">备份包含聊天文字，分享前请检查敏感内容。不包含参考图、撤销历史或模型密钥；恢复后需重新配置模型。未确认的模型会另存为草稿副本。</div>
   {busy&&<OperationProgress title={progress.title} stage={progress.stage}/>}{notice&&<p role="status" className="settings-success">{notice}</p>}{error&&<p role="alert" className="settings-error">{error}</p>}
   <footer className="settings-module-footer"><Button disabled={busy} onClick={onClose}>关闭</Button></footer>

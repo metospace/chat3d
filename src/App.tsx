@@ -50,7 +50,7 @@ import {StudioHome} from './ui/StudioHome';
 import {TaskCenter,StudioSettings} from './ui/StudioPages';
 import {downloadJson} from './util/downloadJson';
 import {exportFile} from './util/exportFile';
-import {initializeWorkspace,useWorkspaceStore,createSession,anySessionRunning,exportWorkspaceBackup} from './workspace';
+import {initializeWorkspace,useWorkspaceStore,createSession,anySessionRunning,exportWorkspaceBackup,retryWorkspaceSave} from './workspace';
 import { MAX_PROJECT_BYTES, PROJECT_SIZE_ERROR, parseProjectFile, serializeProject } from './domain/project';
 import {acquirePublishedCategory} from './domain/teamCategories';
 import {activityProgress} from './domain/customerProgress';
@@ -176,7 +176,8 @@ export default function App() {
   };
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => {
-      if (anySessionRunning() || useWorkspaceStore.getState().saving || !!useWorkspaceStore.getState().error || ['capturing','context','generating','validating','previewing'].includes(useEditorStore.getState().aiStatus)) { e.preventDefault(); e.returnValue = ''; }
+      const {saving,error,reclaimNotice}=useWorkspaceStore.getState();
+      if (anySessionRunning() || saving || error || reclaimNotice || ['capturing','context','generating','validating','previewing'].includes(useEditorStore.getState().aiStatus)) { e.preventDefault(); e.returnValue = ''; }
     };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
@@ -189,11 +190,11 @@ export default function App() {
 
   const workspace=useWorkspaceStore();
   const recovery=workspace.error?workspaceRecovery(workspace.error):undefined;
-  useEffect(()=>{setConflictDismissed(false);setBackupStatus('');},[workspace.error]);
+  useEffect(()=>{setConflictDismissed(false);setBackupStatus('');},[workspace.error,workspace.reclaimNotice]);
   const active=workspace.sessions.find(s=>s.id===workspace.activeId);
   const isAsset=active?.moduleKind==='asset',libraryName=isAsset?'资产库':'场景库',structureName=isAsset?'模型结构':'场景结构';
   const localSaveFailed=!!(workspace.error||autosaveError);
-  const localSaveLabel=localSaveFailed?'本机草稿自动保存异常':workspace.saving?'本机草稿自动保存中':'本机草稿已自动保存';
+  const localSaveLabel=localSaveFailed?'本机草稿自动保存异常':workspace.saving?'本机草稿自动保存中':workspace.reclaimNotice?'本机草稿已保存（部分数据未写入）':'本机草稿已自动保存';
   const librarySaveLabel=!active?.librarySavedAt?`尚未保存到${libraryName}`:active.savedRevision===revision?`已保存到${libraryName}`:`当前修改尚未保存到${libraryName}`;
   const [assetDialog,setAssetDialog]=useState<'insert'|'manage'>();
   const [assistantOpen,setAssistantOpen]=useState(true);
@@ -252,7 +253,15 @@ export default function App() {
         {exportProgress&&<OperationProgress key={exportProgress.title} {...exportProgress}/>}
         {importProgress&&<OperationProgress key={importProgress.title} {...importProgress}/>}
         {backupBusy&&<OperationProgress title="备份工作台" stage="打包项目并请求保存"/>}
-        {workspace.error&&recovery&&!conflictDismissed&&<div role="alert" className="workspace-notice is-error"><div className="workspace-conflict-copy"><span>{workspace.error}</span><small>{recovery.guidance}</small>{backupStatus&&<span role="status">{backupStatus}</span>}</div><Button disabled={backupBusy} onClick={()=>void backupConflict()}>下载工作台备份</Button>{recovery.kind==='quota'&&<Button onClick={()=>setAssetDialog('manage')}>打开资产库备份</Button>}{recovery.kind==='recovery'&&<Button onClick={()=>setShowTools(true)}>备份与恢复</Button>}{recovery.refresh&&<Button type="primary" onClick={()=>window.location.reload()}>我已备份，刷新本页</Button>}<Button type="text" aria-label="隐藏保存异常提示" icon={<Cross1Icon/>} onClick={()=>setConflictDismissed(true)}/></div>}
+        {(workspace.error||workspace.reclaimNotice)&&!conflictDismissed&&<div role={workspace.error?'alert':'status'} className={`workspace-notice${workspace.error?' is-error':''}`}>
+          <div className="workspace-conflict-copy"><span>{workspace.error??workspace.reclaimNotice}</span>{recovery&&<small>{recovery.guidance}</small>}{backupStatus&&<span role="status">{backupStatus}</span>}</div>
+          <Button disabled={backupBusy} onClick={()=>void backupConflict()}>下载工作台备份</Button>
+          {(recovery?.kind==='quota'||workspace.reclaimNotice)&&<Button onClick={()=>setAssetDialog('manage')}>打开资产库备份</Button>}
+          {(workspace.canRetrySave||recovery?.kind==='recovery')&&<Button onClick={()=>setShowTools(true)}>备份与恢复</Button>}
+          {(workspace.canRetrySave||workspace.reclaimNotice)&&<Button type="primary" loading={workspace.saving} onClick={()=>void retryWorkspaceSave()}>重试保存</Button>}
+          {recovery?.refresh&&<Button type="primary" onClick={()=>window.location.reload()}>我已备份，刷新本页</Button>}
+          {!workspace.canRetrySave&&<Button type="text" aria-label="隐藏保存异常提示" icon={<Cross1Icon/>} onClick={()=>setConflictDismissed(true)}/>}
+        </div>}
         {!workspace.error&&autosaveError&&<div className="workspace-notice is-error" role="alert"><div className="workspace-conflict-copy"><span>自动保存失败</span><small>{autosaveError}</small></div><Button onClick={()=>setShowTools(true)}>备份与恢复</Button></div>}
         {!workspace.error&&projectNotice&&!saveNotice&&<SaveToast message={projectNotice} tone={projectNoticeTone} onClose={closeSaveNotice} duration={projectNoticeTone==='error'?0:5000}/>}
         </aside>

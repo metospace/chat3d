@@ -62,8 +62,8 @@ try {
  });
  await test('quota degradation combines image stripping with trash omission without losing core text',async()=>{
   const trash=w.useWorkspaceStore.getState().activeId;w.createSession();w.getSessionEditor(trash).getState().setComposerText('TRASH_QUOTA');w.trashSession(trash);const active=w.useWorkspaceStore.getState().activeId;editor.getState().setComposerText('核心文字');editor.getState().setComposerImages(['IMAGE_QUOTA']);
-  const put=IDBObjectStore.prototype.put;let failures=0;IDBObjectStore.prototype.put=function(value,key){if(/TRASH_QUOTA|IMAGE_QUOTA/.test(JSON.stringify(value))){failures++;throw new DOMException('quota','QuotaExceededError');}return put.call(this,value,key);};
-  try{await w.flushWorkspace();const durable=await ws.readWorkspace();assert.equal(failures,2);assert.equal(durable.sessions.some(s=>s.id===trash),false);assert.equal(durable.sessions.find(s=>s.id===active).snapshot.composerText,'核心文字');assert.deepEqual(durable.sessions.find(s=>s.id===active).snapshot.composerImages,[]);assert.match(w.useWorkspaceStore.getState().error,/参考图及回收站/);}finally{IDBObjectStore.prototype.put=put;}
+  const put=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(value,key){const record=JSON.stringify(value);if(record.includes('IMAGE_QUOTA'))throw new DOMException('', 'UnknownError');if(record.includes('TRASH_QUOTA'))throw new DOMException('', 'AbortError');return put.call(this,value,key);};
+  try{await w.flushWorkspace();const durable=await ws.readWorkspace();assert.equal(durable.sessions.some(s=>s.id===trash),false);assert.equal(durable.sessions.find(s=>s.id===active).snapshot.composerText,'核心文字');assert.deepEqual(durable.sessions.find(s=>s.id===active).snapshot.composerImages,[]);assert.equal(w.useWorkspaceStore.getState().error,null);assert.match(w.useWorkspaceStore.getState().reclaimNotice,/参考图及回收站/);assert.deepEqual(editor.getState().composerImages,['IMAGE_QUOTA']);}finally{IDBObjectStore.prototype.put=put;}
  });
  await test('restart waits for pending composer persistence and refuses failed saves',async()=>{
   // Exercise the real restart client boundary without exiting a native process.

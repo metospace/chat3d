@@ -42,12 +42,12 @@ function lineAt(lines:number[],position:number):number{
  let lo=0,hi=lines.length;while(lo+1<hi){const mid=(lo+hi)>>>1;if(lines[mid]<=position)lo=mid;else hi=mid;}return lo+1;
 }
 /** Two independent 32-bit accumulators, deterministic across browsers and runtimes. */
-function version(source:string):string{
+export function sourceVersion(source:string):string{
  let a=0x811c9dc5,b=0x9e3779b9;
  for(let i=0;i<source.length;i++){const code=source.charCodeAt(i);a=Math.imul(a^code,0x01000193);b=Math.imul(b^code,0x5bd1e995);b^=b>>>13;}
  return `v1-${source.length}-${(a>>>0).toString(16).padStart(8,'0')}${(b>>>0).toString(16).padStart(8,'0')}`;
 }
-function metadata(source:string,lines:number[]):SourceMetadata{return {version:version(source),chars:source.length,lineCount:lines.length};}
+function metadata(source:string,lines:number[]):SourceMetadata{return {version:sourceVersion(source),chars:source.length,lineCount:lines.length};}
 function startCursor(value:unknown,label:'startLine'|'startChar',source:string,lines:number[]):number{
  const start=integer(value,label,label==='startLine'?1:0,Number.MAX_SAFE_INTEGER),max=label==='startLine'?lines.length:source.length;
  if(start>max)throw Error(`${label}=${start} 超出源码范围；实际 lineCount=${lines.length}，chars=${source.length}。有效游标：startLine 为 1..${lines.length}，startChar 为 0..${source.length}（UTF-16）；请按此范围重试，或先不传选择器读取摘要。`);
@@ -121,7 +121,7 @@ export function editSource(source:string,options:SourceEditOptions,maxSourceChar
  if(maxSourceChars!==undefined)integer(maxSourceChars,'maxSourceChars',1,Number.MAX_SAFE_INTEGER);
  record(options,['expectedVersion','patches'],'edit options');
  if(!own(options,'expectedVersion')||!own(options,'patches'))throw Error('edit options requires expectedVersion and patches');
- if(typeof options.expectedVersion!=='string'||options.expectedVersion!==version(source))throw Error('Stale expectedVersion: read the current source before editing');
+ if(typeof options.expectedVersion!=='string'||options.expectedVersion!==sourceVersion(source))throw Error('Stale expectedVersion: read the current source before editing');
  if(!Array.isArray(options.patches)||Object.getPrototypeOf(options.patches)!==Array.prototype||options.patches.length<1||options.patches.length>MAX_PATCHES)throw Error('patches must contain between 1 and 8 literal patches');
  if(Reflect.ownKeys(options.patches).some(key=>typeof key!=='string'||(key!=='length'&&!/^(?:0|[1-9]\d*)$/.test(key))))throw Error('patches contains an unsupported or unsafe key');
  if(Object.values(Object.getOwnPropertyDescriptors(options.patches)).some(descriptor=>!('value' in descriptor)))throw Error('patches must not contain accessors');

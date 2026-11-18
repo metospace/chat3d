@@ -14,7 +14,7 @@ type Occurrence={position:number;packet:Packet;indices:number[];recall:boolean};
 type RecallReference={captureId:string;imageIndices:number[];revision:number;originalRevision?:number};
 
 function record(value:unknown):Record<string,unknown>{
- if(typeof value==='string'){try{return record(JSON.parse(value));}catch{return {};}}
+ if(typeof value==='string'){if(!value.startsWith('{'))return {};try{return record(JSON.parse(value));}catch{return {};}}
  return value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:{};
 }
 function jsonDetails(value:unknown):{[key:string]:JsonValue}{
@@ -45,6 +45,20 @@ function frozenClone<T>(value:T):T{
  const freeze=(item:unknown):void=>{if(item&&typeof item==='object'){for(const child of Object.values(item))freeze(child);Object.freeze(item);}};
  freeze(copy);return copy;
 }
+
+/** Current capture receipts and plans are snapshots, not per-image provenance. */
+function captureSnapshot(part:TextContent,toolName:string):'readiness'|'plan'|undefined{
+ const data=record(part.text);
+ if(data.reviewReadiness!==undefined)return 'readiness';
+ if(toolName==='capture_quality_review'&&data.coverage==='component-multiview'&&Array.isArray(data.targets))return 'plan';
+}
+
+function frameKey(packet:Packet,index:number):string|undefined{
+ const {toolName}=packet.entry,{scopes,views}=packet.manifest[index];
+ if(!scopes.length||!views.length||toolName==='preview_animation'||toolName==='capture_detail_diagnostic')return;
+ return JSON.stringify([toolName,scopes,views]);
+}
+
 function describe(message:ResultMessage,id:string):Packet{
  const details=record(message.details),images:ImageContent[]=[],manifest:ImageEvidence[]=[];
  const fallbackRevision=revision(details.revision),fallbackScopes=stringValues(details.scope),fallbackViews=stringValues(details.view);
@@ -131,12 +145,19 @@ export class EvidenceContext{
   return {content:this.content(packet,new Set(indices),`Recalled original capture page: ${JSON.stringify(reference)}. Original provenance and limitations below; recall is not a new capture or acceptance.`),details:{...jsonDetails(packet.message.details),evidenceRecall:reference}};
  }
 
- private content(packet:Packet,selected:Set<number>,notice:string):Content[]{
+ private content(packet:Packet,selected:Set<number>,notice:string,projection?:true):Content[]{
   let index=0;
-  return [{type:'text',text:notice},...packet.message.content.flatMap((part):Content[]=>{
-   if(part.type==='text')return [{...part}];
+  return [{type:'text',text:notice},...packet.message.content.flatMap((part,position,parts):Content[]=>{
+   if(part.type==='text'){
+    if(projection){
+     if(captureSnapshot(part,packet.entry.toolName))return [];
+     // Hide inactive frames' labels as well as their pixels. Recall still returns the original page.
+     if(parts[position+1]?.type==='image'&&!selected.has(index)&&tokens(part.text,'scope').length)return [];
+    }
+    return [{...part}];
+   }
    const imageIndex=index++;
-   return selected.has(imageIndex)?[{...part}]:[{type:'text',text:`[Image ${imageIndex} archived: ${packet.id}; available via recall_evidence, startImage=${imageIndex}. No visual acceptance implied.]`}];
+   return selected.has(imageIndex)?[{...part}]:projection?[]:[{type:'text',text:`[Image ${imageIndex} archived: ${packet.id}; available via recall_evidence, startImage=${imageIndex}. No visual acceptance implied.]`}];
   })];
  }
 
@@ -155,7 +176,7 @@ export class EvidenceContext{
     if(packet)occurrences.push({position,packet,indices:packet.manifest.filter(image=>this.usableRevision(image.revision,currentRevision)).map(image=>image.index),recall:false});
    }
   }
-  const newest=[...occurrences].reverse(),chosen=new Map<number,Set<number>>(),seenImages=new Set<string>();
+  const newest=[...occurrences].reverse(),chosen=new Map<number,Set<number>>(),seenImages=new Set<string>(),seenFrames=new Set<string>();
   let remaining=IMAGE_LIMIT;
   const add=(occurrence:Occurrence|undefined):void=>{
    if(!occurrence||!remaining)return;
@@ -166,16 +187,23 @@ export class EvidenceContext{
     if(selected.has(index))continue;
     const identity=`${occurrence.packet.id}:${index}`;
     if(seenImages.has(identity))continue;
+    const key=frameKey(occurrence.packet,index);
+    if(key&&!occurrence.recall&&seenFrames.has(key))continue;
+    if(key)seenFrames.add(key);
     seenImages.add(identity);selected.add(index);remaining--;
    }
    if(selected.size)chosen.set(occurrence.position,selected);
   };
-  const usable=newest.filter(occurrence=>occurrence.indices.length),latest=usable[0],latestRecall=usable.find(occurrence=>occurrence.recall);
+  const usable=newest.filter(occurrence=>occurrence.indices.length),latest=usable[0];
+  const latestRecall=usable.find(occurrence=>occurrence.recall);
+  // A page requested alongside subsequent tools still takes priority on its next request, but
+  // an old page should not crowd out new evidence after another assistant turn.
+  const recallRequested=latestRecall&&!messages.slice(latestRecall.position+1).some(message=>message.role==='assistant');
   const whole=usable.find(occurrence=>occurrence.indices.some(index=>occurrence.packet.manifest[index].scopes.includes('whole')));
   const focused=usable.find(occurrence=>occurrence.indices.some(index=>occurrence.packet.manifest[index].scopes.some(scope=>scope!=='whole')));
   // Keep an explicit recalled page active even if a capture followed it in the same turn.
   // Animation packets stay together when <=6 and no recalled page competes for that request.
-  if(latestRecall)add(latestRecall);
+  if(recallRequested)add(latestRecall);
   if(latest?.packet.message.toolName==='preview_animation')add(latest);
   else if(whole&&focused&&(whole===focused?whole.indices.length:whole.indices.length+focused.indices.length)<=remaining){
    for(const occurrence of [whole,focused].sort((a,b)=>b.position-a.position))add(occurrence);
@@ -192,22 +220,41 @@ export class EvidenceContext{
   const occurrenceByPosition=new Map(occurrences.map(occurrence=>[occurrence.position,occurrence]));
   const catalog=this.packets.slice(-CATALOG_LIMIT).map(packet=>packet.entry);
   const catalogPosition=occurrences[occurrences.length-1]?.position;
+  const snapshots=new Map<number,TextContent[]>();
+  let hasReadiness=false,hasPlan=false;
+  for(const occurrence of usable){
+   const content=occurrence.recall?(messages[occurrence.position] as ResultMessage).content:occurrence.packet.message.content;
+   // The tool appends live readiness after the immutable original capture receipt.
+   for(let i=0;i<content.length;i++){
+    const part=content[occurrence.recall?content.length-1-i:i];
+    if(part.type!=='text')continue;
+    const kind=captureSnapshot(part,occurrence.recall?'recall_evidence':occurrence.packet.entry.toolName);
+    if((kind==='readiness'&&!hasReadiness)||(kind==='plan'&&!hasPlan)){
+     if(kind==='readiness')hasReadiness=true;else hasPlan=true;
+     const parts=snapshots.get(occurrence.position)??[];
+     parts.push(part);snapshots.set(occurrence.position,parts);
+    }
+   }
+   if(hasReadiness&&hasPlan)break;
+  }
   return messages.map((message,position):AgentMessage=>{
    if(message.role!=='toolResult'||message.isError)return message;
    const occurrence=occurrenceByPosition.get(position),recall=record(record(message.details).evidenceRecall);
    if(!occurrence){
     // A recalled page can become stale after a later edit; never reinstate its pixels.
-    if(typeof recall.captureId==='string')return {...message,content:message.content.filter(part=>part.type!=='image').concat({type:'text',text:'Recalled screenshots are no longer active at the current revision; original capture remains archived.'})};
+    if(typeof recall.captureId==='string')return {...message,content:[{type:'text',text:`Recalled screenshots (${recall.captureId}) are no longer active at the current revision; original capture remains archived.`}]};
     return message;
    }
    const {packet}=occurrence,selected=chosen.get(position)??new Set<number>();
    const catalogText=position===catalogPosition?` Archive catalog (latest ${catalog.length}/${this.packets.length}, availability only): ${JSON.stringify(catalog)}. All captures remain reachable with recall_evidence list pagination offset=0, limit<=12.`:'';
    const effectiveRecall=occurrence.recall?{...recall,revision:currentRevision,...(packet.entry.revision!==currentRevision?{originalRevision:packet.entry.revision}:{})}:undefined;
    const recallText=effectiveRecall?` Recalled page cursor: ${JSON.stringify(effectiveRecall)}.`:'';
-   const notice=`Evidence ${packet.id}: revision=${selected.size?currentRevision:packet.entry.revision??'unknown'}${selected.size&&packet.entry.revision!==currentRevision?`, originalRevision=${packet.entry.revision??'unknown'}`:''}, scopes=${JSON.stringify(packet.entry.scopes)}, views=${JSON.stringify(packet.entry.views)}, available=true, active image indices=${JSON.stringify([...selected])}, totalImages=${packet.images.length}. Original capture retained; archived images are not visible and are not acceptance evidence.${recallText}${catalogText}`;
+   const notice=`Evidence ${packet.id}: revision=${selected.size?currentRevision:packet.entry.revision??'unknown'}${selected.size&&packet.entry.revision!==currentRevision?`, originalRevision=${packet.entry.revision??'unknown'}`:''}, scopes=${JSON.stringify(packet.entry.scopes)}, views=${JSON.stringify(packet.entry.views)}, active image indices=${JSON.stringify([...selected])}, totalImages=${packet.images.length}. Archived images are not visible and are not acceptance evidence.${recallText}${catalogText}`;
    // Archived packets need a compact pointer, not the original potentially large review plan.
-   const content=selected.size?this.content(packet,selected,notice):[{type:'text' as const,text:notice}];
-   return {...message,content,details:{...jsonDetails(packet.message.details),...(effectiveRecall?{evidenceRecall:jsonDetails(effectiveRecall)}:{}),evidenceProjection:{captureId:packet.id,revision:currentRevision,originalRevision:packet.entry.revision,imageIndices:[...selected],archived:selected.size===0}}};
+   const content=selected.size?this.content(packet,selected,notice,true):[{type:'text' as const,text:notice}];
+   for(const snapshot of snapshots.get(position)??[])content.push({...snapshot});
+   const {reviewPlan,...details}=record(packet.message.details);
+   return {...message,content,details:{...jsonDetails(details),...(effectiveRecall?{evidenceRecall:jsonDetails(effectiveRecall)}:{}),evidenceProjection:{captureId:packet.id,revision:currentRevision,originalRevision:packet.entry.revision,imageIndices:[...selected],archived:selected.size===0}}};
   });
  }
 }

@@ -32,47 +32,50 @@ try{
   assert.deepEqual(await page.evaluate(doc=>window.qa.validate(doc).map(e=>e.message),result),[]);await clean();check('real opaque worker builds valid editable curved multi-mesh document and cleans up');
   const patched=await page.evaluate(async ({base,generated})=>{
     const {runModelingAgent}=await import('/src/ai/modelingAgent.ts');
-    const {readSource}=await import('/src/ai/modelingProgramSource.ts');
-    const {applyBatch}=await import('/src/domain/commands.ts');
     const {parseProject,serializeProject}=await import('/src/domain/project.ts');
     const plan={key:'curved',name:'Curved test assembly',purpose:'curved structure',detailLevel:'closeup',detailReason:'check editable curves',silhouette:'rim and shell',negativeSpaces:[],views:['front','side'],features:[{key:'body',name:'rim and shell',role:'form',geometryApproach:'mesh'}]};
     const empty={...generated,nodes:[],materials:[]};
     const source=`/*${'x'.repeat(256*1024)}*/\n${base}`;
     const replay=async(document,text,steps)=>{
       let turn=0;
-      const result=await runModelingAgent({text,document,config:{baseURL:'https://fixture.invalid/v1',apiKey:'unused',model:'fixture'},selection:[],captureAvailable:()=>false,streamFn:async model=>{
-        const step=steps[turn++],reason=step?'toolUse':'stop';
+      const result=await runModelingAgent({text,document,config:{baseURL:'https://fixture.invalid/v1',apiKey:'unused',model:'fixture'},selection:[],captureAvailable:()=>false,streamFn:async (model,context)=>{
+        const next=steps[turn++],step=typeof next==='function'?next(context):next,reason=step?'toolUse':'stop';
         const message={role:'assistant',api:model.api,provider:model.provider,model:model.id,content:step?[{type:'toolCall',id:step.name,name:step.name,arguments:step.args}]:[{type:'text',text:'Ready for visual review'}],stopReason:reason,timestamp:Date.now(),usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}};
         return {result:async()=>message,async *[Symbol.asyncIterator](){yield {type:'start',partial:message};yield {type:'done',reason,message};}};
       }});
       const failed=result.activity.timings.find(t=>t.kind==='tool'&&t.failed);
       if(failed)throw Error(failed.toolName+': '+failed.detail);
-      const committed=applyBatch(document,result.batch);
-      if(committed.errors.length)throw committed.errors[0];
-      return {doc:committed.doc,ops:result.batch.operations.map(op=>op.op),timings:result.activity.timings};
+      return {doc:result.result.doc,ops:result.batch.operations.map(op=>op.op),timings:result.activity.timings};
     };
-    const built=await replay(empty,'Build the curved test assembly',[
-      {name:'plan_object_structure',args:{objects:[plan]}},
-      {name:'build_modeling_program',args:{name:plan.name,summary:'Build the curved rim and shell',blueprintKey:plan.key,source,stage:'silhouette',features:[{key:'body',partNames:['Curved rim','Lathed shell']}]}},
-    ]);
-    const initialNode=built.doc.nodes[0];
-    const initialSource=parseProject(serializeProject(built.doc)).nodes[0].modelingProgram.source;
     const profile=Array.from({length:850},(_,i)=>`new THREE.Vector2(${.12+.04*Math.sin(i*.01)},${i/850})`).join(',');
     const replace=`const insert=new THREE.Mesh(new THREE.LatheGeometry([${profile}],16),new THREE.MeshStandardMaterial());insert.name='Curved insert';root.add(insert);return new Promise(resolve=>setTimeout(()=>resolve(root),15500));`;
-    const args={componentId:initialNode.assemblyId,expectedVersion:readSource(initialSource).version,stage:'detailed',summary:'Add the curved insert',patches:[{find:'return root;',replace}],features:[{key:'body',partNames:['Curved rim','Lathed shell','Curved insert']}]};
-    const rebuilt=await replay(built.doc,'Complete the insert in this draft',[{name:'patch_modeling_program',args}]);
+    let initialProgram,patchedProgram;
+    const rebuilt=await replay(empty,'Build and finish the curved test assembly',[
+      {name:'plan_object_structure',args:{objects:[plan]}},
+      {name:'build_modeling_program',args:{name:plan.name,summary:'Build the curved rim and shell',blueprintKey:plan.key,source,stage:'silhouette',features:[{key:'body',partNames:['Curved rim','Lathed shell']}]}},
+      context=>{
+        const built=context.messages.find(m=>m.role==='toolResult'&&m.toolName==='build_modeling_program'&&!m.isError);
+        initialProgram=JSON.parse(built.content[0].text).program;
+        return {name:'patch_modeling_program',args:{componentId:initialProgram.componentId,expectedVersion:initialProgram.version,stage:'detailed',summary:'Add the curved insert',patches:[{find:'return root;',replace}],features:[{key:'body',partNames:['Curved rim','Lathed shell','Curved insert']}]}};
+      },
+      context=>{
+        const patched=context.messages.find(m=>m.role==='toolResult'&&m.toolName==='patch_modeling_program'&&!m.isError);
+        patchedProgram=JSON.parse(patched.content[0].text).program;
+      },
+    ]);
     const saved=parseProject(serializeProject(rebuilt.doc)).nodes[0].modelingProgram;
+    if(patchedProgram.componentId!==rebuilt.doc.nodes[0].assemblyId)throw Error('Patch receipt points to an obsolete component');
     const timing=rebuilt.timings.find(t=>t.toolName==='patch_modeling_program');
-    return {initialSourceMatches:initialSource===source,initialBytes:new TextEncoder().encode(initialSource).byteLength,initialOps:built.ops,
-      patchedSourceMatches:saved.source===source.replace('return root;',replace),patchedBytes:new TextEncoder().encode(saved.source).byteLength,
+    return {initialProgram,patchedProgram,patchedSourceMatches:saved.source===source.replace('return root;',replace),patchedBytes:new TextEncoder().encode(saved.source).byteLength,
       replaceChars:replace.length,parts:rebuilt.doc.nodes.map(n=>n.name),stage:saved.stage,ops:rebuilt.ops,elapsed:timing.endedAt-timing.startedAt};
   },{base,generated:result});
-  assert.equal(patched.initialSourceMatches,true);assert.deepEqual(patched.initialOps,['importComponentDraft']);
-  assert.equal(patched.patchedSourceMatches,true);assert.ok(patched.initialBytes>256*1024&&patched.patchedBytes>256*1024);
+  assert.equal(patched.initialProgram.stage,'silhouette');assert.equal(patched.patchedProgram.stage,'detailed');
+  assert.notEqual(patched.patchedProgram.componentId,patched.initialProgram.componentId);assert.notEqual(patched.patchedProgram.version,patched.initialProgram.version);
+  assert.equal(patched.patchedSourceMatches,true);assert.ok(patched.patchedBytes>256*1024);
   assert.ok(patched.replaceChars>12000);assert.ok(patched.elapsed>=15000);
   assert.deepEqual(patched.parts,['Curved rim','Lathed shell','Curved insert']);
-  assert.equal(patched.stage,'detailed');assert.deepEqual(patched.ops,['delete','importComponentDraft']);
-  await clean();check('agent builds and commits long source; a large patch runs beyond 15 seconds and commits the rebuilt component');
+  assert.equal(patched.stage,'detailed');assert.deepEqual(patched.ops,['importComponentDraft','delete','importComponentDraft']);
+  await clean();check('build receipt directly patches long source; rebuilt component persists after a patch runs beyond 15 seconds');
   await assert.rejects(run('throw new Error("expected failure");'),/expected failure/);await clean();check('thrown model errors reject without returning partial document');
   const reversed='const material = new THREE.MeshStandardMaterial();\nconst shape = new THREE.BoxGeometry();\nconst add = (g, m) => new THREE.Mesh(g, m);\nreturn add(material, shape);';
   await assert.rejects(run(reversed), error=>/第 4 行/.test(error.message)&&/Mesh\(geometry, material\)/.test(error.message));await clean();

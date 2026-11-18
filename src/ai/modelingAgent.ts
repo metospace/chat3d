@@ -4,7 +4,7 @@ import {commandSchema,validateCommandOperations,CommandContractError,commandCont
 import {EvidenceContext} from './evidenceContext';
 import {buildRepairAgenda} from './repairAgenda';
 import {sceneContract} from './sceneContract';
-import {readSource,editSource} from './modelingProgramSource';
+import {readSource,editSource,sourceVersion} from './modelingProgramSource';
 import {runModelingProgram} from '../scene/modelingProgram';
 import {modelingProgramCommands,modelingProgramSource} from './modelingProgramDraft';
 import {agentSceneContext,targetedSceneContext,selectedAssemblies,compactAgentContext} from './agentContext';
@@ -73,6 +73,8 @@ import { validateToolArguments, type Model, type ImageContent } from '@earendil-
 import {Type,type TSchema,type Static} from 'typebox';
 import { stream } from '@earendil-works/pi-ai/api/openai-completions';
 import { getFetch, parseModelResponse, type ModelConfig, type ConversationTurn } from './provider';
+import { observeStreamingFetch } from './transport';
+import { NO_MODEL_DATA } from '../domain/generationFailure';
 import { applyBatch, type Command, type CommandBatch, type ExecutionResult } from '../domain/commands';
 import type { SceneDocument } from '../domain/types';
 import {inspectSceneQuality,type CompositionPlan,type QualityReport} from '../domain/sceneQuality';
@@ -81,9 +83,9 @@ import { captureSceneEvidence, isSceneCaptureAvailable, type CaptureView, type E
 import {checkEditScope,type EditScope} from '../domain/editScope';
 import { makeId } from '../util/ids';
 
-import { AGENT_LIMITS } from './agentPolicy';
+import { AGENT_LIMITS, FIRST_BODY_DATA_TIMEOUT_MS } from './agentPolicy';
 import { normalizeModelingRequestMessages } from './modelingRequest';
-import { ensureToolParametersObject } from './toolParameters';
+import { compactSceneEditParameters,ensureToolParametersObject } from './toolParameters';
 export { AGENT_LIMITS } from './agentPolicy';
 export interface ActivityTiming { pendingToolName?:string;summary?:string;phase?:'planning'|'building'|'reviewing'|'repairing'; failureCategory?:ToolFailureCategory;toolName?:string;repeatedInput?:boolean;argumentsChars?:number;resultChars?:number;sceneRevision?:number;firstContentAt?:number;responseAt?:number;usageState?:UsageState;uncachedInputTokens?:number;cacheReadTokens?:number;cacheWriteTokens?:number; id:string; kind:'model'|'tool'; label:string; startedAt:number; firstDataAt?:number; endedAt?:number; failed?:boolean; detail?:string; inputTokens?:number; outputTokens?:number; requestFootprint?:RequestFootprint }
 export interface DesignBrief {flow:string[];layout:string;equipment:{name:string;count:number;features:string[]}[];checks:string[];composition?:CompositionPlan}
@@ -162,6 +164,18 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
   }
   const base=structuredClone(options.document);
   let draft=structuredClone(base);let localFocus:{ids:string[];radius:number}|undefined;
+  let indexedDraft:SceneDocument|undefined,programSources=new Map<string,{source:string;version?:string}>();
+  const currentSourceVersion=(id:string)=>{
+    if(indexedDraft!==draft){
+      const next=new Map<string,{source:string;version?:string}>();
+      for(const node of draft.nodes)if(node.modelingProgram){
+        const key=node.assemblyId??node.id,source=node.modelingProgram.source,prior=programSources.get(key);
+        if(!next.has(key))next.set(key,prior?.source===source?prior:{source});
+      }
+      programSources=next;indexedDraft=draft;
+    }
+    const row=programSources.get(id);if(row)return row.version??=sourceVersion(row.source);
+  };
   const originallySelectedAssemblies=new Set(selectedAssemblies(base,options.selection));
   const selectionForDoc=(doc:SceneDocument)=>{const ids=new Set(options.selection);for(const n of doc.nodes)if(n.assemblyId&&originallySelectedAssemblies.has(n.assemblyId))ids.add(n.id);const existing=new Set(doc.nodes.map(n=>n.id));return [...ids].filter(id=>existing.has(id));};
   const resolvedIntent=resolveConversationIntent(options.text,options.history);
@@ -262,43 +276,56 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
   const disabledToolGroups=new Set<OptionalToolGroup>();
   if(!options.images?.length){enabledToolGroups.add('catalog');enabledToolGroups.add('layout');enabledToolGroups.add('diagnostics');}
   if(needsDesign||wantsAnimation||cfg.parallelDrafts)enabledToolGroups.add('layout');
-  const checkReuse=new CheckReuse(),captureReuse=new CheckReuse();const captureTools:Record<string,true|undefined>={capture_view:true,capture_multiview:true,capture_component_intrinsic:true,capture_quality_review:true};
+  const checkReuse=new CheckReuse(),captureReuse=new CheckReuse();const captureTools:Record<string,true|undefined>={capture_view:true,capture_multiview:true,capture_component_intrinsic:true,capture_quality_review:true,capture_detail_diagnostic:true};
   const evidenceContext=new EvidenceContext();
-  const repairAgenda=()=>buildRepairAgenda({document:draft,referenceRepairs:referenceRepairReport(referenceRepairs),detailReviews,reviewIssues,completionBlockers,capturedRevision,reviewedRevision});
-  const actionableDefects=()=>[...new Set([...completionBlockers,...referenceRepairs.map(item=>`${item.observed}；修复：${item.action}`),...detailReviews.flatMap(review=>review.checks.filter(check=>check.status==='fail').map(check=>`${review.componentId}：${check.evidence}`))])];
+  const referenceBlocker=(item:ReferenceRepair,withExpected:boolean)=>`参考形体差异 ${item.id}：${item.observed}；${withExpected?`目标：${item.expected}；修复：`:''}${item.action}`;
+  const actionableDefects=()=>[...new Set([...completionBlockers,...detailReviews.flatMap(review=>review.checks.filter(check=>check.status==='fail').map(check=>`${review.componentId}：${check.evidence}`)),...referenceRepairs.map(item=>`${item.observed}；修复：${item.action}`)])];
   const inspectionOnly=()=>questionOnly||(executionTexts[executionTexts.length-1]??'').split(/[，,。；;\n]/).some(clause=>{
     if(/(?:不要|不能|不应|不是|别).{0,6}(?:只|仅)(?:检查|核对|诊断|审查)/.test(clause))return false;
     return /(?:只|仅)(?:做)?(?:检查|核对|诊断|审查)|(?:不要|禁止|无需)(?:修改|改动|编辑)(?:模型|几何|场景|任何对象)?$|不(?:修改|改动)(?:任何)?(?:模型|几何|场景)/.test(clause.trim());
   });
   let structuredIssues:number|undefined,structuredStage=-1;const failedStructured=new FailedEditBuffer();const schemaFailures=new Set<string>();let replayingStructured=false;const structuredTools=new Set(['build_structured_component','repair_structured_features']);const structuredRetryScope=()=>JSON.stringify([executionTexts,activity.objectBlueprints]);
   const structuredFailure=(error:unknown)=>error instanceof StructuredValidationError?{stage:['parts','structure','dimensions'].indexOf(error.stage),count:error.stageIssueCount}:error instanceof AssemblyValidationError?{stage:0,count:error.issues.length}:{stage:3,count:1};
+  const captureReviewStatus=()=>{
+    const {missingViews,missingVerdicts}=shapeReviewProgress();
+    const shapeStatus=(targets:typeof missingViews)=>targets.slice(0,8).map(({id,name})=>({componentId:id,name}));
+    return {revision:draft.revision,scope:captureScope,requiredScope:reviewRequirement(base,draft),geometryOnly:usedSoftwareCapture,shapeNeedsEvidence:shapeStatus(missingViews),shapeNeedsVerdicts:shapeStatus(missingVerdicts),remainingShapeTargets:Math.max(0,missingViews.length-8),remainingShapeVerdicts:Math.max(0,missingVerdicts.length-8)};
+  };
   const captureReviewState=()=>{
     const targets=detailTargets(qualityBase,draft);
     const views=(scope:string)=>[...new Set([...capturedViews].filter(key=>key.startsWith(draft.revision+':')&&key.endsWith(':'+scope)).map(key=>key.split(':')[1]))];
-    const {missingViews,missingVerdicts}=shapeReviewProgress();
-    const shapeStatus=(targets:typeof missingViews)=>targets.slice(0,8).map(({id,name})=>({componentId:id,name}));
-    return {revision:draft.revision,scope:captureScope,wholeViews:views('whole'),requiredScope:reviewRequirement(base,draft),geometryOnly:usedSoftwareCapture,shapeNeedsEvidence:shapeStatus(missingViews),shapeNeedsVerdicts:shapeStatus(missingVerdicts),remainingShapeTargets:Math.max(0,missingViews.length-8),targets:targets.slice(0,8).map(t=>({componentId:t.id,name:t.name,closeupViews:views(t.id),intrinsicViews:views('intrinsic-'+t.id),partReferences:draft.nodes.filter(n=>(n.assemblyId??n.id)===t.id).slice(0,16).map(n=>({id:n.id,name:n.name}))})),remainingTargets:Math.max(0,targets.length-8),criteria:DETAIL_CRITERIA.map(c=>c.key),next:'只引用真实组件和部件。补主体所缺互补视角，下一轮用detailReviews记录silhouette与structure，可合并completion。明确缺陷先修复；软件图不能通过材质。'};
+    return {...captureReviewStatus(),wholeViews:views('whole'),targets:targets.slice(0,8).map(t=>({componentId:t.id,name:t.name,closeupViews:views(t.id),intrinsicViews:views('intrinsic-'+t.id),partReferences:draft.nodes.filter(n=>(n.assemblyId??n.id)===t.id).slice(0,16).map(n=>({id:n.id,name:n.name}))})),remainingTargets:Math.max(0,targets.length-8),criteria:DETAIL_CRITERIA.map(c=>c.key),next:'只引用真实组件和部件。补主体所缺互补视角，下一轮用detailReviews记录silhouette与structure，可合并completion。明确缺陷先修复；软件图不能通过材质。'};
   };
   const reusableChecks=new Set(['inspect_view_visibility','audit_model_detail','audit_model_details_batch','inspect_access_route','inspect_part_topology','detail_quality_standard','inspect_connections','inspect_contact_surfaces','check_requirements','inspect_model_quality','inspect_clearance','inspect_workcells']);
   // Pi 1.5 infers only common TypeBox kinds; keep tuple/union inference at our schema boundary.
   type ToolExecute<T extends TSchema>=(id:string,params:Static<T>,signal?:AbortSignal,onUpdate?:Parameters<AgentTool['execute']>[3])=>ReturnType<AgentTool['execute']>;
   const tool=<T extends TSchema>(name:string,label:string,description:string,parameters:T,execute:ToolExecute<T>):AgentTool<any>=>({name,label,description,parameters:ensureToolParametersObject(parameters),executionMode:'sequential',execute:(async(...args:Parameters<ToolExecute<T>>)=>{
     check();
-    const captureArgs=args[1] as {views?:string[]};const captureKey=JSON.stringify([name,Array.isArray(captureArgs.views)?{...captureArgs,views:[...captureArgs.views].sort()}:captureArgs]);if(captureTools[name]&&captureReuse.seen(draft.revision,captureKey))return textResult(JSON.stringify({revision:draft.revision,repeated:true,next:'当前版本同参数图片已归档，请用recall_evidence取回；需要改变相机或局部目标时明确新参数。'}));
+    let captureKey:string|undefined;
+    if(captureTools[name]){
+      const captureArgs=args[1] as {views?:string[];offset?:number;overviewOnly?:boolean;componentIds?:string[];targetIds?:string[];contextIds?:string[]};
+      const params=name==='capture_quality_review'
+        ?[captureArgs.offset??0,captureArgs.overviewOnly??false,[...(captureArgs.componentIds??[])].sort()]
+        :name==='capture_detail_diagnostic'
+          ?[captureArgs.targetIds,captureArgs.contextIds,captureArgs.views].map(values=>[...(values??[])].sort())
+          :Array.isArray(captureArgs.views)?{...captureArgs,views:[...captureArgs.views].sort()}:captureArgs;
+      captureKey=JSON.stringify([name,params]);
+      if(captureReuse.seen(draft.revision,captureKey))return textResult(JSON.stringify({revision:draft.revision,repeated:true,next:'当前版本同参数图片已归档，请用recall_evidence取回；需要改变相机或局部目标时明确新参数。'}));
+    }
     const key=JSON.stringify([name,args[1],requirements,requirementsNeedRefresh,executionTexts,activity.design,activity.objectBlueprints,activity.featureBindings,detailReviews,visualAvailable()]);
     if(reusableChecks.has(name)&&checkReuse.seen(draft.revision,key))return textResult(JSON.stringify({revision:draft.revision,repeated:true,tool:name,next:'本版本同参数检查结果已返回且没有变化，请复用前面的结果。只修正具体问题，unknown不等于通过，不要重复检查获取进展。'}));
     const toolRevision=draft.revision;try{const result=await execute(...args);
     if(reusableChecks.has(name))checkReuse.remember(draft.revision,JSON.stringify([name,args[1],requirements,requirementsNeedRefresh,executionTexts,activity.design,activity.objectBlueprints,activity.featureBindings,detailReviews,visualAvailable()]));
-    if(captureTools[name])captureReuse.remember(toolRevision,captureKey);
+    if(captureKey)captureReuse.remember(toolRevision,captureKey);
     if(captureTools[name])result.content.unshift({type:'text',text:JSON.stringify({reviewReadiness:captureReviewState()})});
     if(name==='recall_evidence'&&args[1]&&typeof args[1]==='object'&&'mode' in args[1]&&args[1].mode==='images')result.content.push({type:'text',text:JSON.stringify({reviewReadiness:captureReviewState(),recallPurpose:'图片送达模型后即保留已读状态；同版已送达图片无需反复召回，下一步应review_model合并复核并提交。'})});
-    if(['review_model','audit_model_detail','audit_model_details_batch'].includes(name))result.content.push({type:'text',text:JSON.stringify({detailReviewState:detailReviews.filter(r=>r.revision===draft.revision).map(r=>({componentId:r.componentId,recorded:r.checks.filter(c=>c.evidence!=='本项尚未提交复核结论，保持待核对').map(c=>c.criterion),pending:r.checks.filter(c=>c.status==='unknown').map(c=>c.criterion),failed:r.checks.filter(c=>c.status==='fail').map(c=>c.criterion)})),next:'只补当前版本待核对标准；未提交项不会标为通过，已知失败必须实际修复。'})});
+    if(['review_model','audit_model_detail','audit_model_details_batch'].includes(name))result.content.push({type:'text',text:JSON.stringify({revision:draft.revision,detailReviewState:detailReviews.filter(r=>r.revision===draft.revision).map(r=>({componentId:r.componentId,recorded:r.checks.filter(c=>c.evidence!=='本项尚未提交复核结论，保持待核对').map(c=>c.criterion),pending:r.checks.filter(c=>c.status==='unknown').map(c=>c.criterion),failed:r.checks.filter(c=>c.status==='fail').map(c=>c.criterion)})),next:'只补当前版本待核对标准；未提交项不会标为通过，已知失败必须实际修复。'})});
     if(structuredTools.has(name)&&!replayingStructured)failedStructured.clear();return result;
     }catch(error){if(structuredTools.has(name)&&!replayingStructured&&!signal?.aborted&&draft.revision===toolRevision){const failure=structuredFailure(error);structuredIssues=failure.count;structuredStage=failure.stage;const cached=failedStructured.remember(args[0],draft.revision,structuredRetryScope(),{summary:name,operations:[{tool:name,args:args[1]}]});throw Error((error instanceof Error?error.message:String(error))+(cached?' 失败结构ID='+args[0]+'；用retry_structured_component集中纠正已列出的字段，最多两次。尺寸检查若因非法几何暂未执行，修好后还会测量；若需修订结构方案，请明确更新plan_object_structure后重新构建，旧失败ID会失效。':''));}throw error;}
   }) as AgentTool['execute']});
 
   const assertPoseGoal=()=>{if(preserveAssetShape&&base.nodes.some(n=>n.modelAsset)&&!hasAssetPoseChange(base,draft,/手|臂|扶|握|按键|封箱|点赞|hand|grip/i.test([resolvedIntent,...(options.history??[]).slice(-6).map(m=>m.text)].join('\n'))))throw Error('姿态目标尚未实现：命名、结构绑定或整个人物平移不能代替手臂/关节调整。不能提交为已完成；若原模型无法独立转动，请明确说明并保留未完成状态。');};
-  const commitEdits=async(args:{summary:string;operations:Command[]},validateResult?:(doc:SceneDocument)=>void,preservationBaseline?:SceneDocument)=>{
+  const commitEdits=async(args:{summary:string;operations:Command[];programVersion?:string},validateResult?:(doc:SceneDocument)=>void,preservationBaseline?:SceneDocument)=>{
       check();if(needsDesign&&!activity.plan.length)throw new Error('完整新场景请先调用 plan_model 说明建模步骤');
       if(submitted)throw new Error('已提交预览，本轮不能继续修改');
       const result=applyBatch(draft,{operations:args.operations});
@@ -310,6 +337,8 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
       const changed=JSON.stringify(draft.nodes)!==JSON.stringify(result.doc.nodes)||JSON.stringify(draft.materials)!==JSON.stringify(result.doc.materials)||JSON.stringify(draft.animation)!==JSON.stringify(result.doc.animation);
       if(!changed)throw new Error('本次操作未改变场景，请执行计划中的有效修改或复核提交');
       const receipt=editReceipt(draft,result.doc);
+      const programNode=args.programVersion?result.applied[result.applied.length-1]?.after.nodes[0]:undefined;
+      const program=args.programVersion&&programNode?.modelingProgram?{componentId:programNode.assemblyId??programNode.id,version:args.programVersion,stage:programNode.modelingProgram.stage}:undefined;
       const oldRevision=draft.revision,sameVisual=visualFingerprint(draft)===visualFingerprint(result.doc);
       if(!sameVisual)activity.lastModelEditAt=Date.now();
       if(!sameVisual||!args.operations.every(op=>op.op==='rename'))progress();
@@ -319,7 +348,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
       const saved=restoreModelStructure(draft),plans=new Map((activity.objectBlueprints??[]).map(p=>[p.key,p]));for(const p of saved.blueprints)if(!plans.has(p.key))plans.set(p.key,p);activity.objectBlueprints=[...plans.values()];activity.featureBindings=saved.bindings.filter(b=>JSON.stringify(saved.blueprints.find(p=>p.key===b.blueprintKey))===JSON.stringify(plans.get(b.blueprintKey)));activity.blueprintCoverage=inspectBlueprintCoverage(draft,activity.objectBlueprints,activity.featureBindings);refreshDetail();if(requirements.length)activity.requirements=checkRequirements(draft,requirements);applied.push(...result.applied);operations.push(...args.operations);
       if(sameVisual){evidenceContext.carryForward(oldRevision,draft.revision);if(consumedAnimations.has(oldRevision))consumedAnimations.add(draft.revision);for(const evidence of [capturedViews,reviewedViews,consumedViews])for(const key of [...evidence])if(key.startsWith(oldRevision+':'))evidence.add(draft.revision+key.slice(String(oldRevision).length));if(latestCaptureKey.startsWith(oldRevision+':'))latestCaptureKey=draft.revision+latestCaptureKey.slice(String(oldRevision).length);if(capturedRevision===oldRevision)capturedRevision=draft.revision;if(reviewedRevision===oldRevision)reviewedRevision=draft.revision;if(reviewedWholeRevision===oldRevision)reviewedWholeRevision=draft.revision;if(animationCheckedRevision===oldRevision)animationCheckedRevision=draft.revision;}else reviewedRevision=-1;
       options.onCheckpoint?.(checkpoint());options.onPreview?.(draft);emit(`草稿已更新：${args.summary}（共 ${draft.nodes.length} 个对象）`,true);
-      return {...textResult(JSON.stringify({revision:draft.revision,scene:receipt,review:reviewRequirement(base,draft),geometryWarnings:inspectGeometryQuality(draft),profileOpenings:profileOpeningMetrics(draft),next:visualAvailable()?'按实际修改复核：none无需截图可提交；local可用受影响组件近景；whole需全景；animation需动态样本。截图后下一轮review_model。完成用户要求即可提交，不要追加无关工序。':'三维不可用。继续完成用户要求的全部数据编辑和数量/尺寸检查；不要遗漏其他对象。完成后调用submit_data_preview保留未视觉验收草稿，不要请求截图。'})),details:{revision:draft.revision}};
+      return {...textResult(JSON.stringify({revision:draft.revision,...(program?{program}:{}),scene:receipt,review:reviewRequirement(base,draft),geometryWarnings:inspectGeometryQuality(draft),profileOpenings:profileOpeningMetrics(draft),next:visualAvailable()?'按实际修改复核：none无需截图可提交；local可用受影响组件近景；whole需全景；animation需动态样本。截图后下一轮review_model。完成用户要求即可提交，不要追加无关工序。':'三维不可用。继续完成用户要求的全部数据编辑和数量/尺寸检查；不要遗漏其他对象。完成后调用submit_data_preview保留未视觉验收草稿，不要请求截图。'})),details:{revision:draft.revision,...(program?{program}:{})}};
   };
   const armSchema=Type.Object({assemblyId:Type.String(),replaceIds:Type.Array(Type.String(),{minItems:1,maxItems:30}),shoulder:Type.Tuple([Type.Number(),Type.Number(),Type.Number()]),elbowHint:Type.Tuple([Type.Number(),Type.Number(),Type.Number()]),upperLength:Type.Number({minimum:.03,maximum:2}),forearmLength:Type.Number({minimum:.03,maximum:2}),target:Type.Tuple([Type.Number(),Type.Number(),Type.Number()]),operation:Type.Union([Type.Literal('press'),Type.Literal('grasp'),Type.Literal('reach'),Type.Literal('support')]),forward:Type.Tuple([Type.Number(),Type.Number(),Type.Number()]),dorsal:Type.Tuple([Type.Number(),Type.Number(),Type.Number()]),handedness:Type.Union([Type.Literal('left'),Type.Literal('right')]),pose:Type.Union(HAND_POSES.map(p=>Type.Literal(p))),skinMaterialId:Type.String(),sleeveMaterialId:Type.String(),gripDiameter:Type.Optional(Type.Number({minimum:.012,maximum:.08})),contactNormal:Type.Optional(Type.Tuple([Type.Number(),Type.Number(),Type.Number()]))});
   const armArgs=(args:any):ArmEdit=>({...args,hand:{forward:args.forward,dorsal:args.dorsal,handedness:args.handedness,pose:args.pose,gripDiameter:args.gripDiameter}});
@@ -369,16 +398,28 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
     tool('read_command_contract','读取命令参数契约','读取当前支持的全部命令、必填字段和组合约束。缺字段或参数错误先按统一报告纠正原批次，不猜缺失值、不换路线新建无关模型。',Type.Object({}),async()=>textResult(commandContractGuide())),
     tool('read_scene_contract','读取共享场景约束','读取当前布局、单位、主要材质、比例方案和参数化组件目录，用于局部修正保持全场一致。只读现状，不代表质量通过，不扩大编辑权限。',Type.Object({}),async()=>textResult(JSON.stringify(sceneContract(draft,activity.design,activity.objectBlueprints)))),
     tool('recall_evidence','取回已归档检查图','分页取回本次任务已生成的原始检查图，不重新渲染、不增加验收权限。list查看captureId及游标；images一次最多3张，原始版本与当前版本不符则拒绝。',Type.Union([Type.Object({mode:Type.Literal('list'),offset:Type.Optional(Type.Integer({minimum:0})),limit:Type.Optional(Type.Integer({minimum:1,maximum:12}))},{additionalProperties:false}),Type.Object({mode:Type.Literal('images'),captureId:Type.String(),startImage:Type.Optional(Type.Integer({minimum:0})),count:Type.Optional(Type.Integer({minimum:1,maximum:3}))},{additionalProperties:false})]),async(_id,args)=>args.mode==='list'?textResult(JSON.stringify(evidenceContext.list(args.offset,args.limit))):evidenceContext.recall(args,draft.revision)),
-    tool('read_modeling_program','读取参数化建模源码','selection只能选一种模式：summary目录、lines行范围、characters字符范围、search字面查询。不要把返回窗口的全部行/字符元数据复制为参数。翻页只传nextChar作为characters.start，或search.start继续搜索。',Type.Object({componentId:Type.String(),selection:Type.Union([Type.Object({mode:Type.Literal('summary')},{additionalProperties:false}),Type.Object({mode:Type.Literal('lines'),start:Type.Integer({minimum:1}),end:Type.Optional(Type.Integer({minimum:1}))},{additionalProperties:false}),Type.Object({mode:Type.Literal('characters'),start:Type.Integer({minimum:0}),end:Type.Optional(Type.Integer({minimum:0}))},{additionalProperties:false}),Type.Object({mode:Type.Literal('search'),query:Type.String({minLength:1,maxLength:160}),start:Type.Optional(Type.Integer({minimum:0}))},{additionalProperties:false})])},{additionalProperties:false}),async(_id,args)=>{const {componentId,selection}=args;const saved=modelingProgramSource(draft,componentId);const selectors=selection.mode==='summary'?{}:selection.mode==='lines'?{startLine:selection.start,...(selection.end!==undefined?{endLine:selection.end}:{})}:selection.mode==='characters'?{startChar:selection.start,...(selection.end!==undefined?{endChar:selection.end}:{})}:{query:selection.query,...(selection.start!==undefined?{startChar:selection.start}:{})};try{return textResult(JSON.stringify({...readSource(saved.source,selectors),hint:'selection只选一种：{mode:summary}目录、{mode:lines,start:1,end:24}行、{mode:characters,start:0,end:3993}字符、{mode:search,query:const}搜索；nextChar仅作为characters.start或search.start，不要同时传行和字符。',createdAt:saved.createdAt,stage:saved.stage,note:saved.note,parts:saved.parts}));}catch(error){const overview=readSource(saved.source);throw Error((error instanceof Error?error.message:String(error))+'；读取恢复：'+JSON.stringify({componentId,chars:overview.chars,lineCount:overview.lineCount,version:overview.version,retry:{componentId,selection:{mode:'summary'}}}));}}),
+    tool('read_modeling_program','读取参数化建模源码','selection选一种：summary目录、lines行范围、characters字符范围、search字面查询。nextChar用于characters.start或search.start续读。',Type.Object({componentId:Type.String(),selection:Type.Union([Type.Object({mode:Type.Literal('summary')},{additionalProperties:false}),Type.Object({mode:Type.Literal('lines'),start:Type.Integer({minimum:1}),end:Type.Optional(Type.Integer({minimum:1}))},{additionalProperties:false}),Type.Object({mode:Type.Literal('characters'),start:Type.Integer({minimum:0}),end:Type.Optional(Type.Integer({minimum:0}))},{additionalProperties:false}),Type.Object({mode:Type.Literal('search'),query:Type.String({minLength:1,maxLength:160}),start:Type.Optional(Type.Integer({minimum:0}))},{additionalProperties:false})])},{additionalProperties:false}),async(_id,{componentId,selection})=>{
+      const saved=modelingProgramSource(draft,componentId);
+      const selectors=selection.mode==='summary'?{}:selection.mode==='lines'?{startLine:selection.start,...(selection.end!==undefined?{endLine:selection.end}:{})}:selection.mode==='characters'?{startChar:selection.start,...(selection.end!==undefined?{endChar:selection.end}:{})}:{query:selection.query,...(selection.start!==undefined?{startChar:selection.start}:{})};
+      try{
+        const source=readSource(saved.source,selectors);
+        const identity={componentId,version:source.version};
+        const sourceRead={...identity,...('window' in source?{startChar:source.window.startChar,endChar:source.window.endChar}:{})};
+        const summary=source.mode==='summary'?{stage:saved.stage,note:saved.note,parts:saved.parts}:{};
+        return {...textResult(JSON.stringify({...source,componentId,...summary})),details:{sourceRead}};
+      }catch(error){
+        throw Error((error instanceof Error?error.message:String(error))+'；读取恢复：'+JSON.stringify({componentId,chars:saved.source.length,retry:{componentId,selection:{mode:'summary'}}}));
+      }
+    }),
     tool('build_modeling_program','参数化构建模型','用JavaScript函数体构建自定义Three.js形体。source接收THREE命名空间，必须return命名Group/Object3D；单位米、Y向上，不写import、渲染器、灯光、文件、网络或DOM。普通Mesh独立命名，可共享几何和PBR材质。程序隔离运行，可手动取消，校验后原子写入可编辑草稿。blueprintKey引用结构方案，features绑定实际返回的部件名；剪影可只绑定已构建特征。replaceComponentId仅在明确需要重建整个组件时使用，必须返回完整组件。失败保留原件，成功仍须取景复核。',Type.Object({name:Type.String({minLength:1,maxLength:80}),summary:Type.String({minLength:1,maxLength:300}),blueprintKey:Type.String({minLength:1,maxLength:80}),source:Type.String({minLength:1}),stage:Type.Union([Type.Literal('silhouette'),Type.Literal('detailed')],{description:'silhouette为中间剪影，不能提交完成；detailed为已补齐完整功能/表面结构，仍需视觉复核'}),position:Type.Optional(Type.Tuple([Type.Number(),Type.Number(),Type.Number()])),replaceComponentId:Type.Optional(Type.String()),features:Type.Array(Type.Object({key:Type.String(),partNames:Type.Array(Type.String(),{minItems:1})}),{minItems:1,maxItems:16})}),async(_id,args)=>{
       check();if(preserveAssetShape)throw Error('当前要求保留已有形状，请使用现有部件局部编辑，不能脚本整体重建');
       const plan=activity.objectBlueprints?.find(p=>p.key===args.blueprintKey);if(!plan)throw Error('缺少blueprintKey='+args.blueprintKey+'的结构方案，尚未执行源码、未修改场景。当前可用方案：'+JSON.stringify((activity.objectBlueprints??[]).map(p=>({key:p.key,name:p.name,featureKeys:p.features.map(f=>f.key)})))+'。先调用plan_object_structure成功记录相同key；比例numerator/denominator.featureKey必须引用该objects项features[].key，不是对象key、节点ID或特征名称。已有组件局部改色/移动请用edit_scene，不需切换到新建构建。');
       if(options.images?.length){const coverage=referenceProportionPlanningCoverage([plan],true);if(coverage.issues.length)throw Error(coverage.issues.join('；'));}
       const generated=await runModelingProgram(args.source,signal);check();
       const programOps=modelingProgramCommands(draft,generated,args,plan);
-      return commitEdits({summary:args.summary,operations:programOps});
+      return commitEdits({summary:args.summary,operations:programOps,programVersion:sourceVersion(args.source)});
     }),
-    tool('patch_modeling_program','局部修改参数化源码并重建','先读取目录或相关片段，用expectedVersion和最多8个唯一且不重叠的find/replace修改源码，系统执行完整源码。读取分页不限制单段补丁长度，按修改后的整份源码校验。只重建明确授权的组件，保持其他组件与原位置朝向；动画、关联和位置锁仍生效。features可更新实际部件名，省略沿用当前绑定。源码不自动包含手动改动。',Type.Object({componentId:Type.String(),expectedVersion:Type.String(),stage:Type.Union([Type.Literal('silhouette'),Type.Literal('detailed')]),summary:Type.String({minLength:1,maxLength:300}),patches:Type.Array(Type.Object({find:Type.String({minLength:1}),replace:Type.String()}),{minItems:1,maxItems:8}),features:Type.Optional(Type.Array(Type.Object({key:Type.String(),partNames:Type.Array(Type.String(),{minItems:1})}),{minItems:1,maxItems:16}))}),async(_id,args)=>{
+    tool('patch_modeling_program','局部修改参数化源码并重建','用当前版本与最多8个唯一、不重叠的原样find/replace修改源码。已有构建/补丁回执的版本和精确片段可直接用，不确定片段才定向读取。只重建指定组件，保持位置朝向；动画、关联与位置锁仍生效，源码不自动包含手动改动。features省略则沿用当前绑定。',Type.Object({componentId:Type.String(),expectedVersion:Type.String(),stage:Type.Union([Type.Literal('silhouette'),Type.Literal('detailed')]),summary:Type.String({minLength:1,maxLength:300}),patches:Type.Array(Type.Object({find:Type.String({minLength:1}),replace:Type.String()}),{minItems:1,maxItems:8}),features:Type.Optional(Type.Array(Type.Object({key:Type.String(),partNames:Type.Array(Type.String(),{minItems:1})}),{minItems:1,maxItems:16}))}),async(_id,args)=>{
       check();if(preserveAssetShape)throw Error('当前要求保形，禁止脚本重建');
       const members=draft.nodes.filter(n=>(n.assemblyId??n.id)===args.componentId),saved=modelingProgramSource(draft,args.componentId);
       const binding=activity.featureBindings?.find(b=>b.componentId===args.componentId),plan=activity.objectBlueprints?.find(p=>p.key===binding?.blueprintKey);
@@ -386,7 +427,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
       const frame=structureFrame(members),edited=editSource(saved.source,{expectedVersion:args.expectedVersion,patches:args.patches});
       const generated=await runModelingProgram(edited.source,signal);check();
       const features=args.features??binding.features.map(f=>({key:f.key,partNames:[...new Set(f.nodeIds.map(id=>members.find(n=>n.id===id)?.name).filter((n):n is string=>!!n))]}));
-      return commitEdits({summary:args.summary,operations:modelingProgramCommands(draft,generated,{name:members[0].assemblyName??plan.name,source:edited.source,stage:args.stage,position:frame.origin,yaw:frame.yaw,replaceComponentId:args.componentId,features},plan)});
+      return commitEdits({summary:args.summary,programVersion:edited.version,operations:modelingProgramCommands(draft,generated,{name:members[0].assemblyName??plan.name,source:edited.source,stage:args.stage,position:frame.origin,yaw:frame.yaw,replaceComponentId:args.componentId,features},plan)});
     }),
     tool('enable_modeling_tools','批量切换建模工具组','一次启用所有需要的组，避免每组一轮；不再需要的组可用disableGroups移除参数定义。catalog目录；layout完整场景；diagnostics遮挡；animation动画；surfaces表面；interaction姿态；assets资产；connections接触。只改下一轮可用参数，不修改场景。',Type.Object({groups:Type.Array(Type.Union(OPTIONAL_TOOL_GROUP_NAMES.map(group=>Type.Literal(group))),{minItems:0,maxItems:8}),disableGroups:Type.Optional(Type.Array(Type.Union(OPTIONAL_TOOL_GROUP_NAMES.map(group=>Type.Literal(group))),{maxItems:8}))}),async(_id,args)=>{for(const group of args.disableGroups??[]){enabledToolGroups.delete(group);disabledToolGroups.add(group);}for(const group of args.groups){disabledToolGroups.delete(group);enabledToolGroups.add(group);}return textResult(JSON.stringify({enabled:[...enabledToolGroups],next:'已一次切换全部工具组；下一轮提供参数。不要分轮逐组启用，已提供的工具直接使用。'}));}),
     tool('detail_quality_standard','读取通用细节验收标准','适用于任何单独模型和完整场景，不限工业或已有网格。返回六项标准及本轮新增/改结构对象。按用途具体化，不以零件数当质量。无截图时只能待核对；有未达标项应先修正。',Type.Object({}),async()=>textResult(JSON.stringify({criteria:DETAIL_CRITERIA,acceptance:refreshDetail(),instruction:'先完成全部结构，再按每个目标的近景核对六项；按repairQueue先修明确缺陷，blocked不要重复取图，deferred保留缺陷并停止该项重试；无近景时保留未验收状态。现成网格也不豁免。'}))),
@@ -503,7 +544,16 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
       check();if(!visualAvailable())throw Error(unavailableStage());
       const plan=generationReviewPlan(qualityBase,draft,args.offset??0),content:({type:'text';text:string}|ImageContent)[]=[];
       if(args.componentIds?.length&&args.overviewOnly)throw Error('目标近景和仅全景不能同时指定');
-      if(args.componentIds?.length){if(args.offset)throw Error('指定目标时不使用offset');const allowed=new Set(detailTargets(qualityBase,draft).map(t=>t.id));if(new Set(args.componentIds).size!==args.componentIds.length||args.componentIds.some(id=>!allowed.has(id)))throw Error('目标必须是不重复的本轮实际变更组件');const targets=args.componentIds.map(id=>{const nodes=draft.nodes.filter(n=>(n.assemblyId??n.id)===id);return {id,name:nodes[0].assemblyName??nodes[0].name,partReferences:nodes.slice(0,24).map(n=>({id:n.id,name:n.name,geometry:n.geometry?.type})),remainingParts:Math.max(0,nodes.length-24),referenceNote:'当前目标实际部件，不代表验收',neighborIds:[] as string[],views:['front','back'] as const};});plan.targets=targets;plan.interactions=interactionTargets(draft).filter(t=>args.componentIds!.includes(t.id));plan.wholeViews=[];plan.totalTargets=targets.length;plan.nextOffset=null;}
+      const requirement=args.componentIds?.length?reviewRequirement(base,draft):undefined;
+      const priorWhole=requirement?.kind==='whole'?[...capturedViews].find(key=>key.startsWith(draft.revision+':')&&key.endsWith(':whole')&&!key.includes(':animation:')):undefined;
+      if(args.componentIds?.length){
+        if(args.offset)throw Error('指定目标时不使用offset');
+        const componentIds=args.componentIds,allowed=new Set(detailTargets(qualityBase,draft).map(t=>t.id));
+        if(new Set(componentIds).size!==componentIds.length||componentIds.some(id=>!allowed.has(id)))throw Error('目标必须是不重复的本轮实际变更组件');
+        const targets=componentIds.map(id=>{const nodes=draft.nodes.filter(n=>(n.assemblyId??n.id)===id);return {id,name:nodes[0].assemblyName??nodes[0].name,partReferences:nodes.slice(0,24).map(n=>({id:n.id,name:n.name,geometry:n.geometry?.type})),remainingParts:Math.max(0,nodes.length-24),referenceNote:'当前目标实际部件，不代表验收',neighborIds:[] as string[],views:['front','back'] as const};});
+        plan.targets=targets;plan.interactions=interactionTargets(draft).filter(t=>componentIds.includes(t.id));plan.totalTargets=targets.length;plan.nextOffset=null;
+        if(priorWhole||requirement?.kind!=='whole')plan.wholeViews=[];
+      }
       if(args.overviewOnly){if(args.offset)throw Error('仅全景不使用offset');plan.targets=[];plan.interactions=[];plan.nextOffset=null;}
       const evidence:{key:string;scope:string}[]=[];
       let subjectCoversWhole=false;
@@ -527,8 +577,10 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
       for(const view of subjectCoversWhole?[]:plan.wholeViews){const data=await captureDraft(view);check();content.push({type:'text',text:`真实检查图 ${usedSoftwareCapture?'software几何检查，可能因预算降低分辨率；看不清须待验，材质未验收 ':''}revision=${draft.revision} scope=whole view=${view}`},asImage(data));evidence.push({key:`${draft.revision}:${view}:whole`,scope:'whole'});}
       if(!evidence.length)throw Error('该偏移没有检查目标；请使用返回的nextOffset或结束检查');
       for(const e of evidence)capturedViews.add(e.key);
-      const last=subjectCoversWhole?evidence.find(e=>e.scope==='whole')!:evidence[evidence.length-1];latestCaptureKey=last.key;captureScope=last.scope;capturedRevision=draft.revision;capturedTurn=calls;progress();
-      content.unshift({type:'text',text:JSON.stringify({...plan,objectBlueprints:activity.objectBlueprints??[],renderLimitations:usedSoftwareCapture?'软件几何检查，不支持PBR、纹理、阴影、精确透明度，材质项必须unknown':'正常渲染检查',next:'先读取真实图片并对照参考图核对主体轮廓、比例、开口及功能结构。下一轮review_model({detailReviews,completion})可一次记录本组细节并提交；仍有分页时省略completion，或用audit_model_details_batch保留本页证据后继续。明确形体差异先局部修正并重新取图；无法判断必须unknown。'})});
+      const last=subjectCoversWhole?evidence.find(e=>e.scope==='whole')!:evidence[evidence.length-1];
+      // Reuse whole scope, but review_model still requires delivery of the actual evidence.
+      latestCaptureKey=priorWhole??last.key;captureScope=priorWhole?'whole':last.scope;capturedRevision=draft.revision;capturedTurn=calls;progress();
+      content.unshift({type:'text',text:JSON.stringify({...plan,renderLimitations:usedSoftwareCapture?'软件几何检查，不支持PBR、纹理、阴影、精确透明度，材质项必须unknown':'正常渲染检查',next:'先读取真实图片并对照参考图核对主体轮廓、比例、开口及功能结构。'+(priorWhole?'当前版本全景已获取；若尚未送达，用recall_evidence取回全景后再复核。':'')+'下一轮review_model({detailReviews,completion})可一次记录本组细节并提交；仍有分页时省略completion，或用audit_model_details_batch保留本页证据后继续。明确形体差异先局部修正并重新取图；无法判断必须unknown。'})});
       emit('已获取当前版本验收图组，等待下一轮读取画面',true);return {content,details:{revision:draft.revision,scope:captureScope,reviewPlan:plan}};
     }),
     tool('inspect_view_visibility','选择较少遮挡的视角','当实际近景被遮挡时，按1–96个真实目标节点估计八个视角的可见面积，推荐两个方向。保留完整场景遮挡，不移动或隐藏对象，不代替实际截图或细节验收；透明表面近似。仅为选角，无需对每个对象重复调用。',Type.Object({targetIds:Type.Array(Type.String(),{minItems:1,maxItems:96})}),async(_id,args)=>textResult(JSON.stringify(await suggestVisibleViews(draft,args.targetIds,signal)))),
@@ -578,7 +630,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
       const reviews=prepareDetailReviews(args.detailReviews??[]);
       for(const id of args.resolvedDifferenceIds??[]){const repair=referenceRepairs.find(item=>item.id===id);if(repair&&!hasRepairView(draft,repair.nodeIds,repair.view))throw Error('解决参考形体差异前请获取当前版本的声明视角截图：'+repair.view);}
       const nextRepairs=updateFormRepairs(updateReferenceRepairs(draft,referenceRepairs,args.referenceDifferences??[],args.resolvedDifferenceIds??[]),reviews);
-      const nextBlockers=[...confirmedCompletionIssues(args.issues,true),...nextRepairs.map(item=>`参考形体差异 ${item.id}：${item.observed}；目标：${item.expected}；修复：${item.action}`)];
+      const nextBlockers=[...confirmedCompletionIssues(args.issues,true),...nextRepairs.map(item=>referenceBlocker(item,true))];
       if(completionBlockers.length&&!nextBlockers.length&&completionFingerprint===visualFingerprint(draft)&&completionEvidence===latestCaptureKey.split(':').slice(1).join(':'))throw Error('此前已确认的问题尚未修复或补充新证据，不能只清空问题列表。请实际修改模型，或换视角/动态时间点取证后再复核。');
       if(!reviewedViews.has(latestCaptureKey)){reviewedViews.add(latestCaptureKey);progress();}
       recordDetailReviews(reviews,nextRepairs);
@@ -608,10 +660,10 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
       remaining.push(...unchecked.map(r=>`需求${r.status==='mismatch'?'不符':'待核对'}：${r.quote}；${r.actual}`));
       const detailFailures=detail.reviews.flatMap(review=>review.checks.filter(item=>item.status==='fail').map(item=>`${review.componentId}：${item.evidence}`));
       const proportionIssues=activity.blueprintCoverage.objects.flatMap(item=>item.referenceProportions.issues);
-      const blockers=[...new Set([...confirmedCompletionIssues(reviewIssues,true),...confirmedCompletionIssues(args.remainingIssues),...detailFailures,...proportionIssues,...referenceRepairs.map(item=>`参考形体差异 ${item.id}：${item.observed}；${item.action}`),...unchecked.filter(item=>item.status==='mismatch').map(item=>`需求不符：${item.quote}；${item.actual}`)])];
+      const blockers=[...new Set([...confirmedCompletionIssues(reviewIssues,true),...confirmedCompletionIssues(args.remainingIssues),...detailFailures,...proportionIssues,...referenceRepairs.map(item=>referenceBlocker(item,false)),...unchecked.filter(item=>item.status==='mismatch').map(item=>`需求不符：${item.quote}；${item.actual}`)])];
       if(completionBlockers.length&&!blockers.length)throw Error('仍有上次提交记录的未解决问题，请先实际修复并重新复核，不能通过清空剩余问题结束任务。');
       recordCompletionBlockers(blockers);
-      if(completionBlockers.length)throw Error('仍有已确认缺陷或未完成的功能，不能作为完成预览提交：'+completionBlockers.join('；')+'。请保留有效草稿，局部修复或补足对应动态样本，再获取最新证据复核。不要把原任务缩成局部诊断；若达到预算或无法继续，系统会保留未完成草稿。');
+      if(completionBlockers.length)throw Error('仍有已确认缺陷或未完成的功能，不能作为完成预览提交：'+completionBlockers.join('；')+'。请保留有效草稿，局部修复或补足对应动态样本，再获取最新证据复核。不要把原任务缩成局部诊断；无法继续时，系统会保留未完成草稿。');
       const {missingViews,missingVerdicts}=shapeReviewProgress();
       if(missingViews.length)throw Error(missingViews.slice(0,8).map(t=>`${shapeReviewIssue(t.name)} 用 capture_quality_review({componentIds:[${JSON.stringify(t.id)}]}) 或 capture_multiview 指定组件取图；下一轮复核。`).join('；'));
       if(missingVerdicts.length)throw Error(missingVerdicts.slice(0,8).map(t=>shapeVerdictIssue(t.name)).join('；'));
@@ -660,11 +712,10 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
   if(options.workerTask){const allowed=new Set(['read_scene_contract','patch_modeling_program','build_modeling_program','read_modeling_program','retry_structured_component','bind_object_features','repair_structured_features','build_structured_component','read_saved_asset','inspect_asset_instances','align_saved_instances','plan_object_structure','bind_object_features','list_saved_assets','add_saved_assets','edit_scene','read_scene','find_scene_parts','list_mesh_components','add_mesh_component','add_mesh_components','read_component_recipe','add_reference_component','set_surface_detail','set_surfaces_batch','prepare_surface_uv','detail_quality_standard','inspect_scene','check_requirements','submit_data_preview']);for(let i=tools.length-1;i>=0;i--)if(!allowed.has(tools[i].name))tools.splice(i,1);}
   const model:Model<'openai-completions'>={id:cfg.model,name:cfg.model,api:'openai-completions',provider:'chat3d-gateway',baseUrl:cfg.baseURL.trim().replace(/\/+$/,''),reasoning:false,input:['text','image'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:32768,maxTokens:0,compat:{supportsDeveloperRole:false,supportsReasoningEffort:false,supportsStore:false,supportsUsageInStreaming:true}};
   const prompt=buildModelingPrompt({draft,base,selection:selectionForDoc(draft),editScope:options.editScope,history:options.history,workerTask:options.workerTask,wantsAnimation,visualAvailable:visualAvailable(),parallelEnabled,preserveAssetShape,hasReferenceImages:!!options.images?.length});
+  const editParameters=tools.find(t=>t.name==='edit_scene')?.parameters;
+  const wireEditParameters=editParameters?compactSceneEditParameters(editParameters):undefined;
   const underlyingFetch=options.streamFn?undefined:await getFetch();
   let transportFailure='';
-  const f:typeof fetch|undefined=underlyingFetch?async(input,init)=>{try{return await underlyingFetch(input,init);}catch(error){
-    if(!signal?.aborted)transportFailure=(error instanceof Error?error.message:'网络请求失败').split(cfg.apiKey||'\u0000').join('[已隐藏]').slice(0,700);throw error;
-  }}:undefined;
   let calls=0;
   const seenCalls=new Set<string>();
   const steeringMessages=new Map<number,{id:string;text:string;mode:'guide'|'question'}>();
@@ -673,7 +724,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
   const toolInputs=new Set<string>();
   const runner=new Agent({
     initialState:{model,systemPrompt:prompt,tools,thinkingLevel:cfg.reasoningEffort??'off'},toolExecution:'sequential',
-    transformContext:async messages=>evidenceContext.prepare(messages,compactAgentContext(messages),draft.revision),
+    transformContext:async messages=>evidenceContext.prepare(messages,compactAgentContext(messages,currentSourceVersion),draft.revision),
     streamFn:async(m,context,streamOptions)=>{
       for(const packet of evidenceContext.active())for(const image of packet.images)if(image.revision===draft.revision)for(const scope of image.scopes)for(const view of image.views)consumedViews.add(`${draft.revision}:${view}:${scope}`);
       let newlyDelivered=false;
@@ -686,9 +737,17 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
       transportFailure='';calls++;turnActions=[];turnErrors=[];activity.turn=calls;activity.timings=[...activity.timings,{id:`model-${calls}`,kind:'model',label:`模型第 ${calls} 轮`,startedAt:Date.now()}];emit(`第 ${calls} 轮：等待模型决定下一步`);
       const recoveryNote=stagnantTurns>=2?'\n已连续无有效进展：不要重复read_scene或plan_model。若有校验错误，先修正失败参数；若计划已记录，执行一个最小有效edit_scene；若模型已完成，按review要求检查并提交；非视觉修改可直接提交。无法继续应明确说明阻碍。':'';
       const animationNext=wantsAnimation?(!activity.plan.length?'本轮用户要求实际动画：先plan_model，然后configure_animation。':JSON.stringify(draft.animation)===JSON.stringify(base.animation)?'本轮动画尚未创建或修改：下一步应configure_animation，不要只反复read_scene/capture_view。':animationCheckedRevision!==draft.revision?'动画已配置：下一步preview_animation。':reviewedWholeRevision!==draft.revision?'动态样本已返回：下一轮review_model。':'动态复核已完成：若需求已满足，下一步submit_preview。'):'';
-      const completionNote=(actionableDefects().length?'\n待闭环的明确缺陷：'+actionableDefects().join('；')+'。在本轮授权范围内直接修改对应几何/材质并复核，不等用户再次指令，不用截图或填表代替修复。':'')+(referenceRepairs.length?'\n形体修复单：'+JSON.stringify(referenceRepairReport(referenceRepairs)):'');
-      const agenda=repairAgenda();
-      const inspectionNote=JSON.stringify({phase:activity.phase,evidenceReadiness:captureReviewState(),quality:activity.quality?{revision:activity.quality.revision,issues:activity.quality.issues}:undefined,structureIssues:activity.blueprintCoverage?.issues,detail:activity.detailAcceptance?{revision:activity.detailAcceptance.revision,status:activity.detailAcceptance.status,issues:activity.detailAcceptance.issues,targets:activity.detailAcceptance.targets.map(t=>({id:t.id,name:t.name}))}:undefined});
+      const references=referenceRepairReport(referenceRepairs),referenceBlockers=new Set(referenceRepairs.flatMap(item=>[referenceBlocker(item,true),referenceBlocker(item,false)]));
+      const blockers=completionBlockers.filter(issue=>!referenceBlockers.has(issue));
+      const agenda=buildRepairAgenda({document:draft,referenceRepairs:references,detailReviews,reviewIssues,completionBlockers:blockers,capturedRevision,reviewedRevision});
+      // The agenda is bounded. Carry forward only the active defects its detailed entries omit.
+      const listedReferences=new Set(agenda.defects.filter(item=>item.source==='reference-difference').map(item=>item.id));
+      const additionalReferences=references.filter(item=>!listedReferences.has(item.id)).map(({id,featureKey,nodeIds,observed,expected,action,view})=>({id,featureKey,nodeIds,observed,expected,action,view}));
+      const listedDetails=new Set(agenda.defects.filter(item=>item.source==='detail-fail').map(item=>`${item.id}：${item.observed}`));
+      const additionalDetails=[...new Set(detailReviews.flatMap(review=>review.checks.flatMap(check=>check.status==='fail'&&!listedDetails.has(`${review.componentId}:${check.criterion}：${check.evidence}`)?[`${review.componentId}：${check.evidence}`]:[])))];
+      const additionalBlockers=blockers.slice(agenda.completionBlockers.length);
+      const completionNote=(additionalReferences.length||additionalDetails.length||additionalBlockers.length?'\n其余待闭环缺陷：'+JSON.stringify({additionalReferences,additionalDetails,additionalBlockers}):'')+(agenda.totalDefects||blockers.length?'\n在本轮授权范围内直接修改对应几何/材质并复核；参考差异以ID复核，不用截图或填表代替修复。':'');
+      const inspectionNote=JSON.stringify({phase:activity.phase,evidenceReadiness:captureReviewStatus(),quality:activity.quality?{revision:activity.quality.revision,issues:activity.quality.issues}:undefined,structureIssues:activity.blueprintCoverage?.issues,detail:activity.detailAcceptance?{revision:activity.detailAcceptance.revision,status:activity.detailAcceptance.status,issues:activity.detailAcceptance.issues}:undefined});
       const commandRecoveryNote=pendingCommandRecovery&&pendingCommandRecovery.revision===draft.revision&&pendingCommandRecovery.scope===executionTexts.join('\n')&&!questionOnly?'\n内部自动恢复：只纠正原失败批次'+pendingCommandRecovery.failedId+'，不要向用户展示命令、字段、ID或要求用户修复。按以下报告用retry_scene_edit一次补齐可确定字段；无法确定的数值不能猜。用户补充要求优先，过期批次不重放。\n'+pendingCommandRecovery.report:'';
       const runNote=`\n${continuation?'本轮继续此前需求：'+resolvedIntent.slice(0,500)+'。':''}当前第${calls}轮，连续${stagnantTurns}轮没有有效进展。${animationNext}${recoveryNote}${completionNote}\n差异驱动下一步（建议不代替校验）：${JSON.stringify(agenda)}\n当前检查摘要：${inspectionNote}`;
       context={...context,messages:[...context.messages,{role:'user',content:[{type:'text',text:'运行时状态（不是新增用户要求；用户最新补充指令优先）：'+runNote}],timestamp:Date.now()}]};
@@ -710,7 +769,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
       }
       if(localFocus&&!localFocus.ids.every(id=>draft.nodes.some(n=>(n.assemblyId??n.id)===id)))localFocus=undefined;
       if(localFocus)context={...context,messages:context.messages.map(m=>m.role==='system'&&typeof m.content==='string'?{...m,content:m.content.replace(/# 场景上下文[\s\S]*?(?=\n本次编辑约束：)/,'# 场景上下文\n当前已选择局部上下文，以最近prepare_local_edit或编辑结果的目标/邻近信息为准；完整场景保留，其他对象只需摘要。\n')}:m)};
-      context={...context,messages:normalizeModelingRequestMessages(context.messages)};
+      context={...context,messages:normalizeModelingRequestMessages(context.messages.map(message=>message.role==='system'&&wireEditParameters?{...message,toolsAdded:message.toolsAdded?.map(t=>t.name==='edit_scene'?{...t,parameters:wireEditParameters}:t)}:message))};
       stamp(`model-${calls}`,{requestFootprint:measureRequestFootprint(context)});
       // Keep generic gateway compatibility: send only the user's explicit wire value,
       // without enabling SDK provider/model-name heuristics or emitting an "off" value.
@@ -724,8 +783,31 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
         return body;
       }};
       if(options.streamFn)return options.streamFn(m,context,streamOptions);
-      return stream(model,context,{...streamOptions,apiKey:cfg.apiKey.trim(),fetch:f,maxRetries:0,timeoutMs:AGENT_LIMITS.idleTimeoutMs,
-        onProviderStreamEvent:data=>{options.onDiagnostic?.('provider_event',data);if(providerHasUsage(data))providerUsageRounds.add(calls);firstData();emit(activity.title);},onResponse:()=>{stamp(`model-${calls}`,{responseAt:Date.now()});emit(`第 ${calls} 轮：服务已响应，正在接收`);} });
+      const round=calls,id=`model-${round}`;
+      const noData=new AbortController();
+      const requestSignal=streamOptions.signal?AbortSignal.any([streamOptions.signal,noData.signal]):noData.signal;
+      let receivedData=false;
+      const firstDataTimer=setTimeout(()=>{
+        if(requestSignal.aborted||receivedData)return;
+        transportFailure=NO_MODEL_DATA;
+        noData.abort(new Error(NO_MODEL_DATA));
+      },FIRST_BODY_DATA_TIMEOUT_MS);
+      const observedFetch=observeStreamingFetch(underlyingFetch!,()=>{
+        if(!receivedData){
+          receivedData=true;clearTimeout(firstDataTimer);
+          stamp(id,{firstDataAt:Date.now()});emit(`第 ${round} 轮：模型正在处理`);
+        }else emit(activity.title);
+      });
+      const response=stream(model,context,{...streamOptions,signal:requestSignal,apiKey:cfg.apiKey.trim(),maxRetries:0,timeoutMs:AGENT_LIMITS.idleTimeoutMs,
+        fetch:async(input,init)=>{try{return await observedFetch(input,init);}catch(error){
+          if(!requestSignal.aborted)transportFailure=(error instanceof Error?error.message:'网络请求失败').split(cfg.apiKey||'\u0000').join('[已隐藏]').slice(0,700);
+          throw error;
+        }},
+        onProviderStreamEvent:data=>{options.onDiagnostic?.('provider_event',data);if(providerHasUsage(data))providerUsageRounds.add(round);},
+        onResponse:()=>{stamp(id,{responseAt:Date.now()});},
+      });
+      void response.result().finally(()=>clearTimeout(firstDataTimer));
+      return response;
     },
     beforeToolCall:async({toolCall})=>{check();if(stageReason)return {block:true,reason:stageReason,terminate:true};if(!visualAvailable()&&['audit_model_detail','audit_model_details_batch'].includes(toolCall.name))return {block:true,reason:'当前无可用画面证据，系统已自动标记细节未验收；无需逐项填写unknown。继续完成数据编辑与必要数量检查，然后submit_data_preview。'};if(!visualAvailable()&&(['capture_view','capture_multiview','capture_quality_review','capture_detail_diagnostic','capture_component_intrinsic','preview_animation','review_model'].includes(toolCall.name)||(toolCall.name==='submit_preview'&&reviewRequirement(base,draft).kind!=='none')))return {block:true,reason:unavailableStage(),terminate:true};if(runner.hasQueuedMessages())return {block:true,reason:'用户补充了新指令，请先读取并按最新要求重新决定操作',terminate:true};if(questionOnly&&['patch_modeling_program','build_modeling_program','retry_structured_component','bind_object_features','repair_structured_features','build_structured_component','align_saved_instances','add_saved_assets','retry_scene_edit','define_pose_rig','pose_with_rig','bend_existing_mesh','pose_existing_parts','pose_bimanual_interaction','pose_arm_interaction','create_hand_pose','edit_scene','configure_animation','configure_process_route','add_reference_component','add_mesh_component','add_mesh_components','connect_scene_parts','remove_connection','set_surface_detail','set_surfaces_batch','build_components_parallel','prepare_surface_uv','move_components','submit_data_preview','submit_preview'].includes(toolCall.name))return {block:true,reason:'用户当前选择只提问，请直接回答，不要修改或提交场景',terminate:true};if(seenCalls.has(toolCall.id))return {block:true,reason:'重复的工具调用ID已拒绝，避免重复修改'};seenCalls.add(toolCall.id);if(submitted)return {block:true,reason:'本轮已提交预览',terminate:true};if(pauseReason)return {block:true,reason:pauseReason,terminate:true};activity.toolCalls++;return undefined;},
     finishTurn:async({message})=>{
@@ -804,14 +886,17 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
     }
     if(event.type==='message_update'){
       const e=event.assistantMessageEvent;
-      if(e.type==='text_delta'){
+      if(e.type==='text_delta'&&e.delta.length){
         const id=`explanation-${calls}`;const entries=activity.explanations??[];const existing=entries.find(v=>v.id===id);const previous=existing?.text??'';
         activity.explanations=[...entries.filter(v=>v.id!==id),{id,createdAt:existing?.createdAt??Date.now(),phase:existing?.phase??activity.phase,text:(previous+e.delta).slice(0,4000)}];
       }
-      if(e.type==='toolcall_start'||e.type==='toolcall_delta'){const pending=e.partial.content[e.contentIndex];if(pending?.type==='toolCall'&&tools.some(t=>t.name===pending.name))stamp(`model-${calls}`,{pendingToolName:pending.name});}
-      if(e.type==='text_delta'||e.type==='toolcall_delta'){
+      const toolEvent=e.type==='toolcall_start'||e.type==='toolcall_delta';
+      const pending=toolEvent?e.partial.content[e.contentIndex]:undefined;
+      const deltaLength=e.type==='text_delta'||e.type==='toolcall_delta'?e.delta.length:0;
+      if(pending?.type==='toolCall'&&tools.some(t=>t.name===pending.name))stamp(`model-${calls}`,{pendingToolName:pending.name});
+      if(deltaLength||pending?.type==='toolCall'&&(pending.id||pending.name)){
         firstData();const timing=activity.timings.find(t=>t.id===`model-${calls}`);if(timing?.firstContentAt===undefined)stamp(`model-${calls}`,{firstContentAt:Date.now()});
-        activity.characters+=e.delta.length;emit(e.type==='toolcall_delta'?'正在接收建模工具参数':'正在接收模型回复');
+        activity.characters+=deltaLength;emit(toolEvent?'正在接收建模指令':'正在接收模型回复');
       }
     }
     if(event.type==='message_end' && event.message.role==='assistant'){
@@ -838,6 +923,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
     }});
     await runner.prompt(options.text||'请根据参考图建模',(options.images??[]).map(asImage));check();
     const last=[...runner.state.messages].reverse().find(m=>m.role==='assistant');
+    if(transportFailure===NO_MODEL_DATA)throw new Error(transportFailure);
     if(last?.role==='assistant' && (last.stopReason==='error'||last.stopReason==='aborted'))throw new Error(transportFailure||last.errorMessage||'模型服务未完成请求，请检查工具调用兼容性');
     if(operations.length&&!submitted){emit('本轮结束，已保留未完成阶段草稿',true);return checkpoint(stageReason|| (pauseReason?(pauseReason+'\n原始工具错误：'+rootToolErrors.join('；')):last?.role==='assistant'&&last.stopReason==='stop'&&last.content.some(c=>c.type==='text')?last.content.filter(c=>c.type==='text').map(c=>c.text).join('\n'):'本轮未完成“最新截图→复核→提交”，没有自动修改正式场景。'));}
     if(!operations.length&&stageReason)throw new Error(stageReason);
@@ -849,7 +935,8 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
   } catch(error) {
     activity.outcome=signal?.aborted?'cancelled':'failed';
     activity.timings=activity.timings.map(t=>t.endedAt===undefined?{...t,endedAt:Date.now(),failed:true,detail:signal?.aborted?'用户停止，操作未完成':'执行中断，操作未完成'}:t);
-    if(operations.length && !signal?.aborted){emit('任务中断，已保留阶段草稿',true);return checkpoint(stageReason||(error instanceof Error?error.message:'模型请求中断'));}
+    // Let the controller record the retryable failure and restore its last validated checkpoint.
+    if(operations.length && !signal?.aborted && transportFailure!==NO_MODEL_DATA){emit('任务中断，已保留阶段草稿',true);return checkpoint(stageReason||(error instanceof Error?error.message:'模型请求中断'));}
     emit(activity.title);throw error;
   } finally {acceptingSteering=false;options.onControl?.(null);unsubscribe();signal?.removeEventListener('abort',abort);}
 }
