@@ -1,6 +1,7 @@
 export interface UpdateHistoryEntry {version:string;date:string;changes:readonly string[]}
 /** Historical dates are version-commit times, not asserted deployment times. Newest first. */
 export const UPDATE_HISTORY:readonly UpdateHistoryEntry[]=[
+ {version:'0.2.48',date:'2026-11-19T18:07:30+08:00',changes:['团队库会列出后台管理库中的未归档资产和场景，不只是已用 Chat3D 发布的条目','后台直接上传的 GLB 可在团队库中获取，并按导入 GLB 的方式打开到本地','已发布的 Chat3D 资产和看板库的获取、预览行为不变']},
  {version:'0.2.47',date:'2026-11-19T08:06:15+08:00',changes:['会话保存失败会显示存储层返回的错误原因；可下载备份、导入备份或直接重试，写入成功后才解除保存锁','连续建模区分等待响应、模型处理中和正在接收内容；完全收不到正文时会超时并保留草稿，有数据到达时不会当成静默失败','发给模型的工具参数声明去掉重复的几何字段定义；构建和补丁回执带上当前组件与源码版本，避免把已过期或已被覆盖的源码窗口再次完整送回','参考图任务的说明改为优先主比例、截面、转折和有深度的构造']},
  {version:'0.2.46',date:'2026-11-17T13:41:44+08:00',changes:['团队登录固定显示账号、密码和可编辑的服务地址，并保留「登录授权」','默认团队服务地址仍为 https://portal.jiezi-ai.com；浏览器仍可使用当前站点地址，成功登录后记住的地址优先','允许回环、RFC1918 和 Tailscale CGNAT（100.64/10）地址使用私有 HTTP；仍拒绝公共 HTTP，以及含凭据、路径、查询或片段的服务地址']},
  {version:'0.2.45',date:'2026-11-16T22:12:50+08:00',changes:['团队资产和团队场景可在后台直接选文件上传发布，不必先保存到本地库','支持导出的资产或场景 JSON，也支持自包含 GLB 直传；同一份 GLB 在资产页发布为资产，在场景页发布为场景','可发布为新项，或由所有者、管理员追加新版本；上传显示进度和明确的成功或失败，失败可重试','原有从本地库「发布到团队」的路径保持不变']},
