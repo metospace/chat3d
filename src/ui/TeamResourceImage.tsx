@@ -20,6 +20,6 @@ export function TeamResourceImage({row,load,onOpen}:{row:TeamItem;load:TeamPrevi
   if(host.current)observer?.observe(host.current);
   return ()=>{stop();observer?.disconnect();};
  },[load,row,attempt,lazy]);
- const content=thumbnail?<img src={thumbnail.image} alt={`${row.name} 团队固定版本 v${row.version}${onOpen?'缩略图':'预览'}`} onError={()=>{render.current=true;setThumbnail(undefined);setError('预览图片无法显示，请重试生成');}}/>:<span className="team-resource-image-status">{error?'预览不可用':'正在读取真实预览…'}</span>;
+ const content=thumbnail?.image?<img src={thumbnail.image} alt={`${row.name} 团队固定版本 v${row.version}${onOpen?'缩略图':'预览'}`} onError={()=>{render.current=true;setThumbnail(undefined);setError('预览图片无法显示，请重试生成');}}/>:<span className="team-resource-image-status">{thumbnail?'暂无缩略图':error?'预览不可用':'正在读取真实预览…'}</span>;
  return <div ref={host} className={onOpen?'team-resource-cover':'team-preview-image'}>{onOpen?<button className="team-resource-preview-button" aria-label={`预览 ${row.name}`} onClick={onOpen}>{content}</button>:content}{error?<div className="team-resource-image-error"><span role="status">{error}</span><Button size="small" aria-label={`重试 ${row.name} 预览`} onClick={()=>setAttempt(value=>value+1)}>重试预览</Button></div>:thumbnail?.notice&&<span className="team-resource-image-notice">{thumbnail.notice}</span>}</div>;
 }

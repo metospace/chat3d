@@ -2,7 +2,7 @@ import {useEffect,useRef,useState,useSyncExternalStore} from 'react';
 import {Button as AntButton,Input,Tag} from 'antd';
 import {PortalDialog} from './kit/PortalDialog';
 import {Cross1Icon,UploadIcon,DownloadIcon} from '@radix-ui/react-icons';
-import {acquireLinkedTeamVersion,beginTeamAuthorization,defaultTeamServiceBase,getTeamSession,getTeamSessionStatus,listTeamPublishSources,loginTeamSession,logoutTeamSession,prepareTeamPublications,publishPreparedTeamBatch,rememberedTeamServiceBase,resolveTeamPublishTarget,resumeTeamFromPlatformAuth,subscribeTeamSession,type PreparedTeamPublication,type TeamItem,type TeamLocalSource,type TeamPreparationProgress,type TeamPublishSource} from '../domain/teamLibrary';
+import {acquireLinkedTeamVersion,loadTeamVersion,beginTeamAuthorization,defaultTeamServiceBase,getTeamSession,getTeamSessionStatus,listTeamPublishSources,loginTeamSession,logoutTeamSession,prepareTeamPublications,publishPreparedTeamBatch,rememberedTeamServiceBase,resolveTeamPublishTarget,resumeTeamFromPlatformAuth,subscribeTeamSession,type PreparedTeamPublication,type TeamItem,type TeamLocalSource,type TeamPreparationProgress,type TeamPublishSource} from '../domain/teamLibrary';
 import {OperationProgress,nextProgressPaint} from './OperationProgress';
 import {listModelAssets} from '../domain/modelAssetStorage';
 import {useWorkspaceStore} from '../workspace';
@@ -72,7 +72,7 @@ export function TeamTransferDialog({kind,mode,sources,items,serviceOrigin,onClos
   }
   if(mode==='publish')await publishPreparedTeamBatch(client,publishEntries,reportBatch);
   else {
-   for(const entry of acquisitions){if(entry.status==='success')continue;entry.status='running';entry.error=undefined;reportBatch();try{const fixed=await client.read(entry.item);if(fixed.id!==entry.item.id||fixed.kind!==kind||fixed.version!==entry.item.version)throw Error('团队服务返回的固定版本不匹配');const result=await acquireLinkedTeamVersion(client,fixed);entry.reused=result.reused;entry.link=result.link;entry.status='success';}catch(error){entry.status='error';entry.error=error instanceof Error?error.message:'获取失败，可重试';}reportBatch();}
+   for(const entry of acquisitions){if(entry.status==='success')continue;entry.status='running';entry.error=undefined;reportBatch();try{const fixed=await loadTeamVersion(client,entry.item);if(fixed.id!==entry.item.id||fixed.kind!==kind||fixed.version!==entry.item.version)throw Error('团队服务返回的固定版本不匹配');const result=await acquireLinkedTeamVersion(client,fixed);entry.reused=result.reused;entry.link=result.link;entry.status='success';}catch(error){entry.status='error';entry.error=error instanceof Error?error.message:'获取失败，可重试';}reportBatch();}
    if(kind==='asset'&&acquisitions.some(entry=>entry.link))try{const ids=new Set(acquisitions.map(entry=>entry.link?.localId));const rows=await listModelAssets();if(alive.current)setLocalNames(Object.fromEntries(rows.filter(row=>ids.has(row.id)).map(row=>[row.id,row.name])));}catch{/* The stored identity still supports location if names could not be read. */}
   }
   if(results.some(entry=>entry.status==='success'))onCompleted?.();

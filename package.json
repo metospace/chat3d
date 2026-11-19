@@ -21,7 +21,7 @@
     "test:full-scenes": "node tests/full-scene-replay.mjs",
     "build:team": "node scripts/build-team.mjs",
     "build:team-web": "node scripts/build-team-web.mjs",
-    "test:team": "npm run build:team && npm run build:team-web && node tests/auth-transport.mjs && node tests/team-publish.mjs && node tests/team-file-upload.mjs && node tests/team-categories.mjs && node tests/team-auth-resources.mjs && node tests/team-library.mjs && node tests/team-client.mjs && node tests/team-resource-links.mjs && node tests/team-ui.mjs && node tests/team-web.mjs && node tests/team-oauth-callback.mjs && node tests/team-static.mjs",
+    "test:team": "npm run build:team && npm run build:team-web && node tests/auth-transport.mjs && node tests/team-publish.mjs && node tests/team-file-upload.mjs && node tests/team-management-glb.mjs && node tests/team-categories.mjs && node tests/team-auth-resources.mjs && node tests/team-library.mjs && node tests/team-client.mjs && node tests/team-resource-links.mjs && node tests/team-ui.mjs && node tests/team-web.mjs && node tests/team-oauth-callback.mjs && node tests/team-static.mjs",
     "test:scene-quality": "node tests/scene-quality-browser.mjs",
     "test:realistic-rendering": "node tests/realistic-rendering.mjs",
     "test:diagnostic-export": "node tests/diagnostic-export-browser.mjs",
