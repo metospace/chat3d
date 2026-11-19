@@ -40,6 +40,32 @@ try{
  await test('stale revisions cannot remove or overwrite newer records',async()=>{const before=await records();await assert.rejects(()=>storage.writeWorkspace({...pack,sessions:[{id:'stale',snapshot:{doc:{nodes:[{id:'wrong'}]}}}]},pack.revision-1),/另一个标签页/);assert.deepEqual(await records(),before);assert.deepEqual(await storage.readWorkspace(),pack)});
  await test('older app database version cannot overwrite upgraded storage',async()=>{await new Promise((resolve,reject)=>{const r=indexedDB.open(dbname,1);r.onerror=()=>{assert.equal(r.error.name,'VersionError');resolve()};r.onsuccess=()=>{r.result.close();reject(Error('old database reopened'))}})});
  await test('aborted serialization leaves previous revision and data intact',async()=>{const bad={...pack,sessions:[{...pack.sessions[0],snapshot:{...pack.sessions[0].snapshot,lastRun:()=>{}}}]};await assert.rejects(()=>storage.writeWorkspace(bad,pack.revision));const restored=await storage.readWorkspace();assert.equal(restored.revision,pack.revision);assert.deepEqual(restored.sessions,pack.sessions)});
+ await test('request errors keep their name and message even without a transaction error callback',async()=>{
+  const put=IDBObjectStore.prototype.put;
+  IDBObjectStore.prototype.put=function(value,key){
+   if(key!=='current')return put.call(this,value,key);
+   const request=this.add(value,key); // A second insert of the manifest fails asynchronously.
+   request.addEventListener('error',event=>event.stopPropagation());
+   return request;
+  };
+  try{await assert.rejects(()=>storage.writeWorkspace(pack,pack.revision),/ConstraintError.*constraint/i);}
+  finally{IDBObjectStore.prototype.put=put;}
+  assert.deepEqual(await storage.readWorkspace(),pack);
+ });
+ await test('abort without an error event reports the commit error from the transaction',async()=>{
+  const open=IDBObjectStore.prototype.openKeyCursor;
+  IDBObjectStore.prototype.openKeyCursor=function(...args){
+   const request=open.apply(this,args);
+   request.addEventListener('success',()=>{if(request.result===null){
+    this.transaction.error=new DOMException('commit could not reach the storage device','UnknownError');
+    this.transaction.abort();
+   }});
+   return request;
+  };
+  try{await assert.rejects(()=>storage.writeWorkspace(pack,pack.revision),/UnknownError.*storage device/);}
+  finally{IDBObjectStore.prototype.openKeyCursor=open;}
+  assert.deepEqual(await storage.readWorkspace(),pack);
+ });
  await test('aborted reclamation rolls back fields and manifest without advancing the identity cache',async()=>{
   const before=await records(),session=pack.sessions[0],{messages,...snapshot}=session.snapshot;
   const next={...pack,sessions:[{...session,snapshot:{...snapshot,doc:{nodes:[{id:'committed-only-on-retry'}]},newField:{saved:true}}}]};

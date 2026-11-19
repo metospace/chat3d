@@ -4,6 +4,7 @@ const server=await createServer({server:{middlewareMode:true},appType:'custom'})
 let checks=0;
 try{
  const {EvidenceContext}=await server.ssrLoadModule('/src/ai/evidenceContext.ts');
+ const {compactAgentContext}=await server.ssrLoadModule('/src/ai/agentContext.ts');
  const check=(name,fn)=>{fn();checks++;console.log('PASS '+name);};
  const image=(key)=>({type:'image',data:Buffer.from(key).toString('base64'),mimeType:'image/png'});
  const packet=(id,{revision=18,scope='whole',views=['front','side'],tool='capture_multiview',details={},text=''}={})=>({role:'toolResult',toolCallId:id,toolName:tool,isError:false,timestamp:0,details:{revision,scope,...details},content:views.flatMap((view,index)=>[{type:'text',text:`${text} revision=${revision} scope=${scope} view=${view}`},image(id+index)])});
@@ -33,7 +34,7 @@ try{
  });
  check('original and recall share capture identity without collapsing equal pixels from distinct views',()=>{
   const context=new EvidenceContext(),first=packet('first'),duplicate=packet('duplicate',{scope:'component'});
-  duplicate.content=structuredClone(first.content);context.project([first,duplicate]);
+  duplicate.content=first.content.map(part=>part.type==='text'?{...part,text:part.text.replace('scope=whole','scope=component')}:{...part});context.project([first,duplicate]);
   assert.equal(context.activeImageCount,4);
   const page=context.recall({captureId:context.list().captures[0].captureId},18);
   const projected=context.project([first,duplicate,recallMessage(page)]);
@@ -177,6 +178,40 @@ try{
   const projected=context.prepare([source,other],compacted,18);
   assert.deepEqual(pixels(projected),pixels([source]));assert.equal(projected[1],compacted[1]);assert.equal(context.list().total,1);
   assert.equal(context.project(projected).length,projected.length);assert.equal(context.list().total,1);
+ });
+ check('mixed captures keep unique current views and a compact review receipt while the full archive round-trips',()=>{
+  const context=new EvidenceContext(),quality=(id,views,nextOffset)=>{
+   const plan={coverage:'component-multiview',targets:[{id:'body',partReferences:[{id:'body-seam'}]}],nextOffset,renderLimitations:'Software geometry: no material acceptance'};
+   const source=packet(id,{tool:'capture_quality_review',scope:'body',views,details:{reviewPlan:plan},text:'software geometry only'});
+   source.content.unshift({type:'text',text:JSON.stringify({reviewReadiness:{revision:18,shapeNeedsVerdicts:[{componentId:'body'}],snapshot:id}})},{type:'text',text:JSON.stringify(plan)});
+   return source;
+  };
+  const old=quality('priorCapture',['front','side'],2),fresh=quality('latestCapture',['front','back'],4);
+  const reference={role:'user',content:[image('customerReference')],timestamp:0},failure={...packet('failure'),isError:true,content:[{type:'text',text:'Real renderer error: device lost'}]};
+  const messages=[reference,call(old),old,call(fresh),fresh,call(failure),failure],original=structuredClone(messages);
+  const projected=context.prepare(messages,compactAgentContext(messages),18);
+  assert.deepEqual(messages,original);assert.equal(projected[0],reference);assert.equal(projected.at(-1),failure);
+  assert.deepEqual(pixels(projected),[reference.content[0].data,old.content[5].data,fresh.content[3].data,fresh.content[5].data]);
+  assert.deepEqual(projected.filter(m=>m.role==='toolResult').map(m=>m.toolCallId),['priorCapture','latestCapture','failure']);
+  assert.doesNotMatch(texts([projected[2]]),/reviewReadiness|partReferences|view=front/);
+  assert.match(texts([projected[4]]),/"nextOffset":4/);assert.match(texts([projected[4]]),/"shapeNeedsVerdicts":\[\{"componentId":"body"\}\]/);
+  assert.equal(projected[2].details.reviewPlan,undefined);
+  const id=context.list().captures[0].captureId,page=context.recall({captureId:id,count:1},18);
+  assert.deepEqual(pixels([page]),[old.content[3].data]);assert.deepEqual(page.details.reviewPlan,old.details.reviewPlan);
+  assert.match(texts([page]),/software geometry only/);assert.match(texts([page]),/"nextOffset":2/);
+  const currentReceipt={type:'text',text:JSON.stringify({reviewReadiness:{revision:18,snapshot:'explicit recall'}})};
+  const recalled=recallMessage({...page,content:[...page.content,currentReceipt]});
+  const recalledProjection=context.prepare([...messages,recalled],undefined,18);
+  assert.deepEqual(pixels([recalledProjection.at(-1)]),pixels([page]));
+  assert.match(texts([recalledProjection.at(-1)]),/explicit recall/);assert.doesNotMatch(texts([recalledProjection.at(-1)]),/"nextOffset":2/);
+  assert.match(texts(recalledProjection),/"nextOffset":4/);assert.equal(context.list().total,2);
+ });
+ check('a consumed recall no longer takes priority over a subsequent full animation packet',()=>{
+  const context=new EvidenceContext(),source=packet('source');context.project([source]);
+  const recalled=recallMessage(context.recall({captureId:context.list().captures[0].captureId},18));
+  const animation=packet('laterAnimation',{tool:'preview_animation',views:['front','side','back','left','top','bottom']});
+  const projected=context.project([source,recalled,call(animation),animation]);
+  assert.deepEqual(pixels(projected),pixels([animation]));assert.equal(context.activeImageCount,6);
  });
  check('non-raw string details, JSON metadata and Chinese punctuation retain real marker identities',()=>{
   const context=new EvidenceContext(),source=packet('json');source.details=JSON.stringify({revision:18,intrinsicOnly:true});source.content=[{type:'text',text:JSON.stringify({revision:18,scope:'whole',componentId:'single-subject',view:'back'})},image('json'),{type:'text',text:'动态样本 time=1.00s revision=18 scope=whole；不是完整碰撞或动画验收'},image('time')];

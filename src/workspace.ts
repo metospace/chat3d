@@ -5,7 +5,7 @@ import { useEditorStore, createEditorStore, setWorkspacePersistenceActive, creat
 import {bindConversationStore} from './conversationStores';
 import { parseProject, serializeProject, validateProjectDocument, MAX_PROJECT_BYTES } from './domain/project';
 import { isQuotaExceededError, prepareSessionsForStorage, requestDurableBrowserStorage, storageReclaimNotice, type WorkspaceStorageTier } from './domain/workspacePersist';
-import { readWorkspace, writeWorkspace } from './domain/workspaceStorage';
+import {readWorkspace,writeWorkspace,WorkspaceConflictError,WorkspaceWriteError} from './domain/workspaceStorage';
 import { makeId } from './util/ids';
 import {listLibraryCategories} from './domain/libraryCategories';
 
@@ -14,8 +14,8 @@ export type Snapshot=Pick<EditorState,'doc'|'messages'|'selection'|'dirty'|'past
 };
 export interface WorkspaceSession {assetCatalogVersion?:number;sceneCategory?:string;libraryDescription?:string;libraryMetadataRevision?:number;moduleKind?:'asset'|'scene';assetSource?:{id:string;version:number};assetCategory?:import('./domain/modelAssets').AssetCategory;sceneThumbnail?:string;librarySavedAt?:number;savedRevision?:number;id:string;title:string;autoTitle:boolean;pinned?:boolean;createdAt:number;updatedAt:number;deletedAt:number|null;snapshot:Snapshot}
 interface RecoverySession {data:unknown;error:string}
-interface WorkspaceState {ready:boolean;saving:boolean;error:string|null;activeId:string;sessions:WorkspaceSession[];recoverySessions:RecoverySession[]}
-export const useWorkspaceStore=create<WorkspaceState>(()=>({ready:false,saving:false,error:null,activeId:'',sessions:[],recoverySessions:[]}));
+interface WorkspaceState {ready:boolean;saving:boolean;error:string|null;canRetrySave:boolean;reclaimNotice:string|null;activeId:string;sessions:WorkspaceSession[];recoverySessions:RecoverySession[]}
+export const useWorkspaceStore=create<WorkspaceState>(()=>({ready:false,saving:false,error:null,canRetrySave:false,reclaimNotice:null,activeId:'',sessions:[],recoverySessions:[]}));
 const stores=new Map<string,EditorStore>();
 export const getSessionEditor=(id:string)=>stores.get(id);
 export const sessionIsRunning=(id:string)=>{const state=stores.get(id)?.getState();return !!state&&['capturing','context','generating','validating','applying'].includes(state.aiStatus);};
@@ -25,7 +25,7 @@ const busy=anySessionRunning;
 const snapshot=(s:EditorState=useEditorStore.getState()):Snapshot=>{return {doc:s.doc,messages:s.messages,selection:s.selection,dirty:s.dirty,past:s.past,future:s.future,composerText:s.composerText,composerImages:s.composerImages,lastRun:s.lastRun,pendingBatch:s.pendingBatch,pendingResult:s.pendingResult,wasRunning:['capturing','context','generating','validating','applying'].includes(s.aiStatus)}};
 const fresh=():Snapshot=>({doc:createInitialDoc(),messages:[],selection:[],dirty:false,past:[],future:[],composerText:'',composerImages:[],lastRun:null,pendingBatch:null,pendingResult:null,wasRunning:false});
 const record=(snap:Snapshot,title='新建会话'):WorkspaceSession=>({id:makeId(),title,autoTitle:title==='新建会话',createdAt:Date.now(),updatedAt:Date.now(),deletedAt:null,snapshot:snap});
-let hydrating=false, revision=0, pending=false, saving=false, blocked=false, reclaimNotice:string|null=null;
+let hydrating=false, revision=0, pending=false, saving=false, blocked:'write'|'unsafe'|null=null;
 let timer:ReturnType<typeof setTimeout>|undefined;
 let initialized:Promise<void>|null=null;
 let waiters:(()=>void)[]=[];
@@ -64,35 +64,44 @@ function track(session:WorkspaceSession){
 function restore(session:WorkspaceSession){hydrating=true;try{bindConversationStore(track(session));}finally{hydrating=false;}}
 function capture(){const w=useWorkspaceStore.getState(),editor=stores.get(w.activeId);if(editor)writeSnapshot(w.activeId,editor.getState());}
 function schedule(progressOnly=false){
-  if(hydrating||blocked||!useWorkspaceStore.getState().ready)return;
+  if(hydrating||(blocked&&!saving)||!useWorkspaceStore.getState().ready)return;
   pending=true;useWorkspaceStore.setState({saving:true});
   if(progressOnly&&timer)return;
-  if(timer)clearTimeout(timer);timer=setTimeout(()=>void flushWorkspace(),progressOnly?5000:250);
+  clearTimeout(timer);timer=setTimeout(()=>void flushWorkspace(),progressOnly?5000:250);
 }
-async function persistWorkspace(tiers:WorkspaceStorageTier[]):Promise<{tier:WorkspaceStorageTier;notice:string|null}>{
- const w=useWorkspaceStore.getState();let lastError:unknown;
+async function persistWorkspace():Promise<string|null>{
+ const w=useWorkspaceStore.getState(),tiers:WorkspaceStorageTier[]=['normal','strip-images','omit-trashed'];let lastError:unknown;
  for(const tier of tiers){
   try{
    revision=await writeWorkspace({version:1,activeId:w.activeId,sessions:prepareSessionsForStorage(w.sessions,tier),recoverySessions:w.recoverySessions},revision);
-   return {tier,notice:storageReclaimNotice(tier)};
-  }catch(e){lastError=e;if(!isQuotaExceededError(e))throw e;}
+   return storageReclaimNotice(tier);
+  }catch(e){lastError=e;if(!(e instanceof WorkspaceWriteError)||!isQuotaExceededError(e.cause))throw e;}
  }
  throw lastError;
 }
-export async function flushWorkspace():Promise<void>{
-  if(timer)clearTimeout(timer);timer=undefined;
-  if(saving)return new Promise<void>(resolve=>waiters.push(resolve));
-  if(blocked||!pending)return;
-  saving=true;pending=false;
-  try{
-   const result=await persistWorkspace(['normal','strip-images','omit-trashed']);
-   setWorkspacePersistenceActive(true);reclaimNotice=result.notice;
-   useWorkspaceStore.setState({error:result.notice});
-  }
-  catch(e){blocked=true;pending=false;reclaimNotice=null;useWorkspaceStore.setState({error:e instanceof Error?e.message:'会话保存失败'});}
-  finally{saving=false;useWorkspaceStore.setState({saving:pending});if(pending)await flushWorkspace();else {const done=waiters;waiters=[];done.forEach(resolve=>resolve());}}
+export function flushWorkspace():Promise<void>{return flush();}
+export function retryWorkspaceSave():Promise<void>{
+ const {ready,reclaimNotice}=useWorkspaceStore.getState();
+ if(!ready||blocked==='unsafe'||(!blocked&&!reclaimNotice))return Promise.resolve();
+ if(!saving)pending=true;
+ return flush(true);
 }
-export function workspaceReclaimNotice(){return reclaimNotice;}
+async function flush(retry=false):Promise<void>{
+  clearTimeout(timer);timer=undefined;
+  if(saving){const {promise,resolve}=Promise.withResolvers<void>();waiters.push(resolve);return promise;}
+  if((blocked&&!retry)||!pending)return;
+  saving=true;pending=false;useWorkspaceStore.setState({saving:true});
+  try{
+   const reclaimNotice=await persistWorkspace();
+   blocked=null;setWorkspacePersistenceActive(true);
+   useWorkspaceStore.setState({error:null,canRetrySave:false,reclaimNotice});
+  }
+  catch(e){
+   blocked=e instanceof WorkspaceConflictError?'unsafe':'write';pending=false;
+   useWorkspaceStore.setState({error:e instanceof Error?e.message:`会话保存失败：${String(e)}`,canRetrySave:blocked==='write',reclaimNotice:null});
+  }
+  finally{saving=false;useWorkspaceStore.setState({saving:pending});if(pending)await flush();else {const done=waiters;waiters=[];done.forEach(resolve=>resolve());}}
+}
 function validate(raw:unknown):WorkspaceSession{
   const s=raw as WorkspaceSession;
   if(!s||typeof s.id!=='string'||typeof s.title!=='string'||!s.snapshot||!Array.isArray(s.snapshot.messages))throw new Error('会话数据格式不正确');
@@ -128,7 +137,7 @@ export function initializeWorkspace():Promise<void>{
         setWorkspacePersistenceActive(true);revision=stored.revision;useWorkspaceStore.setState({sessions,recoverySessions,activeId:active.id,ready:true});restore(active);
       }else{const first=record(snapshot(),useEditorStore.getState().doc.nodes.length?'恢复的项目':'新建会话');useWorkspaceStore.setState({sessions:[first],activeId:first.id,ready:true});restore(first);}
       if(changed){schedule();await flushWorkspace();}
-    }catch(e){blocked=true;const first=record(snapshot(),'当前项目');useWorkspaceStore.setState({ready:true,activeId:first.id,sessions:[first],error:e instanceof Error?e.message:'会话恢复失败；已有存储不会被覆盖'});restore(first);}
+    }catch(e){blocked='unsafe';const first=record(snapshot(),'当前项目');useWorkspaceStore.setState({ready:true,activeId:first.id,sessions:[first],error:`会话恢复失败：${e instanceof Error?e.message:String(e)}`});restore(first);}
   })();return initialized;
 }
 export function createSession(document?:EditorState['doc'],metadata:Partial<Pick<WorkspaceSession,'moduleKind'|'assetSource'|'assetCatalogVersion'|'assetCategory'|'title'|'sceneCategory'|'libraryDescription'|'libraryMetadataRevision'|'librarySavedAt'|'savedRevision'>>={},maxBytesOrOptions?:number|{activate?:boolean},optionsOrMaxBytes?:{activate?:boolean}|number):boolean{
@@ -201,7 +210,9 @@ export function exportWorkspaceBackup():string{
  if(new TextEncoder().encode(output).length>MAX_WORKSPACE_BACKUP_BYTES)throw Error(WORKSPACE_BACKUP_SIZE_ERROR);return output;
 }
 export function importWorkspaceBackup(text:string):number{
- if(busy()||blocked||!useWorkspaceStore.getState().ready)throw Error('请先结束当前任务并解决存储错误');
+ if(busy())throw Error('请先在任务队列中停止所有生成，再导入备份。');
+ if(!useWorkspaceStore.getState().ready)throw Error('工作区正在恢复，请稍候再导入备份。');
+ if(blocked==='unsafe')throw Error('当前无法安全写入已有工作区。请下载本页备份，按保存提示重新打开后再导入。');
  if(new TextEncoder().encode(text).length>MAX_WORKSPACE_BACKUP_BYTES)throw Error(WORKSPACE_BACKUP_SIZE_ERROR);
  const pack=JSON.parse(text);if(pack?.format!=='chat3d-workspace-backup'||pack.version!==1||!Array.isArray(pack.sessions))throw Error('备份格式错误');
  const next:WorkspaceSession[]=[];
@@ -214,7 +225,10 @@ export function importWorkspaceBackup(text:string):number{
   // never silently committed to the original or trusted as an executable batch.
   if(item.draft){const draft=parseProject(JSON.stringify(item.draft));next.push(record({...fresh(),doc:draft},item.title.slice(0,65)+'（未确认草稿副本）'));}
  }
- capture();next.forEach(track);useWorkspaceStore.setState(w=>({sessions:[...next,...w.sessions]}));schedule();return next.length;
+ if(!next.length)return 0;
+ capture();next.forEach(track);useWorkspaceStore.setState(w=>({sessions:[...next,...w.sessions]}));
+ schedule();
+ return next.length;
 }
 
 export async function editLibrarySessionMetadata(id:string,details:LibraryMetadata,expectedRevision=0):Promise<void>{

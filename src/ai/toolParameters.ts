@@ -41,3 +41,24 @@ export function ensureToolParametersObject<T>(parameters:T):T & {type:'object'} 
   if(sanitized.type==='object')return sanitized as T & {type:'object'};
   return {...sanitized,type:'object'} as T & {type:'object'};
 }
+
+type ProviderSchema={properties?:Record<string,ProviderSchema>;items?:ProviderSchema;anyOf?:ProviderSchema[]};
+
+/** Factor repeated constraints out of the model-facing edit_scene union. */
+export function compactSceneEditParameters<T>(parameters:T):T {
+  const schema=structuredClone(parameters) as ProviderSchema;
+  const operations=schema.properties?.operations?.items;
+  if(operations?.anyOf){
+    // Each closed op branch still admits only its original fields. The parent
+    // validates shared fields for every branch that admits them.
+    for(const field of ['geometry','parts']){
+      const branches=operations.anyOf.filter(branch=>branch.properties?.[field]!==undefined);
+      const shared=branches[0]?.properties?.[field];
+      const serialized=JSON.stringify(shared);
+      if(!shared||branches.length<2||!branches.every(branch=>JSON.stringify(branch.properties![field])===serialized))continue;
+      (operations.properties??={})[field]=shared;
+      for(const branch of branches)branch.properties![field]={};
+    }
+  }
+  return schema as T;
+}

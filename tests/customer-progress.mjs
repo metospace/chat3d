@@ -61,8 +61,10 @@ try{
   const progress=activityProgress(review,true,now);
   assert.equal(progress.phase,'reviewing');assert.equal(progress.modelState,'waiting');assert.equal(progress.modelEditAgeSeconds,240);assert.ok(progress.reviewNote);
   assert.equal(activityProgress({...review,lastEventAt:now+60_000},true,now+60_000).modelEditAgeSeconds,300);
-  assert.equal(activityProgress({...review,timings:[{...review.timings[0],firstDataAt:now-90_000}]},true,now).modelState,'waiting','transport bytes are not model content');
-  assert.equal(activityProgress({...review,timings:[{...review.timings[0],firstContentAt:now-90_000}]},true,now).modelState,'responding');
+ const withTiming=patch=>({...review,timings:[{...review.timings[0],...patch}]});
+ assert.equal(activityProgress(withTiming({responseAt:now-90_000}),true,now).modelState,'waiting','headers alone are not body data');
+ assert.equal(activityProgress(withTiming({firstDataAt:now-90_000}),true,now).modelState,'processing','transport bytes are not public content');
+ assert.equal(activityProgress(withTiming({firstDataAt:now-90_000,firstContentAt:now-80_000}),true,now).modelState,'responding');
   assert.equal(activityProgress({...review,timings:[{...review.timings[0],endedAt:now}]},true,now).modelState,undefined);
   assert.equal(activityProgress({...review,timings:[...review.timings,{id:'capture',kind:'tool',label:'private_capture_tool',startedAt:now}]},true,now).modelState,undefined);
   assert.equal(activityProgress(activity,true,now).modelEditAgeSeconds,undefined,'legacy records never invent a model edit');
@@ -90,6 +92,7 @@ try{
    const details=document.getElementById(disclosure.getAttribute('aria-controls'));assert.ok(details);assert.ok(section.contains(details));
    const assertCollapsed=()=>{assert.equal(disclosure.getAttribute('aria-expanded'),'false');assert.equal(details.hidden,true);assert.equal(ui.queryByRole('list',{name:'建模进展'}),null);};
    assertCollapsed();const initialAction=disclosure.querySelector('strong').textContent;assert.ok(initialAction.trim());assert.match(disclosure.textContent,/496 秒/);assert.ok(details.contains(ui.getByText(explanation.text)));
+   assert.equal(section.dataset.modelState,'waiting');assert.match(initialAction,/等待模型响应/);
    assert.equal(ui.queryByLabelText('当前模型处理状态'),null);assert.equal(ui.queryByLabelText('距上次模型修改'),null);assert.equal(ui.container.textContent.includes('secret_model_tool'),false);
    const stop=ui.getByRole('button',{name:'停止生成'});assert.ok(!details.contains(stop));fireEvent.click(stop);assert.equal(stopped,1);assertCollapsed();
    fireEvent.click(disclosure);assert.equal(disclosure.getAttribute('aria-expanded'),'true');assert.equal(details.hidden,false);
@@ -98,8 +101,11 @@ try{
    ui.rerender(React.createElement(ChatRunTrace,{run:{...run,activity:{...review,phase:'repairing',lastEventAt:now}},onStop:()=>stopped++}));
    assert.notEqual(disclosure.querySelector('strong').textContent,initialAction,'the current action follows the updated phase without rewriting public history');assert.equal(disclosure.getAttribute('aria-expanded'),'true');assert.equal(details.hidden,false);assert.ok(ui.getByText(explanation.text));assert.equal(ui.queryByLabelText('距上次模型修改'),null);
    fireEvent.click(disclosure);assertCollapsed();
-   const added={id:'public-update',text:'检查结果已记录。'},updated={...review,phase:'repairing',lastEventAt:now,explanations:[explanation,added]};
+   const added={id:'public-update',text:'检查结果已记录。'},updated={...review,phase:'repairing',lastEventAt:now,explanations:[explanation,added],timings:[{...review.timings[0],responseAt:now-300,firstDataAt:now-200}]};
    ui.rerender(React.createElement(ChatRunTrace,{run:{...run,activity:updated},onStop:()=>stopped++}));
+   assert.equal(section.dataset.modelState,'processing');assert.match(disclosure.textContent,/模型正在处理/);
+   ui.rerender(React.createElement(ChatRunTrace,{run:{...run,activity:{...updated,timings:[{...updated.timings[0],firstContentAt:now,pendingToolName:'capture_view'}]}},onStop:()=>stopped++}));
+   assert.equal(section.dataset.modelState,'responding');assert.match(disclosure.textContent,/正在接收模型响应.*查看当前模型效果/);
    assertCollapsed();assert.ok(details.contains(ui.getByText(added.text)));fireEvent.click(ui.getByRole('button',{name:'停止生成'}));assert.equal(stopped,2);assertCollapsed();
    ui.rerender(React.createElement(ChatRunTrace,{run:{...run,status:'stopped',endedAt:now,activity:updated},onStop:()=>stopped++}));
    assert.equal(timers.size,0);assertCollapsed();assert.equal(ui.queryByLabelText('距上次模型修改'),null);assert.equal(ui.queryByRole('button',{name:'停止生成'}),null);assert.match(disclosure.textContent,/497 秒/);
@@ -126,8 +132,12 @@ try{
   try{
    const ui=render(React.createElement(ChatPanelX,{canvasMode:true,expanded:false}));const draft=ui.getByLabelText('当前草稿状态');
    assert.equal(draft.dataset.phase,'reviewing');assert.equal(draft.dataset.modelState,'waiting');assert.match(draft.querySelector('[aria-label="距上次模型修改"]').textContent,/240/);
+   assert.match(draft.textContent,/等待模型响应/);
+   act(()=>runtime.ui.setState({agentActivity:{...review,timings:[{...review.timings[0],firstDataAt:now}]}}));
+   assert.equal(draft.dataset.modelState,'processing');assert.match(draft.textContent,/模型正在处理/);
    const compact=ui.container.querySelector('.adx-compact-strip');assert.ok(compact);assert.equal(compact.textContent.includes('生成中'),false);assert.equal(ui.container.textContent.includes('private_review_tool'),false);assert.equal(ui.container.textContent.includes('停滞'),false);
    const responding={...review,timings:[{...review.timings[0],firstContentAt:now}]};act(()=>runtime.ui.setState({agentActivity:responding}));assert.equal(draft.dataset.modelState,'responding');assert.equal(draft.dataset.phase,'reviewing');
+   assert.match(draft.textContent,/正在接收模型响应/);
    act(()=>{runtime.ui.setState({agentActivity:{...responding,phase:'repairing',lastModelEditAt:Date.now()}});});assert.equal(draft.dataset.phase,'repairing');assert.match(draft.querySelector('[aria-label="距上次模型修改"]').textContent,/0/);
    act(()=>store.setState({aiStatus:'cancelled'}));assert.equal(ui.queryByLabelText('当前草稿状态'),null);assert.equal(ui.container.querySelector('.adx-compact-strip'),null);
   }finally{cleanup();runtime.ui.setState(previous);store.setState({aiStatus:'idle'});}

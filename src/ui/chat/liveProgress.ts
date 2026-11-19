@@ -47,8 +47,12 @@ export function liveProgress(activity:AgentActivity|undefined|null,blender=false
  const receivingReview=usesBlender&&activity?.phase==='reviewing';
  if(current?.kind==='tool')return {label:actionLabel(current.toolName)??progress.label,note:'正在执行，结果返回后会更新下方进展。'};
  const phase=activity?.phase??'planning',action=phaseActions[phase];
- if(progress.modelState==='waiting')return {label:receivingReview?'核对 Blender 输出':action,note:usesBlender?(receivingReview?'已请求模型检查效果图，等待回复；此时不执行 Blender。':'已发送需求，等待模型返回脚本；尚未启动 Blender。'):'本轮请求已发出，模型尚未返回公开内容；收到回复后继续更新。'};
- if(progress.modelState==='responding')return {label:usesBlender?(receivingReview?'正在接收复核说明':'正在编写 Blender 脚本'):current?.pendingToolName?`准备${actionLabel(current.pendingToolName)??action}`:action,note:usesBlender?'正在接收内容，完整脚本返回后才会执行。':current?.pendingToolName?'正在接收这一步的建模指令，尚未执行。':'正在接收模型回复，公开说明会实时显示在下方。'};
+ if(progress.modelState==='waiting')return {label:usesBlender?(receivingReview?'核对 Blender 输出':action):`${progress.modelStateLabel} · ${action}`,note:usesBlender?(receivingReview?'已请求模型检查效果图，等待回复；此时不执行 Blender。':'已发送需求，等待模型返回脚本；尚未启动 Blender。'):'本轮尚未收到模型响应数据。'};
+ if(progress.modelState==='processing')return {label:`${progress.modelStateLabel} · ${action}`,note:'已收到模型服务的响应数据，尚未收到公开回复或建模指令。'};
+ if(progress.modelState==='responding'){
+  const pending=actionLabel(current?.pendingToolName);
+  return {label:usesBlender?(receivingReview?'正在接收复核说明':'正在编写 Blender 脚本'):`${progress.modelStateLabel} · ${pending??action}`,note:usesBlender?'正在接收内容，完整脚本返回后才会执行。':pending?'正在接收这一步的建模指令，尚未执行。':'正在接收模型回复，公开说明会实时显示在下方。'};
+ }
  if(timings.length)return {label:'整理本轮结果',note:'正在整理已返回的内容。'};
  return {label:'正在准备生成',note:'正在整理本次需求和参考附件。'};
 }

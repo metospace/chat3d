@@ -179,6 +179,18 @@ try{
   const audit=id=>({role:'toolResult',toolCallId:'audit'+id,toolName:'audit_model_detail',isError:false,details:{revision:3,componentId:id},content:[{type:'text',text:'recorded'}],timestamp:0});const newer={...packet,toolCallId:'captureC',content:[{type:'text',text:'revision=3 scope=C view=front'},image]};
   let messages=compactAgentContext([packet,audit('A'),newer]);assert.equal(messages[0].content.filter(c=>c.type==='image').length,2);messages=compactAgentContext([packet,audit('A'),audit('B'),newer]);assert.equal(messages[0].content.filter(c=>c.type==='image').length,0);const fresh={...packet,content:packet.content.map(c=>c.type==='text'?{...c,text:c.text.replace('revision=3','revision=4')}:c)};const freshC={...newer,content:newer.content.map(c=>c.type==='text'?{...c,text:c.text.replace('revision=3','revision=4')}:c)};messages=compactAgentContext([audit('A'),audit('B'),fresh,freshC]);assert.equal(messages[2].content.filter(c=>c.type==='image').length,2);
  });
+ await test('compaction retains actual review findings and errors but not repeated cumulative snapshots',()=>{
+  const result=(id,toolName,parts,isError=false)=>({role:'toolResult',toolName,toolCallId:id,isError,timestamp:0,content:parts.map(part=>({type:'text',text:typeof part==='string'?part:JSON.stringify(part)}))});
+  const first=result('audit-a','audit_model_detail',[{revision:3,review:{componentId:'a',checks:[{criterion:'silhouette',status:'fail',evidence:'real finding: missing cutout',nodeIds:['a-shell']}]},repairQueue:['superseded queue copy'],remainingCount:2,remaining:['old count detail'],unreviewed:['b']},{revision:3,detailReviewState:[{componentId:'a'}]}]);
+  const audit=result('audit-b','audit_model_details_batch',[{revision:3,recorded:['b'],repairQueue:['current repair queue'],remainingCount:1,unreviewed:[]},{revision:3,detailReviewState:[{componentId:'a'},{componentId:'b'}]}]);
+  const latest=result('review','review_model',[{revision:3,referenceRepairs:[{id:'open-cutout',nodeIds:['a-shell']}]},{revision:3,detailReviewState:[{componentId:'a',failed:['silhouette']},{componentId:'b',pending:['materials']}]}]);
+  const failed=result('failed','review_model',['review rejected: no current direction evidence'],true);
+  const messages=[first,audit,latest,failed].flatMap(m=>[{role:'assistant',timestamp:0,content:[{type:'toolCall',id:m.toolCallId,name:m.toolName,arguments:{}}]},m]);
+  const original=structuredClone(messages),projected=compactAgentContext(messages);
+  assert.deepEqual(messages,original);assert.deepEqual(projected.map(m=>m.role==='toolResult'?m.toolCallId:m.content[0].id),['audit-a','audit-a','audit-b','audit-b','review','review','failed','failed']);
+  const raw=JSON.stringify(projected);assert.match(raw,/real finding: missing cutout|a-shell/);assert.match(raw,/current repair queue/);assert.match(raw,/open-cutout/);assert.doesNotMatch(raw,/superseded queue copy|old count detail/);
+  assert.equal((raw.match(/detailReviewState/g)??[]).length,1);assert.equal(projected.at(-1),failed);
+ });
  await test('context keeps every current plan scope and target while deduplicating successful payloads',()=>{
   const call=(id,name,args)=>({role:'assistant',content:[{type:'toolCall',id,name,arguments:args}],timestamp:0});const result=(id,name,data,isError=false)=>({role:'toolResult',toolCallId:id,toolName:name,content:[{type:'text',text:JSON.stringify(data)}],isError,timestamp:0});
   const a={key:'A',silhouette:'old contour',features:[{key:'body',referenceObservation:'A reference'}]},b={key:'B',silhouette:'B contour',features:[{key:'body',referenceObservation:'B reference'}]},newA={...a,silhouette:'corrected A contour'};
@@ -318,6 +330,23 @@ try{
    const unsupportedKeywords=value=>value!==null&&typeof value==='object'&&Object.entries(value).some(([key,child])=>/^~/.test(key)||key==='oneOf'||key==='uniqueItems'||(key==='items'&&Array.isArray(child))||unsupportedKeywords(child));
    const firstTools=wire[0].tools.map(tool=>tool.function);
    const editScene=firstTools.find(tool=>tool.name==='edit_scene');
+   const {Check}=await import('typebox/value');
+   const part={name:'shell',geometry:create.geometry};
+   for(const [operation,valid] of [
+    [create,true],
+    [{op:'updateParameters',targetId:'body',name:'shell'},true],
+    [{op:'updateParameters',targetId:'body',geometry:create.geometry},true],
+    [{op:'createAssembly',name:'case',parts:[part]},true],
+    [{op:'appendAssemblyParts',targetId:'case',parts:[part]},true],
+    [{op:'replaceAssemblyParts',targetId:'case',partIds:['old'],parts:[part]},true],
+    [{op:'createPrimitive'},false],
+    [{op:'createAssembly',name:'case'},false],
+    [{op:'createAssembly',name:'case',parts:[]},false],
+    [{op:'updateParameters',targetId:'body',geometry:{...create.geometry,params:{...create.geometry.params,width:'1'}}},false],
+    [{op:'appendAssemblyParts',targetId:'case',parts:[{...part,geometry:{type:'notRegistered'}}]},false],
+    [{op:'rename',targetId:'body',name:'shell',geometry:create.geometry},false],
+    [{op:'createPrimitive',geometry:create.geometry,parts:[part]},false],
+   ])assert.equal(Check(editScene.parameters,{summary:'Edit',operations:[operation]}),valid,JSON.stringify(operation));
    const program=firstTools.find(tool=>tool.name==='build_modeling_program');
    assert.ok(program?.parameters,'build_modeling_program must declare parameters');
    const position=program.parameters.properties.position;

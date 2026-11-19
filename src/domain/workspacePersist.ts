@@ -90,19 +90,22 @@ export function prepareSessionsForStorage<T extends PersistableWorkspaceSession>
 
 export function storageReclaimNotice(tier: WorkspaceStorageTier): string | null {
   if (tier === 'strip-images') {
-    return '本地空间不足：已跳过参考图写入，文字与场景几何仍会保存。建议下载工作台备份。';
+    return '本机草稿已保存，但参考图未写入。请保留原图，检查本地空间后重试保存。';
   }
   if (tier === 'omit-trashed') {
-    return '本地空间不足：已跳过参考图及回收站中的会话数据以释放空间。未删除的会话文字与场景仍会保存。建议下载工作台备份。';
+    return '本机草稿已保存，但参考图及回收站中的会话数据未写入。请保留当前页面与原图，检查本地空间后重试保存。';
   }
   return null;
 }
 
-export function isQuotaExceededError(error: unknown): boolean {
-  return (
-    (error instanceof DOMException && error.name === 'QuotaExceededError') ||
-    (error instanceof Error && /quota|空间不足|空间已满|QuotaExceeded/i.test(error.message))
-  );
+export function isQuotaExceededError(cause: unknown): boolean {
+  if(!(cause instanceof Error||cause instanceof DOMException))return false;
+  if(cause.name==='QuotaExceededError')return true;
+  if(!['Error','UnknownError','AbortError'].includes(cause.name))return false;
+  const message=cause.message.trim();
+  return /quota|空间不足|空间已满/i.test(message)||
+    (!message&&(cause.name==='UnknownError'||cause.name==='AbortError'))||
+    (cause.name==='AbortError'&&/\b(?:abort(?:ed)?|IDBTransaction\.abort)\b/i.test(message));
 }
 
 export async function requestDurableBrowserStorage(): Promise<void> {

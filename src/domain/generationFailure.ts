@@ -8,6 +8,7 @@ export function generationStopMessage(result:StopResult){
 }
 export const STOP_PREVIEW_NEXT='可查看或放弃预览；不会自动继续生成。';
 export const STOP_USAGE_NOTE='服务端可能仍在处理，停止不保证退还用量。';
+export const NO_MODEL_DATA='等待 2 分钟仍未收到模型响应数据。';
 
 /** Raw failures belong in task diagnostics, never in normal chat or preview text. */
 export function generationFailureMessage(error:unknown,options:GenerationFailureOptions={}):string {
@@ -25,6 +26,7 @@ export function generationFailureMessage(error:unknown,options:GenerationFailure
  if(/体验页访问验证未通过|体验页要求重新登录/.test(raw))return outcome+'体验页访问验证未通过，请重新登录体验页后再发送。';
  if(/\b401\b|unauthori[sz]ed|invalid.{0,12}(?:api.?key|token)|authentication|密钥.{0,8}(?:无效|错误|过期)/i.test(raw))return outcome+'模型服务未能验证身份，请在模型配置中检查访问凭证后再发送。';
  if(/\b403\b|forbidden|permission denied|无权访问/i.test(raw))return outcome+'当前账号没有使用该模型的权限，请在模型配置中选择可用的模型后再发送。';
+ if(raw.startsWith(NO_MODEL_DATA))return outcome+NO_MODEL_DATA+'请恢复输入后手动重试；不会自动重新生成，先前请求可能仍在处理。';
  if(/timeout|timed?\s*out|超时|(?:超过|连续)\s*3\s*分钟|等待.{0,12}3\s*分钟/i.test(raw))return outcome+'等待超过 3 分钟，已停止本次接收。请恢复输入后手动重试；不会自动重新生成，先前请求可能仍在处理。';
  if(/\b5\d\d\b|service unavailable|bad gateway/i.test(raw))return outcome+'模型服务暂时不可用，请稍后重试。';
  if(/failed to fetch|fetch failed|network|网络|连接失败|无法读取接口响应|跨域|ECONN|ENOTFOUND/i.test(raw))return outcome+'暂时无法连接模型服务，请检查网络连接后重试。';

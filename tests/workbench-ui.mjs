@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
-import {indexedDB} from 'fake-indexeddb';
+import {indexedDB,IDBObjectStore} from 'fake-indexeddb';
 import {createServer} from 'vite';
 import React from 'react';
 import {installBrowserGlobals} from './jsdom-env.mjs';
@@ -54,7 +54,37 @@ try{
  await act(async()=>{w.useWorkspaceStore.setState({error:null});w.switchSession(assetProject);});
  console.log('PASS asset import uses direct file selection, recycle bin restores without settings, and quota/write errors never offer conflict reload');passed++;
  await act(async()=>editor.setState({aiStatus:'idle'}));await act(async()=>w.flushWorkspace());
- const storage=await server.ssrLoadModule('/src/domain/workspaceStorage.ts');const stored=await storage.readWorkspace();await storage.writeWorkspace(stored,stored.revision);
+ const storage=await server.ssrLoadModule('/src/domain/workspaceStorage.ts');
+ const put=IDBObjectStore.prototype.put;
+ const pack=JSON.parse(w.exportWorkspaceBackup());
+ const backup=JSON.stringify({...pack,sessions:pack.sessions.slice(0,1)});
+ IDBObjectStore.prototype.put=function(){throw new DOMException('workspace cannot access the storage device','NotReadableError');};
+ try{
+  await act(async()=>{editor.getState().setComposerText('保留未保存的草稿');await w.flushWorkspace();});
+  assert.match(ui.container.querySelector('.workspace-notice').textContent,/NotReadableError.*storage device/);
+  fireEvent.click(ui.getByRole('button',{name:'备份与恢复',exact:true}));
+  const recoveryDialog=ui.getByRole('dialog',{name:'备份与恢复'});
+  const input=recoveryDialog.querySelector('input[type=file]');
+  await act(async()=>w.getSessionEditor(background).setState({aiStatus:'generating'}));
+  const file=new File([backup],'workspace.json',{type:'application/json'});
+  fireEvent.change(input,{target:{files:[file]}});
+  await waitFor(()=>assert.match(within(recoveryDialog).getByRole('alert').textContent,/先.*停止.*生成.*再导入/));
+  await act(async()=>w.getSessionEditor(background).setState({aiStatus:'idle'}));
+  fireEvent.change(input,{target:{files:[file]}});
+  await waitFor(()=>assert.match(within(recoveryDialog).getByRole('status').textContent,/已新增 1 个会话.*尚未保存/));
+  fireEvent.click(within(recoveryDialog).getByRole('button',{name:'关闭备份与恢复'}));
+ }finally{IDBObjectStore.prototype.put=put;}
+ fireEvent.click(ui.getByRole('button',{name:'重试保存',exact:true}));
+ await waitFor(()=>assert.equal(ui.queryByRole('button',{name:'重试保存',exact:true}),null));
+ const recovered=await storage.readWorkspace();
+ assert.equal(recovered.sessions.find(s=>s.id===assetProject).snapshot.composerText,'保留未保存的草稿');
+ assert.ok(recovered.sessions.some(s=>s.title.endsWith('（导入）')));
+ fireEvent.click(ui.getByRole('button',{name:'首页',exact:true}));
+ fireEvent.click(ui.getByRole('button',{name:'新建项目',exact:true}));fireEvent.click(ui.getByRole('menuitem',{name:/新建空白/}));
+ await act(async()=>{editor.getState().setComposerText('恢复后自动保存');await w.flushWorkspace();});
+ const continued=await storage.readWorkspace();assert.equal(continued.sessions.find(s=>s.id===continued.activeId).snapshot.composerText,'恢复后自动保存');
+ console.log('PASS failed writes surface the cause, preserve imports and recover autosave without reloading');passed++;
+ const stored=await storage.readWorkspace();await storage.writeWorkspace(stored,stored.revision);
  await act(async()=>{editor.getState().setComposerText('冲突草稿');await w.flushWorkspace();editor.setState({aiStatus:'generating'});});
  const banner=ui.container.querySelector('.workspace-notice.is-error');assert.ok(banner);assert.equal(ui.getByRole('button',{name:'下载工作台备份'}).disabled,false);
  fireEvent.click(ui.getByRole('button',{name:'下载工作台备份'}));await waitFor(()=>assert.match(banner.querySelector('[role=status]').textContent,/停止生成/));
