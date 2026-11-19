@@ -4,7 +4,7 @@ import {teamServiceOrigin} from './teamServiceOrigin';
 import {makeId} from '../util/ids';
 import {compressTeamPublication,sendTeamPublication,type TeamPublicationPackage,type TeamUploadProgress} from './teamPublish';
 import {localPublishedCategoryPath,publishedCategoryPath,acquirePublishedCategory} from './teamCategories';
-import {parseModelAsset} from './modelAssets';
+import {createModelAsset,parseModelAsset} from './modelAssets';
 import {parseProject,MAX_TEAM_SCENE_BYTES} from './project';
 import {saveModelAsset} from './modelAssetStorage';
 import {createSession,flushWorkspace,useWorkspaceStore} from '../workspace';
@@ -17,9 +17,11 @@ import {scenePublication} from './teamPublicationSnapshot';
 export {assetPublication,scenePublication} from './teamPublicationSnapshot';
 import {prepareTeamPublicationSnapshot,yieldTeamPreparationPaint,type TeamPreparationProgress} from './teamPreparation';
 import type {SceneDocument} from './types';
+import {importGlb} from '../scene/importGlb';
+import {assertGlbSize} from '../scene/glbLimit';
 export type {TeamPreparationProgress} from './teamPreparation';
 export interface TeamUser {id:string;name:string;role:'admin'|'member'|'viewer'}
-export interface TeamItem {id:string;owner:string;kind:'asset'|'scene';version:number;name:string;description:string;created:string;categoryPath?:string[]}
+export interface TeamItem {id:string;owner:string;kind:'asset'|'scene';version:number;name:string;description:string;created:string;categoryPath?:string[];sourceKind?:string}
 export interface TeamVersion extends TeamItem {payload:unknown}
 export interface TeamPublish {kind:'asset'|'scene';name:string;description:string;payload:unknown;key:string;itemId?:string;expectedVersion:number;categoryPath?:string[]}
 export class TeamServiceError extends Error {
@@ -72,7 +74,26 @@ async loginWithPlatform(auth:{accessToken:string;tenantId:string}){const result=
  async logout(){const pending=this.request('logout',{});this.token='';this.user=undefined;await pending;}
  list(kind:'asset'|'scene',q=''){return this.request<TeamItem[]>('items?kind='+kind+'&q='+encodeURIComponent(q));}
  async read(item:TeamItem){const value=await this.request<TeamVersion>(`items/${encodeURIComponent(item.id)}/${item.version}`);if(value.id!==item.id||value.kind!==item.kind||value.version!==item.version)throw Error('团队服务返回的固定版本不匹配');return value;}
+ async downloadGlb(item:TeamItem):Promise<ArrayBuffer>{
+  const response=await this.raw(`items/${encodeURIComponent(item.id)}/${item.version}`,undefined,AbortSignal.timeout(15*60*1000));
+  const header=response.headers.get('Content-Length'),length=header===null?undefined:Number(header);
+  try{
+   if(length!==undefined){if(!Number.isSafeInteger(length)||length<0)throw Error('团队 GLB 文件长度无效');assertGlbSize(length);}
+  }catch(error){await response.body?.cancel();throw error;}
+  const bytes=await response.arrayBuffer();assertGlbSize(bytes.byteLength);
+  if(length!==undefined&&bytes.byteLength!==length)throw Error('团队 GLB 文件下载不完整，请重试');
+  return bytes;
+ }
  publish(body:TeamPublish,onProgress?:(progress:TeamUploadProgress)=>void,publication?:TeamPublicationPackage,signal?:AbortSignal){return this.request<{id:string;version:number}>('publish',body,onProgress,publication,signal);}
+}
+/** Native management models share the local GLB importer; publications retain their JSON path. */
+export async function loadTeamVersion(client:TeamClient,item:TeamItem):Promise<TeamVersion>{
+ if(item.sourceKind!=='glb')return client.read(item);
+ const bytes=await client.downloadGlb(item);assertGlbSize(bytes.byteLength);
+ const {doc}=await importGlb(bytes,item.name);
+ const payload=item.kind==='asset'?createModelAsset(doc,doc.nodes.map(node=>node.id),{name:item.name,category:'其他'}):scenePublication(doc);
+ if(item.kind==='asset'&&item.description)payload.description=item.description.slice(0,1000);
+ return {...item,payload};
 }
 const sessionListeners=new Set<()=>void>();
 let sharedClient:TeamClient|undefined;
@@ -255,6 +276,7 @@ export function resolveTeamPublishTarget(client:TeamClient,source:TeamPublishSou
  if(new Set(matching.map(link=>link.teamItemId)).size!==1)return {issue:'该资源关联多个团队原件，请明确选择发布位置'};
  const link=matching.reduce((latest,current)=>current.teamVersion>latest.teamVersion?current:latest),target=heads.find(item=>item.kind===source.kind&&item.id===link.teamItemId);
  if(!target)return {link,issue:'关联的团队原件不存在或当前账号不可见，请确认权限或明确另存为新原件'};
+ if(target.sourceKind==='glb')return {link,target,issue:'管理库 GLB 不支持发布新版，请明确另存为新原件'};
  if(!client.user||client.user.role==='viewer'||target.owner!==client.user.id&&client.user.role!=='admin')return {link,target,issue:'当前账号没有追加该关联团队原件版本的权限，可明确另存为新原件'};
  if(target.version!==link.teamVersion)return {link,target,issue:`关联原件已从 v${link.teamVersion} 更新至 v${target.version}，请获取新版后编辑，或明确另存为新原件`};
  return {link,target};
@@ -279,6 +301,7 @@ export async function prepareTeamPublications(client:TeamClient,kind:'asset'|'sc
  const heads=kind==='asset'?await listModelAssets():[],links=(await listTeamResourceLinks()).filter(link=>link.kind===kind&&link.status==='ready');
  for(let index=0;index<sources.length;index++){let source=sources[index];
   const target=targets[source.id];if(target&&(target.kind!==kind||(target.owner!==client.user!.id&&client.user!.role!=='admin')))throw Error('你没有追加该团队原件版本的权限');
+  if(target?.sourceKind==='glb')throw Error('管理库 GLB 不支持发布新版，请明确另存为新原件');
   const sourceLinks=links.filter(link=>link.localId===source.id);
   if(sourceLinks.length&&!Object.prototype.hasOwnProperty.call(targets,source.id))throw Error('该资源已有团队关联，请选择关联原件或明确选择新增到团队库');
   const targetLinks=target?sourceLinks.filter(link=>link.serviceOrigin===client.base&&link.teamItemId===target.id):[];

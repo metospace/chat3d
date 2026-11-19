@@ -44,7 +44,7 @@ export async function parseTeamUploadFile(file:File,kind:'asset'|'scene',onStage
  const result:TeamUploadFile={kind,name,description,categoryPath};payloads.set(result,payload);return result;
 }
 export function canUpdateTeamUpload(client:TeamClient,item:TeamItem):boolean{
- const user=client.user;return !!user&&user.role!=='viewer'&&(user.role==='admin'||item.owner===user.id);
+ const user=client.user;return item.sourceKind!=='glb'&&!!user&&user.role!=='viewer'&&(user.role==='admin'||item.owner===user.id);
 }
 export async function prepareTeamFileUpload(file:TeamUploadFile,options:{client:TeamClient;name:string;description:string;categoryPath:string[];target?:TeamItem;key:string},onStage?:(stage:string)=>void):Promise<TeamPreparationResult>{
  const {client,target,key,description,categoryPath}=options,name=options.name.trim();
