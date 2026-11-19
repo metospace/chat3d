@@ -92,6 +92,7 @@ export async function loadTeamVersion(client:TeamClient,item:TeamItem):Promise<T
  const bytes=await client.downloadGlb(item);assertGlbSize(bytes.byteLength);
  const {doc}=await importGlb(bytes,item.name);
  const payload=item.kind==='asset'?createModelAsset(doc,doc.nodes.map(node=>node.id),{name:item.name,category:'其他'}):scenePublication(doc);
+ if(item.kind==='asset'&&item.description)payload.description=item.description.slice(0,1000);
  return {...item,payload};
 }
 const sessionListeners=new Set<()=>void>();

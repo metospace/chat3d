@@ -54,7 +54,7 @@ try{
  AbortSignal.timeout=ms=>{timeouts.push(ms);return originalTimeout(ms);};
  try{loadedAsset=await api.loadTeamVersion(client,nativeAsset);}finally{AbortSignal.timeout=originalTimeout;}
  assert.ok(timeouts.includes(15*60*1000),'GLB download must allow the 15 minute model transfer timeout');
- assert.equal(loadedAsset.kind,'asset');assert.equal(loadedAsset.name,nativeAsset.name);assert.equal(loadedAsset.payload.format,'chat3d-model-asset');
+ assert.equal(loadedAsset.kind,'asset');assert.equal(loadedAsset.name,nativeAsset.name);assert.equal(loadedAsset.payload.format,'chat3d-model-asset');assert.equal(loadedAsset.payload.description,nativeAsset.description);
  const loadedScene=await api.loadTeamVersion(client,nativeScene),importedScene=parseProject(JSON.stringify(loadedScene.payload));
  const meshNodes=nodes=>{assert.ok(nodes.length);assert.ok(nodes.every(node=>node.geometry.type==='mesh'&&node.geometry.params.positions.length>0&&node.geometry.params.indices.length>0));};
  meshNodes(loadedAsset.payload.nodes);meshNodes(importedScene.nodes);assert.equal(downloads,2);assert.equal(bodyReads,2);assert.equal(jsonReads,0);
