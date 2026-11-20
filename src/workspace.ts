@@ -145,9 +145,10 @@ export function createSession(document?:EditorState['doc'],metadata:Partial<Pick
   const maxBytes=typeof maxBytesOrOptions==='number'?maxBytesOrOptions:typeof optionsOrMaxBytes==='number'?optionsOrMaxBytes:MAX_PROJECT_BYTES;
   const options=typeof maxBytesOrOptions==='object'?maxBytesOrOptions:typeof optionsOrMaxBytes==='object'?optionsOrMaxBytes:undefined;
   if(document)serializeProject(document,undefined,maxBytes);
+  if(options?.activate!==false||!w.activeId)capture();
   const next={...record(document?{...fresh(),doc:document}:fresh(),metadata.title??'新建会话'),...metadata};
   if(options?.activate===false&&w.activeId){track(next);useWorkspaceStore.setState({sessions:[next,...w.sessions]});schedule();return true;}
-  capture();useWorkspaceStore.setState(state=>({sessions:[next,...state.sessions],activeId:next.id}));restore(next);schedule();return true;
+  useWorkspaceStore.setState(state=>({sessions:[next,...state.sessions],activeId:next.id}));restore(next);schedule();return true;
 }
 export function updateLibrarySession(id:string,metadata:Partial<Pick<WorkspaceSession,'moduleKind'|'assetSource'|'assetCatalogVersion'|'assetCategory'|'librarySavedAt'|'savedRevision'|'sceneThumbnail'|'title'|'autoTitle'|'sceneCategory'|'libraryDescription'|'libraryMetadataRevision'>>):void{
  if(blocked)throw Error('请先解决工作区保存错误');

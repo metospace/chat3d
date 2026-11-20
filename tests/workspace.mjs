@@ -16,6 +16,17 @@ try{
  });
  await test('workspace initialization preserves current scene and excludes credentials from durable data',async()=>{await w.initializeWorkspace();await w.flushWorkspace();const saved=await storage.readWorkspace();assert.ok(saved.sessions.length);assert.ok(!JSON.stringify(saved).includes('MUST-NOT-PERSIST'));assert.equal(w.useWorkspaceStore.getState().ready,true)});
  const first=w.useWorkspaceStore.getState().activeId;
+ await test('new active session sorts before the captured session with an advancing clock',async()=>{
+  const originalNow=Date.now;let now=originalNow();
+  try{
+   Date.now=()=>++now;
+   assert.equal(w.createSession(),true);
+   const {sessions,activeId}=w.useWorkspaceStore.getState();
+   const ordered=sessions.filter(s=>!s.deletedAt).sort((a,b)=>Number(!!b.pinned)-Number(!!a.pinned)||b.updatedAt-a.updatedAt);
+   assert.equal(ordered[0].id,activeId);
+   assert.ok(sessions.find(s=>s.id===activeId).updatedAt>=sessions.find(s=>s.id===first).updatedAt);
+  }finally{Date.now=originalNow;w.switchSession(first);}
+ });
  await test('sessions isolate conversation, reference image, composer draft and geometry',async()=>{
   editor.getState().addUserMessage('第一台设备',['data:image/jpeg;base64,YWJj']);editor.getState().setComposerText('继续修改轮子');editor.getState().setComposerImages(['data:image/jpeg;base64,YWJj']);
   editor.getState().applyCommandBatch([{op:'createPrimitive',name:'A',parentId:null,geometry:{type:'box',params:{width:1,height:1,depth:1}},transform:{position:[0,.5,0],scale:[1,1,1],rotationQuaternion:[0,0,0,1]},materialId:'mat_gray'}],'create');
