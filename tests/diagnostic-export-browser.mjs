@@ -9,7 +9,7 @@ const fixture=`
 import React from 'react';
 import {createRoot} from 'react-dom/client';
 import {TaskPanel} from '/src/ui/TaskPanel.tsx';
-import {createEditorStore} from '/src/store.ts';
+import {createEditorStore,createInitialDoc} from '/src/store.ts';
 import {prepareDiagnosticExport} from '/src/util/diagnosticExport.ts';
 window.exportWorkers={created:0,terminated:0,active:0};
 const NativeWorker=window.Worker;
@@ -39,6 +39,14 @@ window.loadInput=async actual=>{
 window.startHeartbeat=()=>{window.beats=0;window.maxGap=0;let previous=performance.now();window.beatTimer=setInterval(()=>{const now=performance.now();window.maxGap=Math.max(window.maxGap,now-previous);previous=now;window.beats++;},10);};
 window.stopHeartbeat=()=>clearInterval(window.beatTimer);
 window.directExport=async()=>{const s=state.getState();const snapshot={aiStatus:s.aiStatus,lastRun:s.lastRun,aiError:s.aiError,messages:s.messages,doc:s.doc,pendingBatch:s.pendingBatch,pendingResult:s.pendingResult,past:s.past,future:s.future};const stringify=JSON.stringify;JSON.stringify=()=>{throw Error('JSON.stringify must not run on main thread');};try{const result=await prepareDiagnosticExport(snapshot,window.liveDiagnostics);window.directBlob=result.blob;return {bytes:result.bytes,summary:result.summary};}finally{JSON.stringify=stringify;}};
+window.exportUnicodeFixture=async maxFileBytes=>{
+ const boundary='a'.repeat(65535)+'🚗雪'+String.fromCharCode(10,34,92)+'b'.repeat(65537);
+ const snapshot={aiStatus:'error',aiError:boundary,lastRun:null,messages:[],doc:createInitialDoc(),pendingResult:null,pendingBatch:null,past:[],future:[]};
+ try{
+  const {blob}=await prepareDiagnosticExport(snapshot,undefined,{maxFileBytes});
+  return {retained:Object.values(JSON.parse(await blob.text()).artifacts).includes(boundary)};
+ }catch(error){return {error:error.message};}
+};
 window.mount();`;
 const server=await createServer({server:{host:'127.0.0.1',port:0,hmr:false},plugins:[{name:'diagnostic-export-fixture',resolveId(id){if(id==='/__diagnostic_fixture.js')return '\0diagnostic-export-fixture';},load(id){if(id==='\0diagnostic-export-fixture')return fixture;},configureServer(server){server.middlewares.use(async(req,res,next)=>{
  if(req.url==='/__diagnostic_fixture'){res.setHeader('Content-Type','text/html');res.end(await server.transformIndexHtml('/__diagnostic_fixture','<html><body><div id="root"></div><script type="module" src="/__diagnostic_fixture.js"></script></body></html>'));return;}
@@ -75,10 +83,22 @@ try{
  const data=await page.evaluate(async()=>{const b=JSON.parse(await window.directBlob.text());return {format:b.format,omissions:b.omissions,hasConfig:!!b.data.aiConfig||!!b.data.diagnosticApiKey};});
  assert.equal(data.format,'chat3d-diagnostics-v2');assert.equal(data.hasConfig,false);assert.ok(data.omissions.some(item=>item.path.includes('pendingResult.applied')));
  console.log('PASS full export keeps browser heartbeat alive, stringifies only in worker, returns Blob and small summary',JSON.stringify({bytes:result.bytes,...heartbeat}));
+ assert.deepEqual(await page.evaluate(()=>window.exportUnicodeFixture(256*1024)),{retained:true});
+ assert.match((await page.evaluate(()=>window.exportUnicodeFixture(4096))).error,/轻量诊断/);
+ assert.equal(await page.evaluate(()=>window.exportWorkers.active),0);
+ console.log('PASS chunked JSON preserves Unicode and escaping, and releases the worker on the file limit');
  await page.getByText('问题排查',{exact:true}).click();await page.getByRole('button',{name:'下载完整诊断记录',exact:true}).click();
  await page.waitForFunction(()=>window.downloads.length===1);await page.getByRole('status').filter({hasText:'尚未确认'}).waitFor();assert.ok(await page.getByLabel('诊断导出摘要').textContent());
  assert.equal(await page.locator('textarea').count(),0);
  console.log('PASS task panel downloads original Blob and renders only compact summary');
+ const createdBeforeLight=await page.evaluate(()=>window.exportWorkers.created);
+ await page.getByRole('button',{name:'下载轻量诊断记录',exact:true}).click();
+ await page.waitForFunction(()=>window.downloads.length===2);
+ const light=await page.evaluate(async()=>{const blob=window.downloads.at(-1);return {bytes:blob.size,data:JSON.parse(await blob.text())};});
+ assert.equal(light.data.format,'chat3d-diagnostics-v1');assert.equal(light.data.status,initialStatus);
+ assert.ok(light.bytes<256*1024);assert.equal(light.data.messages,undefined);assert.equal(light.data.scene.nodes>=0,true);
+ assert.equal(await page.evaluate(()=>window.exportWorkers.created),createdBeforeLight);
+ console.log('PASS lightweight support download skips the full snapshot worker');
  await page.getByRole('button',{name:'下载完整诊断记录',exact:true}).click();await page.getByRole('button',{name:'取消准备',exact:true}).waitFor();await page.waitForFunction(()=>window.exportWorkers.active>0);await page.evaluate(()=>window.unmount());await page.waitForFunction(()=>window.exportWorkers.active===0);
  assert.deepEqual(errors,[]);console.log('PASS unmount terminates export worker');
 }finally{await browser?.close();await server.close();}

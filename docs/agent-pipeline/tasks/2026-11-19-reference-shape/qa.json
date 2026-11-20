@@ -1,0 +1,117 @@
+{
+  "taskId": "2026-11-19-reference-shape",
+  "acceptanceRevision": 1,
+  "verdict": "PASS",
+  "delivery": {
+    "repository": "D:/work/code/chat3d",
+    "baselineCommit": "4c5af60f26e83646f5bbf31b51283623eba657f9",
+    "currentCommit": "4c5af60f26e83646f5bbf31b51283623eba657f9",
+    "workingTree": "Uncommitted user changes preserved; includes previously untracked src/ai/referenceComparison.ts. Six developer delivery hashes match before/after independent validation. Task report and QA evidence excluded from delivery fingerprint.",
+    "sha256": {
+      "src/ai/modelingAgent.ts": "FC6B59D5C5DBF564F972B00330310DC42AA242F112C09C4931A04E3499F1DDDE",
+      "src/ai/referenceComparison.ts": "7F541C86515D318310EE7D2E69506F22396418DA0DCE42D86C0CBF0E116ED2D0",
+      "src/ai/agentPrompt.ts": "E86E4D48CA925F7B79C462A5BF8B5E75799566F15E3D28C3BDAF011D89E9885B",
+      "tests/modeling-program-browser.mjs": "E2022D385084F03B7FD2233C004DE8B7289EA4B1B521AA86E1E9690BDD4D08DE",
+      "tests/reference-agent.mjs": "808AD43E33754E9F52F9281569E1816DAE11202C490FE3264EECBC8F812B6B80",
+      "docs/REALISTIC-MODELING.md": "23285F5137C182CA8F96078CE2F1B0C9DB7E629B0D7C07EA76FE2D34128E4C72",
+      "src/ai/evidenceContext.ts": "BD366D4CB5BC92A5BB1D8B4AC6AB6F031C5B381E94568405C27F997E442C542E",
+      "src/ai/shapeReviewPolicy.ts": "CDFBECA11A2CF3F886211157D52BA807377B33325D74B6CF89265EE347E0F2D1",
+      "src/ai/agentContext.ts": "EE731923C5D423EF55A3DA26B54FB041D94DA2B44ADDA2C5427ECEBC3C4E7158",
+      "src/scene/modelingProgram.ts": "884FF7F64BB94FA9F1B110C5384D818D73703BFF1298CD2FDB9366E6B1A3F703",
+      "src/scene/modelingProgramConverter.js": "78BEBC48E05EA282706ADA42693E75AB4891DA9D41451479CCF3308E26B2AB5D",
+      "src/domain/referenceRepairs.ts": "E47F50961980868C8528C003E8D6A9019F47CCF82AC5C0C3F22F707F37721C94",
+      "src/domain/visualReviewPlan.ts": "C0A4201891677D046CEB9A14914DAEE657A8584465ABEEE8879BD4953E0B3005",
+      "package-lock.json": "A14A9B39539C2EA3BDB715975E3216151302A8CBA66C77FFEA1DF5BF1F33ED8A",
+      "tsconfig.json": "9671B50541BCB0112D8914CF5F82C838FCAAA25BC3F14AB90CF40A49E929224E"
+    }
+  },
+  "criteria": [
+    {
+      "id": "A1",
+      "expected": "Independent current silhouette check before both detail source execution paths; failures retain draft; match allows detail",
+      "actual": "Inspected awaited stageCheck before runModelingProgram in build and patch. Failure fixture uses throw-on-execution source and verifies unchanged source/stage after mismatch/unknown/invalid. Browser fixture successfully refines two-node silhouette into four-node detailed object after match.",
+      "result": "PASS",
+      "evidence": "reference-agent and modeling-program-browser"
+    },
+    {
+      "id": "A2",
+      "expected": "Primary form only during silhouette; full feature/material check at final; independent original image evidence",
+      "actual": "Silhouette checklist filters form roles; overall item covers primary volumes/negative spaces. Browser reviewer gets four ordered actual fixture images, two-message context with no tools/builder verdicts, and no unbuilt rim/support/cover checks. Final detailed cover mismatch blocks completion. QA context test confirms source inputs immutable and differing phase prompts.",
+      "result": "PASS",
+      "evidence": "source referenceComparison.ts/stageCheck; browser regression; qa-boundary"
+    },
+    {
+      "id": "A3",
+      "expected": "Cache scoped by revision/component/stage and reference/intent; edits/failures cannot yield false approval; fallbacks unchanged",
+      "actual": "Source scope includes componentId,phase,targets,views,primaryForm,executionTexts,images plus revision. Same pixels reuse rejection, actual geometry revision retriggers check; final phase triggers independent run despite silhouette pass. Malformed checker response blocks with incomplete conclusion. Existing no-reference/unavailable rendering regressions pass.",
+      "result": "PASS",
+      "evidence": "reference-agent; modeling-program-browser; modeling-agent; qa-boundary"
+    },
+    {
+      "id": "A4",
+      "expected": "Actionable general continuous-product geometry guidance, no claimed deterministic fidelity",
+      "actual": "Prompt explicitly establishes reference landmarks/comparable views/shared longitudinal stations/cross-sections/matching boundaries/tangent-normal continuity; directs editing curves before sampling and trim; no SU7 hardcoded geometry or numeric quality score.",
+      "result": "PASS",
+      "evidence": "agentPrompt.ts review and REALISTIC-MODELING.md"
+    },
+    {
+      "id": "A5",
+      "expected": "Meaningful behavioral tests and TypeScript pass; truthful limits",
+      "actual": "Independently executed all listed checks with Node24, including real worker browser transition and QA-only malformed-checker boundaries. No assertions removed or weakened for new early-check requirements; existing progression fixture extended to distinguish silhouette vs detailed calls.",
+      "result": "PASS",
+      "evidence": "checks list"
+    }
+  ],
+  "checks": [
+    {
+      "command": "\"C:/Program Files/WindowsApps/OpenAI.CodexPrimaryRuntime.v26-1118-904-0_26.1118.904.0_x64__3k8sg7r9htsxt/dependencies/node/bin/node.exe\" node_modules/typescript/bin/tsc --noEmit",
+      "cwd": "D:/work/code/chat3d",
+      "exitCode": 0,
+      "observation": "TypeScript no errors"
+    },
+    {
+      "command": "\"C:/Program Files/WindowsApps/OpenAI.CodexPrimaryRuntime.v26-1118-904-0_26.1118.904.0_x64__3k8sg7r9htsxt/dependencies/node/bin/node.exe\" tests/reference-agent.mjs",
+      "cwd": "D:/work/code/chat3d",
+      "exitCode": 0,
+      "observation": "8 PASS; includes build/patch × mismatch/unknown/invalid, rejected source deliberately throws, same-revision cache rejection and fresh check after actual edit"
+    },
+    {
+      "command": "\"C:/Program Files/WindowsApps/OpenAI.CodexPrimaryRuntime.v26-1118-904-0_26.1118.904.0_x64__3k8sg7r9htsxt/dependencies/node/bin/node.exe\" tests/reference-shape.mjs",
+      "cwd": "D:/work/code/chat3d",
+      "exitCode": 0,
+      "observation": "9 PASS"
+    },
+    {
+      "command": "\"C:/Program Files/WindowsApps/OpenAI.CodexPrimaryRuntime.v26-1118-904-0_26.1118.904.0_x64__3k8sg7r9htsxt/dependencies/node/bin/node.exe\" tests/evidence-context.mjs",
+      "cwd": "D:/work/code/chat3d",
+      "exitCode": 0,
+      "observation": "21 PASS"
+    },
+    {
+      "command": "\"C:/Program Files/WindowsApps/OpenAI.CodexPrimaryRuntime.v26-1118-904-0_26.1118.904.0_x64__3k8sg7r9htsxt/dependencies/node/bin/node.exe\" tests/modeling-program-browser.mjs",
+      "cwd": "D:/work/code/chat3d",
+      "exitCode": 0,
+      "observation": "11 PASS; real browser worker source execution, successful silhouette-to-detail transition and stage-fresh final independent rejection/cache/recheck"
+    },
+    {
+      "command": "\"C:/Program Files/WindowsApps/OpenAI.CodexPrimaryRuntime.v26-1118-904-0_26.1118.904.0_x64__3k8sg7r9htsxt/dependencies/node/bin/node.exe\" tests/modeling-agent.mjs",
+      "cwd": "D:/work/code/chat3d",
+      "exitCode": 0,
+      "observation": "130 PASS; mocked model/rendering including unavailable-renderer fallback, steering, stale/same-turn evidence, draft retention and no-reference edits"
+    },
+    {
+      "command": "\"C:/Program Files/WindowsApps/OpenAI.CodexPrimaryRuntime.v26-1118-904-0_26.1118.904.0_x64__3k8sg7r9htsxt/dependencies/node/bin/node.exe\" docs/agent-pipeline/tasks/2026-11-19-reference-shape/qa-boundary.mjs",
+      "cwd": "D:/work/code/chat3d",
+      "exitCode": 0,
+      "observation": "Independent QA boundary PASS: context input immutability/image order, no builder verdict/tools, stage split, duplicate/missing/out-of-range verdict rejection and simple/no-reference scope"
+    }
+  ],
+  "issues": [],
+  "unverified": [],
+  "limitations": [
+    "All model/reviewer responses are synthetic; no paid user model request or SU7 re-generation performed. Actual shape reconstruction quality and paid-model latency/cost are not established.",
+    "Independent comparison is another model judgment and is not an objective similarity metric. Scope retains existing complex multi-reference closeup mesh gate, not universal reconstruction enforcement.",
+    "No product UI changed; browser test validates actual generation worker and agent flow rather than a visual fidelity review."
+  ],
+  "qaEvidence": "docs/agent-pipeline/tasks/2026-11-19-reference-shape/qa-boundary.mjs"
+}

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {indexedDB,IDBObjectStore} from 'fake-indexeddb';
+import {indexedDB,IDBDatabase,IDBObjectStore} from 'fake-indexeddb';
 import {createServer} from 'vite';
 globalThis.indexedDB=indexedDB;
 const server=await createServer({server:{middlewareMode:true},appType:'custom'});
@@ -37,7 +37,7 @@ try{
   // Read behavior, not the former unchunked {value} representation, is the contract.
   assert.ok('extra' in pack.sessions[1].snapshot);
  });
- await test('stale revisions cannot remove or overwrite newer records',async()=>{const before=await records();await assert.rejects(()=>storage.writeWorkspace({...pack,sessions:[{id:'stale',snapshot:{doc:{nodes:[{id:'wrong'}]}}}]},pack.revision-1),/另一个标签页/);assert.deepEqual(await records(),before);assert.deepEqual(await storage.readWorkspace(),pack)});
+ await test('stale revisions cannot remove or overwrite newer records',async()=>{const before=await records();await assert.rejects(()=>storage.writeWorkspace({...pack,sessions:[{id:'stale',snapshot:{doc:{nodes:[{id:'wrong'}]}}}]},pack.revision-1),/会话版本冲突/);assert.deepEqual(await records(),before);assert.deepEqual(await storage.readWorkspace(),pack)});
  await test('older app database version cannot overwrite upgraded storage',async()=>{await new Promise((resolve,reject)=>{const r=indexedDB.open(dbname,1);r.onerror=()=>{assert.equal(r.error.name,'VersionError');resolve()};r.onsuccess=()=>{r.result.close();reject(Error('old database reopened'))}})});
  await test('aborted serialization leaves previous revision and data intact',async()=>{const bad={...pack,sessions:[{...pack.sessions[0],snapshot:{...pack.sessions[0].snapshot,lastRun:()=>{}}}]};await assert.rejects(()=>storage.writeWorkspace(bad,pack.revision));const restored=await storage.readWorkspace();assert.equal(restored.revision,pack.revision);assert.deepEqual(restored.sessions,pack.sessions)});
  await test('request errors keep their name and message even without a transaction error callback',async()=>{
@@ -66,6 +66,70 @@ try{
   finally{IDBObjectStore.prototype.openKeyCursor=open;}
   assert.deepEqual(await storage.readWorkspace(),pack);
  });
+ const commitError=()=>new DOMException('Internal error committing transaction.','UnknownError');
+ function interruptCommit(beforeRetry){
+  const open=IDBObjectStore.prototype.openKeyCursor;
+  let commits=0;
+  IDBObjectStore.prototype.openKeyCursor=function(...args){
+   const request=open.apply(this,args);
+   request.addEventListener('success',()=>{
+    if(request.result!==null||++commits!==1)return;
+    this.transaction.error=commitError();
+    this.transaction.abort();
+    beforeRetry?.();
+   });
+   return request;
+  };
+  return {count:()=>commits,restore:()=>{IDBObjectStore.prototype.openKeyCursor=open;}};
+ }
+ await test('an internal commit abort retries once without dropping drafts or reference images',async()=>{
+  const session=pack.sessions[0],snapshot={...session.snapshot,composerImages:['data:image/png;base64,YWJj']};
+  const next={...pack,sessions:[{...session,snapshot},...pack.sessions.slice(1)]};
+  const interrupted=interruptCommit();
+  try{
+   assert.equal(await storage.writeWorkspace(next,pack.revision),pack.revision+1);
+   assert.equal(interrupted.count(),2);
+   pack=await storage.readWorkspace();
+   assert.deepEqual(pack.sessions,next.sessions);
+  }finally{interrupted.restore();}
+ });
+ await test('a durable write with a lost acknowledgement is recognized by its receipt without resaving',async()=>{
+  const transaction=IDBDatabase.prototype.transaction;
+  let readwrites=0;
+  IDBDatabase.prototype.transaction=function(...args){
+   const tx=transaction.apply(this,args);
+   if(args[1]==='readwrite'&&++readwrites===1){
+    let callback;
+    Object.defineProperty(tx,'oncomplete',{
+     get:()=>callback,set:fn=>{
+      callback=event=>{
+       tx.error=commitError();
+       tx.onabort.call(tx,event);
+      };
+     },
+    });
+   }
+   return tx;
+  };
+  const next={...pack,sessions:[{...pack.sessions[0],title:'commit receipt'},...pack.sessions.slice(1)]};
+  try{
+   assert.equal(await storage.writeWorkspace(next,pack.revision),pack.revision+1);
+   assert.equal(readwrites,1);
+   pack=await storage.readWorkspace();
+   assert.deepEqual(pack.sessions,next.sessions);
+  }finally{IDBDatabase.prototype.transaction=transaction;}
+ });
+ await test('a different writer at the next revision wins when the failed page retries',async()=>{
+  const other={...pack,sessions:[{...pack.sessions[0],title:'saved in a different writer'},...pack.sessions.slice(1)]};
+  let otherWrite;
+  const interrupted=interruptCommit(()=>{otherWrite=storage.writeWorkspace(other,pack.revision);});
+  try{
+   await assert.rejects(()=>storage.writeWorkspace(pack,pack.revision),/会话版本冲突/);
+   assert.equal(await otherWrite,pack.revision+1);
+   pack=await storage.readWorkspace();
+   assert.deepEqual(pack.sessions,other.sessions);
+  }finally{interrupted.restore();}
+ });
  await test('aborted reclamation rolls back fields and manifest without advancing the identity cache',async()=>{
   const before=await records(),session=pack.sessions[0],{messages,...snapshot}=session.snapshot;
   const next={...pack,sessions:[{...session,snapshot:{...snapshot,doc:{nodes:[{id:'committed-only-on-retry'}]},newField:{saved:true}}}]};
@@ -91,11 +155,15 @@ try{
   const ownNames={};Object.defineProperty(ownNames,'__proto__',{value:{safe:true},enumerable:true});ownNames.constructor={prototype:{safe:true}};
   const doc={nodes:[{id:'large-mesh',geometry:{type:'mesh',params:{positions,indices,normals:positions,optional:undefined}}}],source:'雪😀'.repeat(IDB_GRAPH_STRING_CHUNK),sparse,ownNames};doc.self=doc;
   const next={...pack,sessions:[{id:'bounded',title:'large model',snapshot:{doc,pendingResult:{doc},extra:undefined}}]};
-  const put=IDBObjectStore.prototype.put,stringify=JSON.stringify,slice=Array.prototype.slice;let checked=0,maxArray=0,maxString=0;
+  const put=IDBObjectStore.prototype.put,stringify=JSON.stringify,slice=Array.prototype.slice;let checked=0,maxArray=0,maxString=0,inFlight=0;
   IDBObjectStore.prototype.put=function(value,key){
    const pending=[value],seen=new Set();
    while(pending.length){const item=pending.pop();if(typeof item==='string'){maxString=Math.max(maxString,item.length);if(item.length>IDB_GRAPH_STRING_CHUNK)throw new DOMException('simulated single-record string limit','QuotaExceededError');continue}if(!item||typeof item!=='object'||seen.has(item))continue;seen.add(item);if(Array.isArray(item)){maxArray=Math.max(maxArray,item.length);if(item.length>IDB_GRAPH_ARRAY_CHUNK)throw new DOMException('simulated single-record array limit','QuotaExceededError')}for(const property in item)if(Object.hasOwn(item,property))pending.push(item[property]);}
-   checked++;return put.call(this,value,key);
+   checked++;
+   assert.equal(++inFlight,1,'wait for the current fragment before scheduling the next write');
+   const request=put.call(this,value,key);
+   request.addEventListener('success',()=>inFlight--);
+   return request;
   };
   JSON.stringify=function(value,...args){assert.ok(Array.isArray(value)&&value.length<=5,'whole document serialization is forbidden');return stringify.call(this,value,...args)};
   Array.prototype.slice=function(start,end){assert.ok(this.length<=IDB_GRAPH_ARRAY_CHUNK||(end!==undefined&&end-(start??0)<=IDB_GRAPH_ARRAY_CHUNK),'unbounded array clone is forbidden');return slice.call(this,start,end)};

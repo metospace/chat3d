@@ -129,8 +129,37 @@ export interface EditorState {
   setAiError: (e: string | null) => void;
 }
 
+// Estimate retained data instead of building a JSON string from every command
+// and inverse. Mesh arrays are shared by the immutable snapshots.
 function entryBytes(applied: CommandWithInverse[]): number {
-  return JSON.stringify(applied).length;
+  const seen = new WeakSet<object>();
+  const meshFields = new Set(['positions', 'indices', 'normals', 'uvs', 'colors']);
+  let bytes = 0;
+  function count(value: unknown, key?: string): void {
+    if (bytes > MAX_HISTORY_BYTES) return;
+    if (typeof value === 'string') {
+      bytes += value.length * 2;
+      return;
+    }
+    if (!value || typeof value !== 'object' || seen.has(value)) return;
+    seen.add(value);
+    bytes += 32;
+    if (Array.isArray(value)) {
+      bytes += value.length * 8;
+      if (key && meshFields.has(key)) return;
+      for (let index = 0; index < value.length && bytes <= MAX_HISTORY_BYTES; index++) {
+        count(value[index]);
+      }
+    } else {
+      for (const [key, child] of Object.entries(value)) {
+        bytes += 8 + key.length * 2;
+        count(child, key);
+        if (bytes > MAX_HISTORY_BYTES) break;
+      }
+    }
+  }
+  count(applied);
+  return bytes;
 }
 
 function pushHistory(past: HistoryEntry[], entry: HistoryEntry): HistoryEntry[] {
@@ -228,10 +257,10 @@ export const createEditorStore = (initial: Partial<EditorState> = {}) => create<
   // AI 事务确认：直接采用预演结果对象，不重跑 applyBatch
   // → 预览看到什么，提交就是什么；新建节点 ID 在预览/正式态完全一致
   confirmPending: () => {
-    const { pendingBatch, pendingResult } = get();
-    if (!pendingBatch || !pendingResult || get().aiStatus !== 'previewing') return;
+    const { doc, pendingBatch, pendingResult, aiStatus } = get();
+    if (!pendingBatch || !pendingResult || aiStatus !== 'previewing') return;
     // 防御：预览期间若文档被其他途径改动（界面已禁编辑，理论上走不到）
-    if (get().doc.revision !== pendingBatch.baseRevision || get().doc.projectId !== pendingBatch.projectId || pendingResult.doc.projectId !== pendingBatch.projectId) {
+    if (doc.revision !== pendingBatch.baseRevision || doc.projectId !== pendingBatch.projectId || pendingResult.doc.projectId !== pendingBatch.projectId) {
       set({
         aiError: '场景在预览期间已变更，预览作废',
         aiStatus: 'error',
@@ -241,18 +270,20 @@ export const createEditorStore = (initial: Partial<EditorState> = {}) => create<
       });
       return;
     }
+    const oldMaterials = new Set(doc.materials.map(m => m.id));
+    const survivingIds = new Set(pendingResult.doc.nodes.map(n => n.id));
     const entry: HistoryEntry = {
       id:makeId(),createdAt:Date.now(),source:'ai',
       summary: pendingBatch.summary,
       applied: pendingResult.applied,
       docAfter: pendingResult.doc,
-      createdMaterialIds: pendingResult.doc.materials.filter(m=>!get().doc.materials.some(old=>old.id===m.id)).map(m=>m.id),
+      createdMaterialIds: pendingResult.doc.materials.filter(m => !oldMaterials.has(m.id)).map(m => m.id),
       bytes: entryBytes(pendingResult.applied),
     };
     set((s) => ({
       messages: s.messages.map(m => m.batch?.requestId === pendingBatch.requestId ? {...m, outcome: 'applied' as const} : m),
       doc: pendingResult.doc,
-      selection: s.selection.filter(id=>pendingResult.doc.nodes.some(n=>n.id===id)),
+      selection: s.selection.filter(id => survivingIds.has(id)),
       past: pushHistory(s.past, entry),
       future: [],
       dirty: true,
@@ -292,7 +323,7 @@ export const createEditorStore = (initial: Partial<EditorState> = {}) => create<
     const entry = future[future.length - 1];
     const survivingIds=new Set(entry.docAfter.nodes.map(n=>n.id));
     set({
-      doc: { ...structuredClone(entry.docAfter), revision: doc.revision + 1 },
+      doc: { ...entry.docAfter, revision: doc.revision + 1 },
       selection: get().selection.filter(id=>survivingIds.has(id)),
       past: [...past, entry],
       future: future.slice(0, -1),

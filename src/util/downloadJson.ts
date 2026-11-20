@@ -1,4 +1,6 @@
 import {isTauri,invoke} from '@tauri-apps/api/core';
+// Keep desktop diagnostics within the support export budget before allocating IPC text.
+export const DESKTOP_DIAGNOSTIC_BYTES = 50 * 1024 * 1024;
 /** Native writes return a verified file path; browser initiation is not proof of saving. */
 export async function downloadJson(text:string,kind:'diagnostics'|'workspace'):Promise<string>{
  if(isTauri()){const path=await invoke<string>('save_support_json',{contents:text,kind});return '已保存到：'+path;}
@@ -9,7 +11,11 @@ export async function downloadJson(text:string,kind:'diagnostics'|'workspace'):P
 
 /** Diagnostics are already encoded in the worker; never stringify or wrap them again. */
 export async function downloadDiagnosticBlob(blob:Blob):Promise<string>{
- if(isTauri()){const path=await invoke<string>('save_support_json',{contents:await blob.text(),kind:'diagnostics'});return '已保存到：'+path;}
+ if(isTauri()){
+  if(blob.size>DESKTOP_DIAGNOSTIC_BYTES)throw new Error('当前记录太大，无法保存完整诊断文件。请下载轻量诊断记录。');
+  const path=await invoke<string>('save_support_json',{contents:await blob.text(),kind:'diagnostics'});
+  return '已保存到：'+path;
+ }
  const url=URL.createObjectURL(blob);const a=document.createElement('a');
  try{a.href=url;a.download='scenivo-diagnostics.json';document.body.appendChild(a);a.click();return '已发起下载，请检查浏览器下载列表；尚未确认文件落盘。';}
  finally{a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}

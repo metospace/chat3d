@@ -5,7 +5,7 @@ const server=await createServer({server:{middlewareMode:true},appType:'custom'})
 let passed=0;
 const test=(name,fn)=>{fn();passed++;console.log('PASS',name);};
 try{
- const {readSource,editSource}=await server.ssrLoadModule('/src/ai/modelingProgramSource.ts');
+ const {readSource,readRepairSource,editSource}=await server.ssrLoadModule('/src/ai/modelingProgramSource.ts');
  const {modelingProgramSource}=await server.ssrLoadModule('/src/ai/modelingProgramDraft.ts');
  const source=['const width = 4;','let depth = 2;','const title = "Body";','// function imaginary() {}','const label = "const misleading = 100;";','function makeBody(size) {','  return size * width;','}','const makeWheel = (radius) => radius * 2;','class Builder {}','return makeBody(depth);'].join('\n');
  const options=()=>({expectedVersion:readSource(source).version,patches:[{find:'width = 4',replace:'width = 5'}]});
@@ -31,6 +31,16 @@ try{
   assert.equal(readSource(source).version,readSource(`${source}`).version);
   assert.notEqual(readSource('ab').version,readSource('ba').version);
   assert.notEqual(readSource(source).version,readSource(source+' ').version);
+ });
+ test('repair read returns both prior pages of a medium program and a directory for a large program',()=>{
+  const text='// geometry notes\n'.repeat(1200)+source;
+  assert.ok(text.length>12000);
+  const repair=readRepairSource(text);
+  assert.equal(repair.mode,'repair');assert.equal(repair.version,readSource(text).version);
+  assert.equal(repair.window.text,text);assert.equal(repair.nextChar,undefined);
+  const larger=readRepairSource(text.repeat(2));
+  assert.equal(larger.mode,'summary');assert.equal(larger.window,undefined);
+  assert.ok(larger.directory.some(item=>item.name==='makeBody'));
  });
  test('line ranges are exact and paginate without returning more than 120 lines or 12000 chars',()=>{
   const view=readSource(source,{startLine:6,endLine:8});

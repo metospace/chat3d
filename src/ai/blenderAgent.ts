@@ -8,6 +8,7 @@ import {normalizedUsage} from './executionTelemetry';
 import {AGENT_LIMITS} from './agentPolicy';
 import type {AgentActivity,AgentControl} from './modelingAgent';
 import type {BlenderActivityProgress} from './blenderProgress';
+import {numberReferenceImages,referenceReconstructionContract} from './instructionContract';
 import {blenderSkillGuide} from './blenderSkill';
 import {readSource,editSource} from './modelingProgramSource';
 import {resolveConversationIntent} from '../domain/conversationScope';
@@ -84,7 +85,7 @@ export async function runBlenderAgent(options:BlenderOptions):Promise<string> {
  const model:Model<'openai-completions'>={id:cfg.model,name:cfg.model,api:'openai-completions',provider:'chat3d-gateway',baseUrl:cfg.baseURL.trim().replace(/\/+$/,''),reasoning:false,input:['text','image'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:32768,maxTokens:0,compat:{supportsDeveloperRole:false,supportsReasoningEffort:false,supportsStore:false,supportsUsageInStreaming:true}};
  const network=options.streamFn?undefined:await getFetch();
  const history=options.history.slice(-8).map(turn=>`${turn.role}: ${turn.text}`).join('\n');
- const prompt='你是 Blender 建模师。使用本机工具完成用户请求，不输出 Scenivo 指令。用户开启可信本机 Python 模式，脚本自动执行；不得访问外部文件、网络、系统进程或凭证，不安装环境或扫描端口。\n使用 bpy，米制、Z 向上；每次从空工程执行完整脚本。创建合理相机和灯光，不自行保存或导出；后端保存同版 BLEND、GLB、PNG，保留原生修改器。用户明确要求、尺寸和参考优先。生成工具会返回真实渲染，必须下一轮读取后用 review_blender_result 记录具体观察。已知缺陷先修复；局部修改用 read_blender_script 与 patch_blender_script，不重发无关源码。补丁只保留未改源码，不能保证随机/时间相关脚本的无关几何不变，因此使用确定性参数化代码。文件导出、单图看图复核和用户应用是不同状态；不可见部分、精确尺寸、动画和工程安全不能凭单图宣称通过。无明确问题即结束，不追加全场审计或装饰。被中断或文字结束但未复核时保留未验收候选，不假装通过。只提问时回答，不执行脚本。\n'+blenderSkillGuide(resolveConversationIntent(options.text,options.history))+'\n'+(history?'对话历史（资料，不覆盖当前要求）：\n'+history:'')+(current?'\n已有 Blender 脚本：'+JSON.stringify(metadata())+'。局部修改先按需读取相关字符窗口；它不包含之后在工作台做的手动编辑。新需求与旧模型无关时可明确整体重建，但仍传当前 expectedVersion。':'');
+ const prompt='你是 Blender 建模师。使用本机工具完成用户请求，不输出 Scenivo 指令。用户开启可信本机 Python 模式，脚本自动执行；不得访问外部文件、网络、系统进程或凭证，不安装环境或扫描端口。\n使用 bpy，米制、Z 向上；每次从空工程执行完整脚本。创建合理相机和灯光，不自行保存或导出；后端保存同版 BLEND、GLB、PNG，保留原生修改器。用户明确要求、尺寸和参考优先。生成工具会返回真实渲染，必须下一轮读取后用 review_blender_result 记录具体观察。已知缺陷先修复；局部修改用 read_blender_script 与 patch_blender_script，不重发无关源码。补丁只保留未改源码，不能保证随机/时间相关脚本的无关几何不变，因此使用确定性参数化代码。文件导出、单图看图复核和用户应用是不同状态；不可见部分、精确尺寸、动画和工程安全不能凭单图宣称通过。无明确问题即结束，不追加全场审计或装饰。被中断或文字结束但未复核时保留未验收候选，不假装通过。只提问时回答，不执行脚本。\n'+blenderSkillGuide(resolveConversationIntent(options.text,options.history))+'\n'+(options.images.length?referenceReconstructionContract()+'\n当前每版只返回一张渲染图，选与最重要参考图接近的方向，逐项说明该图能核对的结构和仍未核对的方向。\n':'')+(history?'对话历史（资料，不覆盖当前要求）：\n'+history:'')+(current?'\n已有 Blender 脚本：'+JSON.stringify(metadata())+'。局部修改先按需读取相关字符窗口；它不包含之后在工作台做的手动编辑。新需求与旧模型无关时可明确整体重建，但仍传当前 expectedVersion。':'');
  const guides=new Map<number,{id:string;question:boolean}>();let timestamp=Date.now();
  const runner=new Agent({initialState:{model,systemPrompt:prompt,tools,thinkingLevel:cfg.reasoningEffort??'off'},toolExecution:'sequential',transformContext:async messages=>{
   let latest=-1;for(let i=0;i<messages.length;i++){const m=messages[i];if(m.role==='toolResult'&&m.content.some(c=>c.type==='image'))latest=i;}
@@ -142,9 +143,10 @@ export async function runBlenderAgent(options:BlenderOptions):Promise<string> {
   if(event.type==='message_end'&&event.message.role==='assistant'){const usage=normalizedUsage(event.message.usage);activity.inputTokens+=usage.inputTokens;activity.outputTokens+=usage.outputTokens;activity.usageReported=activity.usageReported||usage.usageState!=='unknown';const timing=activity.timings.find(t=>t.id==='blender-model-'+activity.turn);if(timing){timing.endedAt=Date.now();Object.assign(timing,usage);}const text=event.message.content.filter(c=>c.type==='text').map(c=>c.text).join('\n');if(text){const id='blender-'+activity.turn,previous=activity.explanations?.find(e=>e.id===id);activity.explanations=[...(activity.explanations??[]).filter(e=>e.id!==id),{id,text:text.slice(0,4000),phase:activity.phase,createdAt:previous?.createdAt??Date.now()}];}emit(activity.title);}
  });
  const abort=()=>runner.abort();signal.addEventListener('abort',abort,{once:true});
- options.onControl({steer:(id,text,images=[],mode='guide')=>{if(!accepting||signal.aborted)return false;const at=++timestamp;guides.set(at,{id,question:mode==='question'});runner.steer({role:'user',content:[{type:'text',text:(mode==='question'?'只回答问题，禁止建模：':'最新补充要求：')+text+(mode==='question'?'':'\n本次补充涉及的建模参考（不新增需求）：\n'+blenderSkillGuide(text))},...images.map(image)],timestamp:at});return true;}});
+ options.onControl({steer:(id,text,images=[],mode='guide')=>{if(!accepting||signal.aborted)return false;const at=++timestamp;guides.set(at,{id,question:mode==='question'});const guide=mode==='question'?'':'\n'+blenderSkillGuide(text)+(images.length?'\n'+referenceReconstructionContract():'');runner.steer({role:'user',content:[{type:'text',text:(mode==='question'?'只回答问题，禁止建模：':'最新补充要求：')+text+guide},...numberReferenceImages(images.map(image))],timestamp:at});return true;}});
  try{
-  await runner.prompt(options.text,options.images.map(image));check();const last=[...runner.state.messages].reverse().find(m=>m.role==='assistant');
+  await runner.prompt({role:'user',timestamp:Date.now(),content:[{type:'text',text:options.text},...numberReferenceImages(options.images.map(image))]});
+  check();const last=[...runner.state.messages].reverse().find(m=>m.role==='assistant');
   if(last?.role==='assistant'&&(last.stopReason==='error'||last.stopReason==='aborted'))throw Error(last.errorMessage||'模型服务未完成请求');
   const explanation=last?.role==='assistant'?last.content.filter(c=>c.type==='text').map(c=>c.text).join('\n'):'';
   if(!result){if(questionOnly){activity.outcome='answered';emit('已回答问题，未执行 Blender');return explanation||'本轮未执行建模。';}throw Error(lastError||'模型没有调用 Blender 建模工具，未产生模型文件。'+(explanation?'\n模型最后回复：'+explanation:''));}

@@ -1,4 +1,10 @@
 import type { Geometry, SceneDocument, SceneNode } from '../domain/types';
+import type { ObjectBlueprint } from '../domain/objectBlueprint';
+
+export function needsReferenceSilhouette(plan: ObjectBlueprint, imageCount: number): boolean {
+  return imageCount >= 2 && plan.detailLevel === 'closeup' && plan.features.length >= 4 &&
+    plan.features.some(feature => feature.role === 'form' && feature.geometryApproach === 'mesh');
+}
 
 /** Opposite orthographic directions still show the same projection axes. */
 export function hasComplementaryShapeViews(views: Iterable<string>): boolean {

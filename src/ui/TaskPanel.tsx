@@ -1,6 +1,8 @@
-import {downloadDiagnosticBlob} from '../util/downloadJson';
+import {isTauri} from '@tauri-apps/api/core';
+import {DESKTOP_DIAGNOSTIC_BYTES,downloadDiagnosticBlob,downloadJson} from '../util/downloadJson';
 import {RequirementList} from './RequirementList';
-import {prepareDiagnosticExport} from '../util/diagnosticExport';
+import {DiagnosticExportLimitError,prepareDiagnosticExport} from '../util/diagnosticExport';
+import {runDiagnostics} from '../domain/runDiagnostics';
 import {sanitizeDiagnostic} from '../ai/runTraceLog';
 import {conversationController} from '../runtime/conversationController';
 import type {ActivityTiming} from '../ai/modelingAgent';
@@ -50,6 +52,29 @@ export function TaskPanel({onConversation,editor}:{onConversation:()=>void;edito
  else title='还没有建模任务';
  const next=busy?'正在继续处理，可返回对话暂存补充要求或停止。':retainedStop?STOP_PREVIEW_NEXT:pending?(pendingBatch?.taskStatus==='partial'?'当前任务尚未完成，可继续处理剩余问题；也可保留或放弃阶段结果。':'检查模型后选择应用或放弃。应用不等于质量验收通过。'):unchangedStop?'可回到对话恢复本轮输入；不会自动继续生成。':aiStatus==='error'?'回到对话查看提示，确认后再继续。不会自动重试。':'可以继续提出修改要求，或保存当前模型。';
  const cancelDiagnosticExport=()=>{exportController.current?.abort();exportController.current=null;setPreparing(false);setExporting(false);setExportNotice('已取消诊断准备；模型任务不受影响。');};
+ const exportLightDiagnostics=async()=>{
+  setExporting(true);
+  setDiagnosticSummary('');
+  try{
+   const state=targetEditor.getState();
+   const activity=state.lastRun??latest?.activity??null;
+   const timings=activity?.timings??[];
+   const diagnostic=runDiagnostics(state.aiStatus,activity&&{
+    ...activity,timings:timings.slice(-200),parallelRuns:activity.parallelRuns?.slice(-16),
+   },state.aiError??failureTiming?.detail?.slice(0,512)??null);
+   const saved=await downloadJson(JSON.stringify({
+    ...diagnostic,
+    scene:{revision:state.doc.revision,nodes:state.doc.nodes.length},
+    draft:state.pendingResult?{revision:state.pendingResult.doc.revision,nodes:state.pendingResult.doc.nodes.length}:null,
+    timingCount:timings.length,
+   }),'diagnostics');
+   setExportNotice(saved);
+  }catch(error){
+   setExportNotice('轻量诊断下载失败：'+String(error));
+  }finally{
+   setExporting(false);
+  }
+ };
  const exportDiagnostics=async()=>{
   if(exportController.current)return;
   const controller=new AbortController();exportController.current=controller;setExporting(true);setPreparing(true);setExportNotice('正在准备排障记录…');setDiagnosticSummary('');
@@ -57,13 +82,20 @@ export function TaskPanel({onConversation,editor}:{onConversation:()=>void;edito
    const state=targetEditor.getState();
    // Pick only task data: never clone Zustand actions, config, or unrelated UI state.
    const snapshot={aiStatus:state.aiStatus,lastRun:state.lastRun,aiError:state.aiError,messages:state.messages,doc:state.doc,pendingBatch:state.pendingBatch,pendingResult:state.pendingResult,past:state.past,future:state.future,diagnosticApiKey:state.aiConfig?.apiKey};
-   const result=await prepareDiagnosticExport(snapshot,conversationController(targetEditor).getDiagnosticEntries(),{signal:controller.signal,onProgress:message=>{if(exportController.current===controller)setExportNotice(message);}});
+   const result=await prepareDiagnosticExport(snapshot,conversationController(targetEditor).getDiagnosticEntries(),{
+    signal:controller.signal,maxFileBytes:isTauri()?DESKTOP_DIAGNOSTIC_BYTES:undefined,
+    onProgress:message=>{if(exportController.current===controller)setExportNotice(message);},
+   });
    if(controller.signal.aborted)return;
    setPreparing(false);setDiagnosticSummary(result.summary);setExportNotice('正在发起保存…');
    const notice=await downloadDiagnosticBlob(result.blob);
    if(exportController.current===controller)setExportNotice(notice);
   }catch(error){
-   if(exportController.current===controller)setExportNotice(controller.signal.aborted?'已取消诊断准备；模型任务不受影响。':'诊断下载失败：'+String(error)+'。请重试。');
+   if(exportController.current===controller){
+    if(controller.signal.aborted)setExportNotice('已取消诊断准备；模型任务不受影响。');
+    else if(error instanceof DiagnosticExportLimitError)setExportNotice(error.message);
+    else setExportNotice('完整诊断下载失败：'+String(error)+'。可下载轻量诊断记录。');
+   }
   }finally{if(exportController.current===controller){exportController.current=null;setPreparing(false);setExporting(false);}}
  };
  return <section className="task-panel customer-task-panel" aria-label="任务记录">
@@ -81,6 +113,16 @@ export function TaskPanel({onConversation,editor}:{onConversation:()=>void;edito
  {!!manualHistory.length&&<section className="customer-section" aria-label="手动修改记录"><h3>手动与历史修改 <span>{manualHistory.length}</span></h3>{manualHistory.map(({entry,undone},i)=><article className="customer-outcome" key={entry.id??i}><div><strong>{undone?'已撤销':'已应用'} · {entry.source==='manual'?'手动操作':'历史操作'}</strong><time>{entry.createdAt?new Date(entry.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):'时间未记录'}</time></div><p>{customerText(entry.summary,'模型修改')}</p></article>)}<p className="task-footnote">这里显示当前保留的可撤销操作。导出的工作区备份不包含撤销历史。</p></section>}
  <section className="customer-section"><h3>AI 修改结果 <span>{outcomes.length}</span></h3>{outcomes.length?outcomes.map(m=><article className="customer-outcome" key={m.id}><div><strong>{m.outcome==='applied'?'已应用':m.outcome==='discarded'?'已放弃':m.outcome==='superseded'?'已保留到后续预览':pendingBatch?.requestId===m.batch?.requestId?'等待应用':'预览已结束'}</strong><time>{new Date(m.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</time></div><p>{customerText(m.batch?.summary||m.text,'模型修改')}</p></article>):<p className="task-footnote">{manualHistory.length?'还没有 AI 生成的修改结果；其他操作见上方记录。':'完成一次 AI 生成后，这里会显示预览和应用结果。'}</p>}</section>
  {!!runs.length&&<details className="customer-section"><summary>历史任务 · {runs.length} 次</summary>{runs.map(m=><details className="customer-history" key={m.id}><summary>{customerText(m.text,'建模请求').slice(0,90)}</summary><RunTrace run={m.run!} now={now}/></details>)}</details>}
- <details className="customer-section" onToggle={event=>{if(!event.currentTarget.open&&preparing&&exportController.current)cancelDiagnosticExport();}}><summary>问题排查</summary><p className="task-footnote">下载排障必需的完整记录：保留模型消息、请求复盘、参考资料、脚本、错误、当前与最终场景及操作命令；重复资料仅保存一次，逐步与撤销场景快照改为摘要，文件内记录全部省略原因。连接凭据已排除；内容仍可能包含敏感信息，请确认后再分享。后台准备可取消，不影响模型任务。</p><button className="customer-diagnostics" disabled={exporting} onClick={()=>void exportDiagnostics()}>{preparing?'正在准备…':exporting?'正在保存…':'下载完整诊断记录'}</button>{preparing&&<button onClick={cancelDiagnosticExport}>取消准备</button>}{exportNotice&&<p role="status">{exportNotice}</p>}{diagnosticSummary&&<p aria-label="诊断导出摘要" className="task-footnote">{diagnosticSummary}</p>}</details>
+ <details className="customer-section" onToggle={event=>{if(!event.currentTarget.open&&preparing&&exportController.current)cancelDiagnosticExport();}}>
+  <summary>问题排查</summary>
+  <p className="task-footnote">轻量记录包含任务状态、工具耗时和错误类型。完整记录还包含对话、模型请求、参考图和场景，请确认内容后再分享。</p>
+  <div className="customer-diagnostic-actions">
+   <button className="customer-diagnostics" disabled={exporting} onClick={()=>void exportLightDiagnostics()}>下载轻量诊断记录</button>
+   <button className="customer-diagnostics" disabled={exporting} onClick={()=>void exportDiagnostics()}>{preparing?'正在准备…':'下载完整诊断记录'}</button>
+   {preparing&&<button onClick={cancelDiagnosticExport}>取消准备</button>}
+  </div>
+  {exportNotice&&<p role="status">{exportNotice}</p>}
+  {diagnosticSummary&&<p aria-label="诊断导出摘要" className="task-footnote">{diagnosticSummary}</p>}
+ </details>
  </section>;
 }

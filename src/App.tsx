@@ -50,6 +50,7 @@ import {StudioHome} from './ui/StudioHome';
 import {TaskCenter,StudioSettings} from './ui/StudioPages';
 import {downloadJson} from './util/downloadJson';
 import {exportFile} from './util/exportFile';
+import {isTauri} from '@tauri-apps/api/core';
 import {initializeWorkspace,useWorkspaceStore,createSession,anySessionRunning,exportWorkspaceBackup,retryWorkspaceSave} from './workspace';
 import { MAX_PROJECT_BYTES, PROJECT_SIZE_ERROR, parseProjectFile, serializeProject } from './domain/project';
 import {acquirePublishedCategory} from './domain/teamCategories';
@@ -88,7 +89,38 @@ export default function App() {
   const [exportNotice,setExportNotice]=useState<{message:string;tone?:'success'|'error'}|null>(null);
   const closeExportNotice=useCallback(()=>setExportNotice(null),[]);
   const [conflictDismissed,setConflictDismissed]=useState(false),[backupStatus,setBackupStatus]=useState(''),[backupBusy,setBackupBusy]=useState(false);
-  async function backupConflict(){setBackupBusy(true);setBackupStatus('');try{await nextProgressPaint();setBackupStatus(await downloadJson(exportWorkspaceBackup(),'workspace'));}catch(e){setBackupStatus(e instanceof Error?e.message:String(e));}finally{setBackupBusy(false);}}
+  async function downloadRecoveryBackup(kind:'draft'|'workspace'){
+    if(backupBusy||(kind==='workspace'&&anySessionRunning()))return;
+    const editor=useEditorStore.getState();
+    const draft=editor.pendingResult?.doc??editor.doc;
+    setBackupBusy(true);
+    setBackupStatus('');
+    try{
+      // Ask for the destination while the click still grants user activation.
+      const picker=(window as Window&{showSaveFilePicker?:(options:{suggestedName:string})=>Promise<FileSystemFileHandle>}).showSaveFilePicker;
+      const destination=kind==='workspace'&&!isTauri()&&picker
+        ?await picker.call(window,{suggestedName:'scenivo-workspace.backup.json'})
+        :undefined;
+      await nextProgressPaint();
+      if(destination){
+        const contents=exportWorkspaceBackup();
+        const file=await destination.createWritable();
+        try{await file.write(contents);await file.close();}
+        catch(error){await file.abort().catch(()=>{});throw error;}
+        setBackupStatus('工作台备份已保存：'+destination.name);
+        return;
+      }
+      const message=kind==='draft'
+        ?await exportFile(async()=>serializeProject(draft),'json',`scenivo-draft-${draft.projectId.slice(0,8)}-r${draft.revision}.chat3d.json`)
+        :await downloadJson(exportWorkspaceBackup(),'workspace');
+      if(message)setBackupStatus(message);
+    }catch(error){
+      if(error instanceof DOMException&&error.name==='AbortError')return;
+      setBackupStatus(`备份下载失败：${error instanceof Error?error.message:String(error)}`);
+    }finally{
+      setBackupBusy(false);
+    }
+  }
   const closeSaveNotice=useCallback(()=>setProjectNotice(''),[]);
   const saveNotice=isLibrarySaveNotice(projectNotice)&&!autosaveError;
   const [modulePage,setModulePage]=useState<StudioNavPage>('home');const [libraryRefresh,setLibraryRefresh]=useState(0);
@@ -135,14 +167,18 @@ export default function App() {
     }catch(error){setExportNotice({message:`HTML 导出失败：${error instanceof Error?error.message:String(error)}`,tone:'error'});}
     finally{htmlExportBusy.current=false;setExporting(false);setExportProgress(null);}
   };
-  const saveProject = async () => {
+  const saveProject = async (preview=false) => {
     if(htmlExportBusy.current)return;
-    htmlExportBusy.current=true;setExportNotice(null);setExporting(true);setExportProgress({title:'下载项目 JSON',stage:'选择保存位置'});
-    const source=useEditorStore.getState().doc;
+    const state=useEditorStore.getState();
+    const source=preview?state.pendingResult?.doc:state.doc;
+    if(!source)return;
+    const title=preview?'下载待确认预览 JSON':'下载项目 JSON';
+    const name=preview?`scenivo-preview-${source.projectId.slice(0,8)}-r${source.revision}.chat3d.json`:`scenivo-${source.projectId.slice(0,8)}.chat3d.json`;
+    htmlExportBusy.current=true;setExportNotice(null);setExporting(true);setExportProgress({title,stage:'选择保存位置'});
     try {
       await nextProgressPaint();
-      const message=await exportFile(async()=>{setExportProgress({title:'下载项目 JSON',stage:'序列化项目数据'});await nextProgressPaint();const json=serializeProject(source);setExportProgress({title:'下载项目 JSON',stage:'保存文件'});await nextProgressPaint();return json;},'json',`scenivo-${source.projectId.slice(0,8)}.chat3d.json`);
-      if(message){if(useEditorStore.getState().doc===source)useEditorStore.getState().markSaved();setExportNotice({message});}
+      const message=await exportFile(async()=>{setExportProgress({title,stage:'序列化项目数据'});await nextProgressPaint();const json=serializeProject(source);setExportProgress({title,stage:'保存文件'});await nextProgressPaint();return json;},'json',name);
+      if(message){if(!preview&&useEditorStore.getState().doc===source)useEditorStore.getState().markSaved();setExportNotice({message});}
     } catch (e) { setExportNotice({message:`项目下载失败：${e instanceof Error ? e.message : String(e)}`,tone:'error'}); }
     finally{htmlExportBusy.current=false;setExporting(false);setExportProgress(null);}
   };
@@ -189,6 +225,7 @@ export default function App() {
   function openTrash(){setHistoryTrash(true);setShowHistory(true);}
 
   const workspace=useWorkspaceStore();
+  const workspaceRunning=workspace.sessions.some(session=>session.snapshot.wasRunning);
   const recovery=workspace.error?workspaceRecovery(workspace.error):undefined;
   useEffect(()=>{setConflictDismissed(false);setBackupStatus('');},[workspace.error,workspace.reclaimNotice]);
   const active=workspace.sessions.find(s=>s.id===workspace.activeId);
@@ -229,7 +266,10 @@ export default function App() {
   usePublishUpdateContext();
 
   /** antd menu model for the export / import actions. */
-  const exportItems=[
+  const exportLocked=(locked&&!previewing)||!workspace.ready;
+  const exportItems=previewing?[
+    {key:'save-preview',label:'下载待确认预览 JSON',icon:<DownloadIcon/>,disabled:exporting,onClick:()=>void saveProject(true)},
+  ]:[
     {key:'import-json',label:'导入项目 JSON',icon:<UploadIcon/>,onClick:()=>fileRef.current?.click()},
     {key:'import-glb',label:'导入 GLB 为新资产',icon:<CubeIcon/>,onClick:()=>modelFileRef.current?.click()},
     {type:'divider' as const},
@@ -252,14 +292,15 @@ export default function App() {
         {exportNotice&&<SaveToast key={exportNotice.message} message={exportNotice.message} tone={exportNotice.tone} onClose={closeExportNotice} duration={exportNotice.tone==='error'?0:5000}/>}
         {exportProgress&&<OperationProgress key={exportProgress.title} {...exportProgress}/>}
         {importProgress&&<OperationProgress key={importProgress.title} {...importProgress}/>}
-        {backupBusy&&<OperationProgress title="备份工作台" stage="打包项目并请求保存"/>}
+        {backupBusy&&<OperationProgress title="下载备份" stage="打包项目并请求保存"/>}
         {(workspace.error||workspace.reclaimNotice)&&!conflictDismissed&&<div role={workspace.error?'alert':'status'} className={`workspace-notice${workspace.error?' is-error':''}`}>
-          <div className="workspace-conflict-copy"><span>{workspace.error??workspace.reclaimNotice}</span>{recovery&&<small>{recovery.guidance}</small>}{backupStatus&&<span role="status">{backupStatus}</span>}</div>
-          <Button disabled={backupBusy} onClick={()=>void backupConflict()}>下载工作台备份</Button>
+          <div className="workspace-conflict-copy"><span>{workspace.error??workspace.reclaimNotice}</span>{workspaceRunning?<small>生成仍在进行。可先下载当前草稿，任务结束后可备份整个工作台。</small>:recovery&&<small>{recovery.guidance}</small>}{backupStatus&&<span role="status">{backupStatus}</span>}</div>
+          <Button disabled={backupBusy} onClick={()=>void downloadRecoveryBackup('draft')}>下载当前草稿</Button>
+          <Button disabled={backupBusy||workspaceRunning} onClick={()=>void downloadRecoveryBackup('workspace')}>下载工作台备份</Button>
           {(recovery?.kind==='quota'||workspace.reclaimNotice)&&<Button onClick={()=>setAssetDialog('manage')}>打开资产库备份</Button>}
           {(workspace.canRetrySave||recovery?.kind==='recovery')&&<Button onClick={()=>setShowTools(true)}>备份与恢复</Button>}
           {(workspace.canRetrySave||workspace.reclaimNotice)&&<Button type="primary" loading={workspace.saving} onClick={()=>void retryWorkspaceSave()}>重试保存</Button>}
-          {recovery?.refresh&&<Button type="primary" onClick={()=>window.location.reload()}>我已备份，刷新本页</Button>}
+          {recovery?.refresh&&<Button type="primary" disabled={backupBusy||workspaceRunning} onClick={()=>{if(!backupBusy&&!anySessionRunning())window.location.reload();}}>我已备份，刷新本页</Button>}
           {!workspace.canRetrySave&&<Button type="text" aria-label="隐藏保存异常提示" icon={<Cross1Icon/>} onClick={()=>setConflictDismissed(true)}/>}
         </div>}
         {!workspace.error&&autosaveError&&<div className="workspace-notice is-error" role="alert"><div className="workspace-conflict-copy"><span>自动保存失败</span><small>{autosaveError}</small></div><Button onClick={()=>setShowTools(true)}>备份与恢复</Button></div>}
@@ -287,7 +328,7 @@ export default function App() {
           <Button type="text" onClick={()=>setModulePage('dashboards')}>看板库</Button>
           {dashboard&&<Button type="text" onClick={()=>setDashboardOpen(true)}>查看看板</Button>}
           <Button type="text" aria-label="模型配置" icon={<GearIcon/>} onClick={()=>setShowSettings(true)}/>
-          <Dropdown trigger={['click']} menu={{items:exportItems}} disabled={locked||!workspace.ready}><Button className="workbench-export" aria-label="导出与更多" disabled={locked||!workspace.ready}>导出 <ChevronDownIcon/></Button></Dropdown>
+          <Dropdown trigger={['click']} menu={{items:exportItems}} disabled={exportLocked}><Button className="workbench-export" aria-label="导出与更多" disabled={exportLocked}>导出 <ChevronDownIcon/></Button></Dropdown>
           <Button className="workbench-save" type="primary" aria-label={librarySaving?'正在保存…':active?.moduleKind==='asset'?'保存资产':'保存场景'} disabled={locked||librarySaving||!workspace.ready} onClick={()=>{if(active?.moduleKind==='asset'&&!useEditorStore.getState().doc.nodes.length){setProjectNotice('还没有可保存的模型。请先创建或导入模型，再保存到资产库。');setAssistantOpen(true);return;}setShowLibrarySave(true);}}>{librarySaving?'保存中…':active?.moduleKind==='asset'?'保存资产':'保存场景'}</Button>
           </div>
           {workbenchUtilities}

@@ -27,4 +27,43 @@ try{
  await drawer.getByRole('button',{name:'准备继续完善',exact:true}).click();await drawer.waitFor({state:'hidden'});const input=await page.getByLabel('建模描述',{exact:true}).inputValue();assert.equal((input.match(/人物颈部衔接/g)||[]).length,1);assert.match(input,/资料限制/);assert.match(input,/不要反复/);assert.match(input,/直接局部修复/);assert.match(input,/不要只检查后原样结束/);
  await card.getByRole('button',{name:'待核对项 · 1',exact:true}).click();await drawer.waitFor();await mkdir('artifacts/preview-checks',{recursive:true});await page.screenshot({path:'artifacts/preview-checks/deduplicated.png'});
  console.log('PASS actual preview drawer merges repeated text, replaces current criterion prose, separates unverifiable limits and prepares non-repeating targeted followup');
+ await page.keyboard.press('Escape');await drawer.waitFor({state:'hidden'});
+ const staged=await page.evaluate(async()=>{
+  const {useEditorStore:s}=await import('/src/store.ts');
+  const {applyBatch}=await import('/src/domain/commands.ts');
+  const {useWorkspaceStore}=await import('/src/workspace.ts');
+  const base=s.getState().doc,triangleCount=200001,positions=[],indices=[];
+  for(let index=0;index<triangleCount;index++){
+   const x=(index%512)*.002,z=Math.floor(index/512)*.002;
+   positions.push(x,0,z,x+.001,0,z,x,0,z+.001);
+   indices.push(index*3,index*3+1,index*3+2);
+  }
+  const operations=[{op:'createAssembly',name:'密集网格',parts:[{
+   name:'网格',geometry:{type:'mesh',params:{positions,indices}},
+   transform:{position:[0,0,0],rotationQuaternion:[0,0,0,1],scale:[1,1,1]},
+  }]}];
+  const result=applyBatch(base,{operations});
+  if(result.errors.length)throw result.errors[0];
+  const batch={requestId:'dense-preview',projectId:base.projectId,baseRevision:base.revision,selectedIds:[],summary:'密集网格预览',operations};
+  s.setState({pendingBatch:batch,pendingResult:result,previewDoc:result.doc});
+  return {sessionId:useWorkspaceStore.getState().activeId,nodeId:result.doc.nodes[0].id};
+ });
+ await card.getByRole('button',{name:'应用修改',exact:true}).click();
+ await card.waitFor({state:'hidden'});
+ const committed=await page.evaluate(async({sessionId,nodeId})=>{
+  const {useEditorStore:s}=await import('/src/store.ts');
+  const {flushWorkspace,useWorkspaceStore}=await import('/src/workspace.ts');
+  await flushWorkspace();
+  const state=s.getState();
+  if(useWorkspaceStore.getState().error)throw Error(useWorkspaceStore.getState().error);
+  return {session:useWorkspaceStore.getState().activeId===sessionId,id:state.doc.nodes[0].id===nodeId,retained:state.doc.nodes[0].geometry.params.indices.length,preview:state.pendingResult,undoCount:state.past.length};
+ },staged);
+ assert.deepEqual(committed,{session:true,id:true,retained:600003,preview:null,undoCount:1});
+ await page.reload();
+ await page.waitForFunction(async({sessionId,nodeId})=>{
+  const {useWorkspaceStore,getSessionEditor}=await import('/src/workspace.ts');
+  const state=getSessionEditor(sessionId)?.getState();
+  return useWorkspaceStore.getState().ready&&state?.doc.nodes[0]?.id===nodeId&&state.doc.nodes[0].geometry.params.indices.length===600003&&state.pendingResult===null;
+ },staged);
+ console.log('PASS clicking Apply commits a 200,001-triangle preview and reload restores the full committed mesh');
 }finally{await browser?.close();await server.close();await rm(cacheDir,{recursive:true,force:true});}

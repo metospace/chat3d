@@ -42,7 +42,7 @@ function resultObject(text:string):Record<string,unknown>|undefined{
 }
 
 // Prune only obsolete tool snapshots. Keep call IDs, errors, latest scene and reference images intact.
-export function compactAgentContext(messages: AgentMessage[],currentSourceVersion?:(componentId:string)=>string|undefined): AgentMessage[] {
+export function compactAgentContext(messages: AgentMessage[],currentSourceVersion?:(componentId:string)=>string|undefined,rejectedProgramStages?:ReadonlySet<string>): AgentMessage[] {
   const sceneReads=new Set(['read_scene','find_scene_parts','find_scene_parts_batch','prepare_local_edit','read_pose_rig']);
   const sceneEdits=new Set(['patch_modeling_program','build_modeling_program','retry_structured_component','bind_object_features','repair_structured_features','build_structured_component','align_saved_instances','add_saved_assets','retry_scene_edit','define_pose_rig','pose_with_rig','bend_existing_mesh','pose_existing_parts','pose_bimanual_interaction','pose_arm_interaction','create_hand_pose','edit_scene','configure_animation','configure_process_route','add_reference_component','add_mesh_component','add_mesh_components','connect_scene_parts','remove_connection','set_surface_detail','set_surfaces_batch','build_components_parallel','prepare_surface_uv','move_components']);
   sceneEdits.delete('bind_object_features'); // Metadata associations remain authoritative across later geometry edits.
@@ -130,6 +130,10 @@ export function compactAgentContext(messages: AgentMessage[],currentSourceVersio
     if(m.role==='system'&&latestEdit>=0&&typeof m.content==='string')return {...m,content:m.content.replace(/# 场景上下文[\s\S]*?(?=\n本次编辑约束：)/,'# 场景上下文\n初始场景快照已过期；以最近成功编辑结果和当前版本查询为准。\n')};
     if(m.role==='assistant')return {...m,content:m.content.map((c):typeof m.content[number]=>{
       if(c.type!=='toolCall')return c;
+      if(rejectedProgramStages?.has(c.id)){
+        const {componentId,blueprintKey,stage,summary}=c.arguments;
+        return {...c,arguments:{componentId,blueprintKey,stage,summary,_historyOnly:'阶段前置条件未通过，源码没有运行。请按错误回执处理当前形体；原始请求仍在诊断中。'}};
+      }
       if(successful.has(c.id)&&c.name==='plan_model'&&c.id!==latestPlan)return {...c,arguments:{_historyOnly:'已被后续完整建模计划替代；以最新plan_model为准。'}};
       if(successful.has(c.id)&&c.name==='plan_object_structure'&&Array.isArray(c.arguments.objects)){const objects=c.arguments.objects.filter(p=>latestPlanKeys.get(p.key)===c.id);return {...c,arguments:{...c.arguments,objects,...(objects.length!==c.arguments.objects.length?{_historyOnly:'仅省略已由同key新方案完整替代的对象；其他当前方案仍有效。'}:{})}};}
       if(paired.has(c.id)){

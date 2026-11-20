@@ -12,3 +12,13 @@ export function confirmedCompletionIssues(values:string[],reportedDefects=false)
   return defect||unfinishedFunction||(reportedDefects&&!onlyUnverified);
  });
 }
+
+/** A stated, visible reference mismatch on the shape is still open when
+ * reported in observations or remaining issues rather than the issues field. */
+export function reportedReferenceShapeIssues(values:string[]):string[]{
+ const shape=/轮廓|剪影|比例|曲率|弧度|曲面|截面|收口|过渡|接缝|开口|凹腔|孔位|尺寸|结构|silhouette|proportion|curvature|contour|cross.section|opening/i;
+ const reference=/参考|原图|照片|素材|图\s*[0-9一二三四五六七八九]|reference|photo/i;
+ const disagreement=/(?:仍有|还存在|仍存在|还有|有明显|有细微).{0,12}(?:差别|差异|偏差)|(?:并非|并不|未能).{0,20}(?:一致|对齐|吻合|匹配)|不一致|不相符|differs? from|does not match|still.{0,20}(?:wider|narrower|taller|shorter)/i;
+ return confirmedCompletionIssues(values,true).filter(value=>shape.test(value)&&reference.test(value)&&disagreement.test(value)
+  &&!/未提供|缺少.{0,12}参考|未做.{0,12}校验|不可见|按(?:用户)?要求简化|上一版|修复前|(?:消除|修复了|没有|未发现).{0,12}(?:差异|差别|不一致)/.test(value));
+}

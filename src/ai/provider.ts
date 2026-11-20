@@ -6,7 +6,7 @@ import {generationReviewPrompt} from './generationPolicy';
 import type {EditScope} from '../domain/editScope';
 import type {AnimationProgram} from '../domain/animation';
 import {createBrowserProxyFetch} from './transport';
-import {instructionContract,referenceReconstructionContract} from './instructionContract';
+import {instructionContract,numberReferenceImages,referenceReconstructionContract} from './instructionContract';
 // 真实模型适配器（方案 P2，提前到本轮实现）
 // OpenAI 兼容协议：POST {baseURL}/chat/completions
 // - 系统提示词把 Scene DSL 讲清楚，模型输出结构化 JSON 命令批
@@ -207,7 +207,7 @@ export function buildMessages(text: string, ctx: SceneContext, images: string[] 
   const userContent: string | ContentPart[] = images.length
     ? [
         { type: 'text', text: text + reminder },
-        ...images.map((url): ContentPart => ({ type: 'image_url', image_url: { url } })),
+        ...numberReferenceImages(images.map((url): ContentPart => ({ type: 'image_url', image_url: { url } }))),
       ]
     : text + reminder;
   return [

@@ -3,16 +3,23 @@ import type {DiagnosticEntry} from '../ai/runTraceLog';
 import type {EditorState} from '../store';
 
 export type DiagnosticExportInput=Pick<EditorState,'aiStatus'|'lastRun'|'aiError'|'messages'|'doc'|'pendingBatch'|'pendingResult'|'past'|'future'> & {diagnosticApiKey?:string};
-export interface DiagnosticExportOptions {signal?:AbortSignal;onProgress?:(message:string)=>void}
+export interface DiagnosticExportOptions {signal?:AbortSignal;onProgress?:(message:string)=>void;maxFileBytes?:number}
 export interface DiagnosticExportResult {blob:Blob;summary:string;bytes:number}
+const MAX_FULL_EXPORT_INPUT = 128 * 1024 * 1024;
+const MAX_FULL_EXPORT_FILE = 128 * 1024 * 1024;
+export class DiagnosticExportLimitError extends Error {
+ constructor() {
+  super('当前记录太大，无法生成完整诊断文件。请下载轻量诊断记录。');
+ }
+}
 type WireValue=undefined|null|boolean|number|string|{ref:number};
 export type DiagnosticWireRecord=
  |{op:'container';id:number;array:boolean;length?:number}
  |{op:'set';id:number;key:string|number;value:WireValue}
  |{op:'string';id:number;part:string;last:boolean}
  |{op:'numbers';id:number;offset:number;values:number[]};
-export type DiagnosticWorkerRequest={type:'chunk';records:DiagnosticWireRecord[]}|{type:'finish';root:WireValue};
-type WorkerReply={type:'ack'}|{type:'progress';message:string}|{type:'error';message:string}|({type:'result'}&DiagnosticExportResult);
+export type DiagnosticWorkerRequest={type:'chunk';records:DiagnosticWireRecord[]}|{type:'finish';root:WireValue;maxFileBytes:number};
+type WorkerReply={type:'ack'}|{type:'progress';message:string}|{type:'error';message:string}|{type:'limit'}|({type:'result'}&DiagnosticExportResult);
 const abortError=()=>new DOMException('已取消诊断准备','AbortError');
 const checkAbort=(signal?:AbortSignal)=>{if(signal?.aborted)throw abortError();};
 async function nextTurn(){const {promise,resolve}=Promise.withResolvers<void>();setTimeout(resolve,0);await promise;}
@@ -81,7 +88,7 @@ function* graphRecords(value:unknown,root:(value:WireValue)=>void):Generator<Dia
  root(yield* visit(value));
 }
 
-export async function prepareDiagnosticExport(snapshot:DiagnosticExportInput,liveDiagnostics?:readonly DiagnosticEntry[],{signal,onProgress}:DiagnosticExportOptions={}):Promise<DiagnosticExportResult>{
+export async function prepareDiagnosticExport(snapshot:DiagnosticExportInput,liveDiagnostics?:readonly DiagnosticEntry[],{signal,onProgress,maxFileBytes=MAX_FULL_EXPORT_FILE}:DiagnosticExportOptions={}):Promise<DiagnosticExportResult>{
  checkAbort(signal);onProgress?.('正在准备排障记录…');await afterPaint();checkAbort(signal);
  let worker:Worker|undefined;
  try{
@@ -99,7 +106,11 @@ export async function prepareDiagnosticExport(snapshot:DiagnosticExportInput,liv
    if(workerFailure){reject(workerFailure);return promise;}
    const cleanup=()=>{activeWorker.removeEventListener('message',message);activeWorker.removeEventListener('error',error);activeWorker.removeEventListener('messageerror',messageError);signal?.removeEventListener('abort',abort);};
    const fail=(reason:unknown)=>{cleanup();reject(reason);};
-   const message=(event:MessageEvent<WorkerReply>)=>{if(event.data.type==='error')fail(new Error(event.data.message));else if(event.data.type===expected){cleanup();resolve(event.data);}};
+   const message=(event:MessageEvent<WorkerReply>)=>{
+    if(event.data.type==='error')fail(new Error(event.data.message));
+    else if(event.data.type==='limit')fail(new DiagnosticExportLimitError());
+    else if(event.data.type===expected){cleanup();resolve(event.data);}
+   };
    const error=(event:ErrorEvent)=>{event.preventDefault();fail(new Error(event.message||'诊断后台准备失败'));};
    const messageError=()=>fail(new Error('无法接收诊断后台结果'));
    const abort=()=>fail(abortError());
@@ -109,14 +120,26 @@ export async function prepareDiagnosticExport(snapshot:DiagnosticExportInput,liv
    return promise;
   };
   onProgress?.('正在分批传送必要记录…');
-  let root:WireValue=undefined,records:DiagnosticWireRecord[]=[],characters=0,deadline=performance.now()+4;
-  const flush=async()=>{if(records.length){const batch=records;records=[];characters=0;await exchange({type:'chunk',records:batch},'ack');}await nextTurn();checkAbort(signal);deadline=performance.now()+4;};
+  let root:WireValue=undefined,records:DiagnosticWireRecord[]=[],batchBytes=0,inputBytes=0,deadline=performance.now()+4;
+  const flush=async()=>{if(records.length){const batch=records;records=[];batchBytes=0;await exchange({type:'chunk',records:batch},'ack');}await nextTurn();checkAbort(signal);deadline=performance.now()+4;};
   for(const record of graphRecords({snapshot:projected,liveDiagnostics},value=>{root=value;})){
-   checkAbort(signal);records.push(record);characters+=record.op==='string'?record.part.length:record.op==='numbers'?record.values.length*8:record.op==='set'&&typeof record.value==='string'?record.value.length:32;
-   if(characters>=131072||records.length>=1024||performance.now()>=deadline)await flush();
+   checkAbort(signal);
+   const payloadBytes = record.op==='string' ? record.part.length*2
+    : record.op==='numbers' ? record.values.length*8
+    : record.op==='set' ? (typeof record.key==='string'?record.key.length*2:0) + (typeof record.value==='string'?record.value.length*2:0)
+    : 0;
+   const transferBytes=64+payloadBytes;
+   // Charge arrays before the worker allocates them. Numeric fragments fill
+   // the slots already counted on the receiving side.
+   if(record.op==='container')inputBytes+=64+(record.length??0)*8;
+   else if(record.op!=='numbers')inputBytes+=transferBytes;
+   if(inputBytes>MAX_FULL_EXPORT_INPUT)throw new DiagnosticExportLimitError();
+   records.push(record);
+   batchBytes+=transferBytes;
+   if(batchBytes>=131072||records.length>=1024||performance.now()>=deadline)await flush();
   }
   await flush();checkAbort(signal);onProgress?.('正在后台去重并生成文件…');
-  const result=await exchange({type:'finish',root},'result');
+  const result=await exchange({type:'finish',root,maxFileBytes},'result');
   if(result.type!=='result')throw new Error('诊断后台没有返回文件');
   return {blob:result.blob,summary:result.summary,bytes:result.bytes};
  }finally{worker?.terminate();}

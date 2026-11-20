@@ -85,14 +85,61 @@ try{
  const continued=await storage.readWorkspace();assert.equal(continued.sessions.find(s=>s.id===continued.activeId).snapshot.composerText,'恢复后自动保存');
  console.log('PASS failed writes surface the cause, preserve imports and recover autosave without reloading');passed++;
  const stored=await storage.readWorkspace();await storage.writeWorkspace(stored,stored.revision);
- await act(async()=>{editor.getState().setComposerText('冲突草稿');await w.flushWorkspace();editor.setState({aiStatus:'generating'});});
- const banner=ui.container.querySelector('.workspace-notice.is-error');assert.ok(banner);assert.equal(ui.getByRole('button',{name:'下载工作台备份'}).disabled,false);
- fireEvent.click(ui.getByRole('button',{name:'下载工作台备份'}));await waitFor(()=>assert.match(banner.querySelector('[role=status]').textContent,/停止生成/));
- await act(async()=>editor.setState({aiStatus:'idle'}));
+ const {applyBatch}=await server.ssrLoadModule('/src/domain/commands.ts');
+ const {parseProject}=await server.ssrLoadModule('/src/domain/project.ts');
+ const committedDoc=editor.getState().doc;
+ const pendingResult=applyBatch(committedDoc,{operations:parts});
+ assert.deepEqual(pendingResult.errors,[]);assert.equal(pendingResult.doc.nodes.length,1);
+ await act(async()=>{
+  editor.getState().setComposerText('冲突草稿');
+  await w.flushWorkspace();
+  editor.setState({aiStatus:'generating',pendingResult,previewDoc:pendingResult.doc});
+ });
+ const banner=ui.container.querySelector('.workspace-notice.is-error');assert.ok(banner);
+ const fullBackupButton=ui.getByRole('button',{name:'下载工作台备份'});
+ const reloadButton=ui.getByRole('button',{name:'我已备份，刷新本页'});
+ assert.equal(fullBackupButton.disabled,true);assert.equal(reloadButton.disabled,true);
  const oldCreate=URL.createObjectURL,oldRevoke=URL.revokeObjectURL,oldClick=dom.window.HTMLAnchorElement.prototype.click;
- URL.createObjectURL=()=> 'blob:backup';URL.revokeObjectURL=()=>{};dom.window.HTMLAnchorElement.prototype.click=()=>{};
- try{fireEvent.click(ui.getByRole('button',{name:'下载工作台备份'}));await waitFor(()=>assert.match(banner.querySelector('[role=status]').textContent,/下载|保存/));}finally{URL.createObjectURL=oldCreate;URL.revokeObjectURL=oldRevoke;dom.window.HTMLAnchorElement.prototype.click=oldClick;}
- assert.ok(ui.getByRole('button',{name:'我已备份，刷新本页'}));fireEvent.click(ui.getByRole('button',{name:'隐藏保存异常提示'}));assert.equal(ui.container.querySelector('.workspace-notice.is-error'),null);assert.match(w.useWorkspaceStore.getState().error,/另一个标签页/);assert.equal(w.createSession(),false);assert.equal(w.switchSession(background),false);
- console.log('PASS conflict backup reports failure and success inside banner; dismiss keeps navigation blocked');passed++;
+ const downloads=[];let downloadBlob;
+ URL.createObjectURL=blob=>{downloadBlob=blob;return 'blob:backup';};
+ URL.revokeObjectURL=()=>{};
+ dom.window.HTMLAnchorElement.prototype.click=function(){downloads.push({name:this.download,blob:downloadBlob});};
+ try{
+  fireEvent.click(ui.getByRole('button',{name:'下载当前草稿'}));
+  await waitFor(()=>assert.equal(downloads.length,1));
+  assert.match(downloads[0].name,/\.chat3d\.json$/);
+  const draft=parseProject(await downloads[0].blob.text());
+  assert.equal(draft.revision,pendingResult.doc.revision);
+  assert.equal(draft.nodes[0].id,pendingResult.doc.nodes[0].id);
+  assert.equal(editor.getState().doc,committedDoc);
+  assert.equal(editor.getState().pendingResult,pendingResult);
+  assert.equal(editor.getState().aiStatus,'generating');
+  assert.match(banner.querySelector('[role=status]').textContent,/已发起下载/);
+  await act(async()=>{
+   w.getSessionEditor(background).setState({aiStatus:'generating'});
+   editor.setState({aiStatus:'idle'});
+  });
+  assert.equal(fullBackupButton.disabled,true);assert.equal(reloadButton.disabled,true);
+  await act(async()=>w.getSessionEditor(background).setState({aiStatus:'idle'}));
+  assert.equal(fullBackupButton.disabled,false);assert.equal(reloadButton.disabled,false);
+  fireEvent.click(fullBackupButton);await waitFor(()=>assert.equal(downloads.length,2));
+  assert.equal(downloads[1].name,'scenivo-workspace.backup.json');
+  let written,closed=false;
+  dom.window.showSaveFilePicker=async({suggestedName})=>({
+   name:suggestedName,
+   createWritable:async()=>({
+    write:async contents=>{written=JSON.parse(contents);},close:async()=>{closed=true;},
+   }),
+  });
+  try{
+   fireEvent.click(fullBackupButton);
+   await waitFor(()=>assert.equal(closed,true));
+   assert.equal(written.format,'chat3d-workspace-backup');
+   assert.equal(written.sessions.some(session=>session.draft?.scene.nodes.length===1),true);
+   assert.match(banner.querySelector('[role=status]').textContent,/已保存/);
+  }finally{delete dom.window.showSaveFilePicker;}
+ }finally{URL.createObjectURL=oldCreate;URL.revokeObjectURL=oldRevoke;dom.window.HTMLAnchorElement.prototype.click=oldClick;}
+ fireEvent.click(ui.getByRole('button',{name:'隐藏保存异常提示'}));assert.equal(ui.container.querySelector('.workspace-notice.is-error'),null);assert.match(w.useWorkspaceStore.getState().error,/会话版本冲突/);assert.equal(w.createSession(),false);assert.equal(w.switchSession(background),false);
+ console.log('PASS a save conflict can export the live draft and gates whole-workspace backup and reload until all runs finish');passed++;
  console.log(`${passed} workbench interaction checks passed with a fixture viewport`);
 }finally{cleanup();await server.close();dom.window.close()}

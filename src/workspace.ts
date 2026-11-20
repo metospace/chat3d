@@ -56,18 +56,18 @@ function track(session:WorkspaceSession){
   stores.set(session.id,editor);
   editor.subscribe((state,prev)=>{
     if(state.doc!==prev.doc||state.messages!==prev.messages||state.past!==prev.past||state.future!==prev.future||state.dirty!==prev.dirty||state.composerText!==prev.composerText||state.composerImages!==prev.composerImages||state.lastRun!==prev.lastRun||state.aiStatus!==prev.aiStatus||state.pendingBatch!==prev.pendingBatch||state.pendingResult!==prev.pendingResult){
-      writeSnapshot(session.id,state);schedule(progressOnlyChange(state,prev));
+      writeSnapshot(session.id,state);
+      if(!progressOnlyChange(state,prev))schedule();
     }
   });
   return editor;
 }
 function restore(session:WorkspaceSession){hydrating=true;try{bindConversationStore(track(session));}finally{hydrating=false;}}
 function capture(){const w=useWorkspaceStore.getState(),editor=stores.get(w.activeId);if(editor)writeSnapshot(w.activeId,editor.getState());}
-function schedule(progressOnly=false){
+function schedule(){
   if(hydrating||(blocked&&!saving)||!useWorkspaceStore.getState().ready)return;
   pending=true;useWorkspaceStore.setState({saving:true});
-  if(progressOnly&&timer)return;
-  clearTimeout(timer);timer=setTimeout(()=>void flushWorkspace(),progressOnly?5000:250);
+  clearTimeout(timer);timer=setTimeout(()=>void flushWorkspace(),250);
 }
 async function persistWorkspace():Promise<string|null>{
  const w=useWorkspaceStore.getState(),tiers:WorkspaceStorageTier[]=['normal','strip-images','omit-trashed'];let lastError:unknown;

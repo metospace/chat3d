@@ -16,7 +16,7 @@ export interface SourceMatch extends SourceWindow {matchStartChar:number;matchEn
 /** nextChar is the exact continuation cursor; nextLine alone may repeat a partially returned long line. */
 export type SourceReadResult=SourceMetadata&(
  | {mode:'summary';directory:SourceDeclaration[];declarationCount:number;directoryTruncated:boolean;parameterHeader:SourceParameter[];hint:string}
- | {mode:'lines'|'characters';window:SourceWindow;nextLine?:number;nextChar?:number}
+ | {mode:'lines'|'characters'|'repair';window:SourceWindow;nextLine?:number;nextChar?:number}
  | {mode:'search';query:string;matches:SourceMatch[];nextLine?:number;nextChar?:number}
 );
 export interface SourcePatch {find:string;replace:string}
@@ -25,6 +25,7 @@ export interface SourceEditOptions {expectedVersion:string;patches:SourcePatch[]
 export interface SourceEditResult extends SourceMetadata {source:string;patchCount:number}
 
 const MAX_CHARS=12000,MAX_LINES=120,MAX_PATCHES=8,MAX_MATCHES=8;
+const MAX_REPAIR_SOURCE_CHARS=24*1024;
 const own=(value:object,key:string)=>Object.prototype.hasOwnProperty.call(value,key);
 function record(value:unknown,allowed:readonly string[],label:string):asserts value is Record<string,unknown>{
  if(!value||typeof value!=='object'||Array.isArray(value)||(Object.getPrototypeOf(value)!==Object.prototype&&Object.getPrototypeOf(value)!==null))throw Error(label+' must be a plain object');
@@ -113,6 +114,17 @@ export function readSource(source:string,options:SourceReadOptions={}):SourceRea
   return {...metadata(source,lines),mode:'lines',window:{...window(source,lines,a,b),endLine:end},...continuation(source,lines,b)};
  }
  return summary(source,lines);
+}
+
+/** An edit may involve a few distant functions in one modest source file.
+ * Keep the version and full literal text together when it fits the budget. */
+export function readRepairSource(source:string):SourceReadResult{
+ const lines=offsets(source);
+ if(source.length<=MAX_REPAIR_SOURCE_CHARS){
+  return {...metadata(source,lines),mode:'repair',window:window(source,lines,0,source.length)};
+ }
+ const directory=summary(source,lines);
+ return {...directory,hint:`源码超过 ${MAX_REPAIR_SOURCE_CHARS} 字符。按目录选择要改的函数，用 search 或指定范围读取。 ${directory.hint}`};
 }
 
 /** Resolve all patches against the same original source before applying any changes. */

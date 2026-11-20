@@ -1,0 +1,41 @@
+{
+  "taskId": "2026-11-19-reference-shape",
+  "phase": "DONE",
+  "reworkRound": 0,
+  "acceptanceRevision": 1,
+  "delivery": {
+    "repository": "D:/work/code/chat3d",
+    "baselineCommit": "4c5af60f26e83646f5bbf31b51283623eba657f9",
+    "currentCommit": "4c5af60f26e83646f5bbf31b51283623eba657f9",
+    "workingTree": "Uncommitted user changes preserved; includes previously untracked src/ai/referenceComparison.ts. Six developer delivery hashes match before/after independent validation. Task report and QA evidence excluded from delivery fingerprint.",
+    "sha256": {
+      "src/ai/modelingAgent.ts": "FC6B59D5C5DBF564F972B00330310DC42AA242F112C09C4931A04E3499F1DDDE",
+      "src/ai/referenceComparison.ts": "7F541C86515D318310EE7D2E69506F22396418DA0DCE42D86C0CBF0E116ED2D0",
+      "src/ai/agentPrompt.ts": "E86E4D48CA925F7B79C462A5BF8B5E75799566F15E3D28C3BDAF011D89E9885B",
+      "tests/modeling-program-browser.mjs": "E2022D385084F03B7FD2233C004DE8B7289EA4B1B521AA86E1E9690BDD4D08DE",
+      "tests/reference-agent.mjs": "808AD43E33754E9F52F9281569E1816DAE11202C490FE3264EECBC8F812B6B80",
+      "docs/REALISTIC-MODELING.md": "23285F5137C182CA8F96078CE2F1B0C9DB7E629B0D7C07EA76FE2D34128E4C72",
+      "src/ai/evidenceContext.ts": "BD366D4CB5BC92A5BB1D8B4AC6AB6F031C5B381E94568405C27F997E442C542E",
+      "src/ai/shapeReviewPolicy.ts": "CDFBECA11A2CF3F886211157D52BA807377B33325D74B6CF89265EE347E0F2D1",
+      "src/ai/agentContext.ts": "EE731923C5D423EF55A3DA26B54FB041D94DA2B44ADDA2C5427ECEBC3C4E7158",
+      "src/scene/modelingProgram.ts": "884FF7F64BB94FA9F1B110C5384D818D73703BFF1298CD2FDB9366E6B1A3F703",
+      "src/scene/modelingProgramConverter.js": "78BEBC48E05EA282706ADA42693E75AB4891DA9D41451479CCF3308E26B2AB5D",
+      "src/domain/referenceRepairs.ts": "E47F50961980868C8528C003E8D6A9019F47CCF82AC5C0C3F22F707F37721C94",
+      "src/domain/visualReviewPlan.ts": "C0A4201891677D046CEB9A14914DAEE657A8584465ABEEE8879BD4953E0B3005",
+      "package-lock.json": "A14A9B39539C2EA3BDB715975E3216151302A8CBA66C77FFEA1DF5BF1F33ED8A",
+      "tsconfig.json": "9671B50541BCB0112D8914CF5F82C838FCAAA25BC3F14AB90CF40A49E929224E"
+    }
+  },
+  "agents": {
+    "developer": "/root/shape_developer",
+    "qa": "/root/shape_qa"
+  },
+  "evidence": [
+    "qa.json",
+    "qa-boundary.mjs",
+    "Root HTTP GET http://127.0.0.1:1420/ -> 200; all delivery fingerprints verified after QA"
+  ],
+  "blockers": [],
+  "nextAction": "Refresh local app and evaluate a new reference-based generation; real-model fidelity not benchmarked",
+  "updatedAt": "2026-11-19T11:15:36.5211090+00:00"
+}

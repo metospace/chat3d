@@ -159,7 +159,7 @@ export function createDiagnosticBundle(snapshot:DiagnosticExportSnapshot,liveDia
    // Mesh positions/normals/UVs dominate exports. Hash scalars incrementally,
    // avoiding one work frame/string/descriptor per coordinate and a huge join.
    let a=2166136261,b=5381,size=2;for(const value of input){const text=JSON.stringify(value)+',';size+=text.length;for(let i=0;i<text.length;i++){const c=text.charCodeAt(i);a=Math.imul(a^c,16777619);b=Math.imul(b,33)^c;}}
-   const node=store(input.slice(),'n'+(a>>>0).toString(36)+(b>>>0).toString(36),size);memo.set(input,node);set(node);continue;
+   const node=store(input,'n'+(a>>>0).toString(36)+(b>>>0).toString(36),size);memo.set(input,node);set(node);continue;
   }
   active.add(input);const source=input;
   if(input instanceof Error){stats.errors++;index.toolErrors.push({path,errorExcerpt:sanitizeDiagnostic(input.message,apiKey).slice(0,200)});input=Object.assign({},input,{name:input.name,message:input.message,stack:input.stack,...('cause' in input?{cause:input.cause}:{})});}

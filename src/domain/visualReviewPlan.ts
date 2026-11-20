@@ -1,9 +1,13 @@
 import {interactionTargets} from './interactionQuality';
 import type {SceneDocument} from './types';import {detailTargets} from './detailAcceptance';import {inspectSceneQuality} from './sceneQuality';
 /** A deterministic capture agenda. It selects evidence, never manufactures verdicts. */
-export function visualReviewPlan(base:SceneDocument,draft:SceneDocument,offset=0){
+export function visualReviewPlan(base:SceneDocument,draft:SceneDocument,offset=0,overviewOnly=false){
  if(!Number.isSafeInteger(offset)||offset<0)throw Error('检查偏移无效');
- const targets=detailTargets(base,draft),quality=inspectSceneQuality(draft);
+ const targets=detailTargets(base,draft);
+ if(overviewOnly){
+  return {revision:draft.revision,totalTargets:targets.length,nextOffset:null,interactions:[],wholeViews:['perspective','top'] as const,targets:[],risks:[],accepted:false as const};
+ }
+ const quality=inspectSceneQuality(draft);
  const priority=new Set(quality.spatial.candidates.filter(c=>c.kind==='body_occupancy').flatMap(c=>[c.a,c.b]));
  const sorted=[...targets].sort((a,b)=>Number(priority.has(b.id))-Number(priority.has(a.id)));
  const selected=sorted.slice(offset,offset+2);

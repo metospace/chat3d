@@ -10,7 +10,7 @@ try{
  const w=await server.ssrLoadModule('/src/workspace.ts');
  const storage=await server.ssrLoadModule('/src/domain/workspaceStorage.ts');
  editor.setState({doc:createInitialDoc(),messages:[],composerText:'',composerImages:[],past:[],future:[],aiStatus:'idle',aiConfig:{baseURL:'https://example.test',apiKey:'MUST-NOT-PERSIST',model:'mock',useMock:true}});
- await test('progress saving is coalesced without delaying edits, user messages or checkpoints',async()=>{const {progressOnlyChange}=await server.ssrLoadModule('/src/domain/workspaceSavePolicy.ts');const msg={id:'a',text:'task',run:{status:'running',startedAt:1,activity:{turn:1}}};const old={aiStatus:'generating',doc:{},pendingBatch:null,pendingResult:null,past:[],future:[],dirty:false,composerText:'',composerImages:[],messages:[msg],lastRun:{turn:1}};
+ await test('live progress is distinguished from edits, user messages and checkpoints',async()=>{const {progressOnlyChange}=await server.ssrLoadModule('/src/domain/workspaceSavePolicy.ts');const msg={id:'a',text:'task',run:{status:'running',startedAt:1,activity:{turn:1}}};const old={aiStatus:'generating',doc:{},pendingBatch:null,pendingResult:null,past:[],future:[],dirty:false,composerText:'',composerImages:[],messages:[msg],lastRun:{turn:1}};
  assert.equal(progressOnlyChange({...old,lastRun:{turn:2}},old),true);assert.equal(progressOnlyChange({...old,messages:[{...msg,run:{...msg.run,activity:{turn:2}}}]},old),true);
  for(const patch of [{doc:{}},{pendingResult:{}},{composerText:'new instruction'},{messages:[msg,{id:'b',text:'change'}]},{messages:[{...msg,text:'changed'}]},{aiStatus:'previewing'},{messages:[{...msg,run:{...msg.run,status:'stopped'}}]}])assert.equal(progressOnlyChange({...old,...patch},old),false);
  });
@@ -41,13 +41,27 @@ try{
  });
  await test('pinned sessions survive storage and reject changes while generating',async()=>{assert.equal(w.toggleSessionPinned(first),true);await w.flushWorkspace();assert.equal((await storage.readWorkspace()).sessions.find(s=>s.id===first).pinned,true);editor.setState({aiStatus:'generating'});assert.equal(w.toggleSessionPinned(first),false);editor.setState({aiStatus:'idle'});assert.equal(w.useWorkspaceStore.getState().sessions.find(s=>s.id===first).pinned,true)});
  await test('running checkpoint is saved separately from the committed document',async()=>{const base=editor.getState().doc;const ops=[{op:'createPrimitive',name:'preview-only',parentId:null,geometry:{type:'box',params:{width:1,height:1,depth:1}},transform:{position:[2,.5,0],scale:[1,1,1],rotationQuaternion:[0,0,0,1]},materialId:'mat_gray'}];const result=applyBatch(base,{operations:ops});const batch={requestId:'preview-test',projectId:base.projectId,baseRevision:base.revision,selectedIds:[],summary:'未完成阶段草稿',incomplete:true,continuation:'继续原任务',operations:ops};editor.setState({pendingBatch:batch,pendingResult:result,previewDoc:result.doc,aiStatus:'generating'});await w.flushWorkspace();const saved=await storage.readWorkspace();const snap=saved.sessions.find(s=>s.id===first).snapshot;assert.equal(snap.doc.nodes.length,1);assert.equal(snap.pendingResult.doc.nodes.length,2);assert.equal(snap.wasRunning,true);assert.equal(snap.pendingBatch.incomplete,true)});
+ await test('streaming progress skips IndexedDB and the next validated checkpoint saves the latest state',async()=>{
+  const earlier=await storage.readWorkspace();
+  editor.setState({lastRun:{turn:28,title:'实时进度'}});
+  await w.flushWorkspace();
+  assert.equal((await storage.readWorkspace()).revision,earlier.revision);
+  const previous=editor.getState();
+  editor.setState({pendingBatch:{...previous.pendingBatch,summary:'第二个已校验草稿'}});
+  await w.flushWorkspace();
+  const saved=await storage.readWorkspace(),active=saved.sessions.find(session=>session.id===first).snapshot;
+  assert.equal(saved.revision,earlier.revision+1);
+  assert.equal(active.lastRun.turn,28);
+  assert.equal(active.pendingBatch.summary,'第二个已校验草稿');
+  assert.equal(active.pendingResult.doc.nodes.length,2);
+ });
  await test('pending preview and per-turn execution survive session switching without applying',async()=>{
   editor.setState({aiStatus:'previewing'});const draft=structuredClone(editor.getState().pendingResult.doc);const id=editor.getState().addUserMessage('继续调整');editor.getState().updateMessageRun(id,{status:'preview',startedAt:100,endedAt:200});
   assert.equal(w.createSession(),true);assert.equal(editor.getState().pendingResult,null);assert.equal(w.switchSession(first),true);assert.deepEqual(editor.getState().pendingResult.doc,draft);assert.equal(editor.getState().doc.nodes.length,1);assert.equal(editor.getState().messages.find(m=>m.id===id).run.status,'preview');
   editor.setState(state=>({aiStatus:'generating',messages:[...state.messages,{id:'queued-guide',role:'user',text:'八米高',createdAt:Date.now(),steering:{runId:id,status:'queued'}}]}));editor.getState().updateMessageRun(id,{status:'running'});await w.flushWorkspace();
  });
  await test('stored data can hydrate in a fresh manager without losing references or draft',async()=>{await w.flushWorkspace();const fresh=await server.ssrLoadModule('/src/workspace.ts?reload-test');editor.setState({doc:createInitialDoc(),messages:[],composerText:'',composerImages:[]});await fresh.initializeWorkspace();assert.equal(editor.getState().messages[0].text,'第一台设备');assert.equal(editor.getState().composerText,'继续修改轮子');assert.equal(editor.getState().doc.nodes.length,1);assert.equal(editor.getState().aiStatus,'previewing');assert.equal(editor.getState().previewDoc.nodes.length,2);assert.equal(editor.getState().pendingBatch.incomplete,true);assert.match(editor.getState().messages.at(-1).text,/阶段草稿/);assert.equal(editor.getState().messages.find(m=>m.text==='继续调整').run.status,'stopped');assert.equal(editor.getState().messages.find(m=>m.id==='queued-guide').steering.status,'interrupted');editor.getState().discardPending();await fresh.flushWorkspace()});
- await test('atomic revision guard rejects stale tab writes instead of overwriting newer workspace',async()=>{const current=await storage.readWorkspace();await assert.rejects(()=>storage.writeWorkspace({version:1,activeId:current.activeId,sessions:[]},current.revision-1),/另一个标签页/);assert.equal((await storage.readWorkspace()).sessions.length,current.sessions.length)});
+ await test('atomic revision guard rejects stale tab writes instead of overwriting newer workspace',async()=>{const current=await storage.readWorkspace();await assert.rejects(()=>storage.writeWorkspace({version:1,activeId:current.activeId,sessions:[]},current.revision-1),/会话版本冲突/);assert.equal((await storage.readWorkspace()).sessions.length,current.sessions.length)});
  await test('unchanged multi-session startup does not write and tracks editors only on navigation',async()=>{
   const before=await storage.readWorkspace(),fresh=await server.ssrLoadModule('/src/workspace.ts?idle-startup');
   assert.ok(before.sessions.length>1);
@@ -100,7 +114,7 @@ try{
   editor.setState({aiStatus:'idle',pendingBatch:null,pendingResult:null});
   const current=await storage.readWorkspace();await storage.writeWorkspace(current,current.revision);
   w.getSessionEditor(w.useWorkspaceStore.getState().activeId).getState().setComposerText('blocked tab draft');await w.flushWorkspace();
-  assert.match(w.useWorkspaceStore.getState().error,/另一个标签页/);
+  assert.match(w.useWorkspaceStore.getState().error,/会话版本冲突/);
   const active=w.useWorkspaceStore.getState().activeId;
   assert.equal(w.switchSession(first),false);assert.equal(w.createSession(),false);
   assert.equal(w.useWorkspaceStore.getState().activeId,active);

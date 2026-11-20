@@ -10,10 +10,14 @@ export function serializeModelingObject(THREE,root) {
     if(Object.values(material).some(value=>value?.isTexture))throw Error('建模程序暂不支持贴图，请使用 PBR 颜色和物理属性');
     if(material.onBeforeCompile!==THREE.Material.prototype.onBeforeCompile||material.customProgramCacheKey!==THREE.Material.prototype.customProgramCacheKey)throw Error('不支持自定义着色器');
     if(material.vertexColors||material.wireframe||material.flatShading||material.side===THREE.BackSide||material.blending!==THREE.NormalBlending||material.polygonOffset||!material.depthTest||!material.depthWrite||!material.colorWrite||material.clippingPlanes?.length)throw Error('材质包含无法保留的渲染选项');
-    if(material.isMeshPhysicalMaterial&&(material.anisotropy!==0||material.iridescence!==0||material.sheen!==0||material.dispersion!==0||material.specularIntensity!==1||material.specularColor.getHex()!==0xffffff||material.attenuationDistance!==Infinity))throw Error('物理材质包含当前文档无法保留的属性');
+    if(material.isMeshPhysicalMaterial&&(material.anisotropy!==0||material.iridescence!==0||material.sheen!==0||material.dispersion!==0||material.attenuationDistance!==Infinity))throw Error('物理材质包含当前文档无法保留的属性');
     const id='program-material-'+materials.length;
     const value={id,baseColor:'#'+material.color.getHexString(),roughness:material.roughness,metalness:material.metalness,opacity:material.opacity,transparent:material.transparent,doubleSided:material.side===THREE.DoubleSide,alphaTest:material.alphaTest,emissive:'#'+material.emissive.getHexString(),emissiveIntensity:material.emissiveIntensity};
-    if(material.isMeshPhysicalMaterial)for(const key of ['clearcoat','clearcoatRoughness','transmission','thickness','ior'])value[key]=material[key];
+    if(material.isMeshPhysicalMaterial){
+      for(const key of ['clearcoat','clearcoatRoughness','transmission','thickness','ior'])value[key]=material[key];
+      if(material.specularIntensity!==1)value.specularIntensity=material.specularIntensity;
+      if(material.specularColor.getHex()!==0xffffff)value.specularColor='#'+material.specularColor.getHexString();
+    }
     finite(Object.values(value).filter(v=>typeof v==='number'),'材质');
     const key=JSON.stringify({...value,id:undefined});
     if(materialValues.has(key)){const existing=materialValues.get(key);materialIds.set(material,existing);return existing;}

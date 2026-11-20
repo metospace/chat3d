@@ -1,5 +1,6 @@
-import {encodeIdbValue,decodeIdbValue,type IdbGraphRoot,type IdbGraphRecord} from './idbChunks';
+import {encodeIdbRecords,decodeIdbValue,type IdbGraphRoot,type IdbGraphRecord} from './idbChunks';
 import {isQuotaExceededError} from './workspacePersist';
+import {makeId} from '../util/ids';
 // Browser-local workspace data only. Credentials are intentionally never part of this payload.
 const DB_NAME='chat3d.workspace.v1';
 const STORE='workspace';
@@ -8,7 +9,7 @@ export interface WorkspaceEnvelope { version:1; revision:number; activeId:string
 type WorkspaceReadResult=WorkspaceEnvelope & {needsRepair?:boolean};
 interface SessionRecord {id:string;snapshot:Record<string,unknown>;[key:string]:unknown}
 interface LegacyManifest {storageVersion:2;version:1;revision:number;activeId:string;sessions:{metadata:Record<string,unknown>;fields:string[]}[]}
-interface Manifest {storageVersion:3;version:1;revision:number;activeId:string;recoveryRoot?:IdbGraphRoot;sessions:{id:string;metadata:IdbGraphRoot;fields:{name:string;root:IdbGraphRoot}[]}[]}
+interface Manifest {storageVersion:3;version:1;revision:number;activeId:string;commitId?:string;recoveryRoot?:IdbGraphRoot;sessions:{id:string;metadata:IdbGraphRoot;fields:{name:string;root:IdbGraphRoot}[]}[]}
 // Identity is used only for objects previously committed/read at the exact revision.
 // Editor snapshots are immutable; a failed transaction must never advance this cache.
 let committedRevision=-1;
@@ -81,7 +82,7 @@ export async function readWorkspace():Promise<WorkspaceReadResult|null>{
  }catch{throw new Error('会话数据不完整，已有数据不会被覆盖，请从项目备份恢复。');}
 }
 export class WorkspaceConflictError extends Error {
- constructor(){super('另一个标签页已更新会话，本页不会覆盖其他标签页的数据。');}
+ constructor(){super('会话版本冲突，本页自动保存已暂停。');}
 }
 export class WorkspaceWriteError extends Error {
  constructor(readonly cause:Error|DOMException){
@@ -94,9 +95,43 @@ function storageFailure(error:unknown):Error{
  if(error instanceof WorkspaceConflictError)return error;
  return new WorkspaceWriteError(error instanceof Error||error instanceof DOMException?error:new Error(String(error)));
 }
+function isUnconfirmedCommit(error:unknown):error is WorkspaceWriteError{
+ return error instanceof WorkspaceWriteError&&error.cause.name==='UnknownError'&&/^Internal error committing transaction\.?$/i.test(error.cause.message.trim());
+}
+
+async function hasCommitReceipt(revision:number,commitId:string):Promise<boolean>{
+ const db=await openDb();
+ try{
+  const {promise,resolve}=Promise.withResolvers<boolean>();
+  const tx=db.transaction(STORE,'readonly'),request=tx.objectStore(STORE).get('current');
+  tx.oncomplete=()=>resolve(request.result?.revision===revision&&request.result?.commitId===commitId);
+  tx.onabort=()=>resolve(false);
+  return await promise;
+ }finally{db.close();}
+}
+
 export async function writeWorkspace(data:Omit<WorkspaceEnvelope,'revision'>,expectedRevision:number):Promise<number>{
  const sessions=data.sessions as SessionRecord[];
  if(sessions.some(s=>!s||typeof s.id!=='string'||!s.snapshot||typeof s.snapshot!=='object')||new Set(sessions.map(s=>s.id)).size!==sessions.length)throw Error('会话保存数据无效');
+ const commitId=makeId(),nextRevision=expectedRevision+1;
+ for(let attempt=0;;attempt++){
+  try{return await writeWorkspaceTransaction(data,sessions,expectedRevision,commitId);}
+  catch(error){
+   if(!isUnconfirmedCommit(error))throw error;
+   // A commit may be durable even if the browser could not confirm it to this tab.
+   // Accept only a receipt from this write, never another writer at the same revision.
+   if(await hasCommitReceipt(nextRevision,commitId).catch(()=>false)){
+    committedRevision=nextRevision;committed=new Map(sessions.map(s=>[s.id,{...s.snapshot}]));
+    return nextRevision;
+   }
+   if(attempt>0)throw error;
+   // Reopen and recheck the original revision before the single lossless retry.
+   await new Promise<void>(resolve=>setTimeout(resolve,150));
+  }
+ }
+}
+
+async function writeWorkspaceTransaction(data:Omit<WorkspaceEnvelope,'revision'>,sessions:SessionRecord[],expectedRevision:number,commitId:string):Promise<number>{
  const db=await openDb().catch((error:unknown)=>{throw storageFailure(error);});
  const {promise,resolve,reject}=Promise.withResolvers<number>();
  try{
@@ -114,35 +149,61 @@ export async function writeWorkspace(data:Omit<WorkspaceEnvelope,'revision'>,exp
   const nextCache=new Map<string,Record<string,unknown>>();
   get.onsuccess=()=>{
    if((get.result?.revision??0)!==expectedRevision){conflict=true;tx.abort();return;}
-   try{
-    const current=get.result as Manifest|undefined,reuse=current?.storageVersion===3&&committedRevision===expectedRevision;
+   const current=get.result as Manifest|undefined,reuse=current?.storageVersion===3&&committedRevision===expectedRevision;
+   const previousSnapshots=reuse?committed:undefined;
+   const referenced=new Set<string>();
+   function* writes():Generator<{key:string;value:unknown},void>{
     const previousSessions=new Map(reuse?current.sessions.map(session=>[session.id,session] as const):[]);
-    const manifest:Manifest={storageVersion:3,version:1,revision:expectedRevision+1,activeId:data.activeId,sessions:[]};
-    const referenced=new Set<string>();
-    const encode=(id:string,field:string|null,value:unknown)=>encodeIdbValue(value,(index,record)=>{const key=chunkKey(id,field,index);referenced.add(key);watch(target.put(record,key));});
-    if(data.recoverySessions?.length)manifest.recoveryRoot=encode('__workspace_recovery__',null,data.recoverySessions);
+    const manifest:Manifest={storageVersion:3,version:1,revision:expectedRevision+1,commitId,activeId:data.activeId,sessions:[]};
+    function* encode(id:string,field:string|null,value:unknown):Generator<{key:string;value:unknown},IdbGraphRoot>{
+     const records=encodeIdbRecords(value);
+     let index=0;
+     for(let next=records.next();;next=records.next()){
+      if(next.done)return next.value;
+      const key=chunkKey(id,field,index++);
+      referenced.add(key);
+      yield {key,value:next.value};
+     }
+    }
+    if(data.recoverySessions?.length)manifest.recoveryRoot=yield* encode('__workspace_recovery__',null,data.recoverySessions);
     for(const session of sessions){
-     const {snapshot,...metadata}=session,previous=reuse?committed.get(session.id):undefined;
+     const {snapshot,...metadata}=session,previous=previousSnapshots?.get(session.id);
      const fields:{name:string;root:IdbGraphRoot}[]=[],previousRoots=new Map(previousSessions.get(session.id)?.fields.map(field=>[field.name,field.root] as const));
-     manifest.sessions.push({id:session.id,metadata:encode(session.id,null,metadata),fields});
+     manifest.sessions.push({id:session.id,metadata:yield* encode(session.id,null,metadata),fields});
      for(const [field,value] of Object.entries(snapshot)){
       const key=fieldKey(session.id,field);referenced.add(key);
       let root=previousRoots.get(field);
-      if(!root||!previous||!Object.prototype.hasOwnProperty.call(previous,field)||previous[field]!==value){root=encode(session.id,field,value);watch(target.put({root},key));}
+      if(!root||!previous||!Object.prototype.hasOwnProperty.call(previous,field)||previous[field]!==value){
+       root=yield* encode(session.id,field,value);
+       yield {key,value:{root}};
+      }
       else for(let index=0;index<root.recordCount;index++)referenced.add(chunkKey(session.id,field,index));
       fields.push({name:field,root});
      }
      nextCache.set(session.id,{...snapshot});
     }
     // All fragments, roots, metadata and reclamation commit together; unchanged geometry is never cloned.
-    watch(target.put(manifest,'current'));
-    // Scan keys, not geometry values, including orphans left by earlier versions.
-    const keys=watch(target.openKeyCursor());keys.onsuccess=()=>{try{
-     const cursor=keys.result;if(!cursor)return;
-     const key=cursor.key;if(typeof key==='string'&&key.startsWith('["session",')&&!referenced.has(key))watch(target.delete(key));
-     cursor.continue();
-    }catch(error){syncFailure=error;tx.abort();}};
-   }catch(error){syncFailure=error;tx.abort();}
+    yield {key:'current',value:manifest};
+   }
+   const queue=writes();
+   const writeNext=()=>{
+    try{
+     const next=queue.next();
+     if(!next.done){
+      // Continue inside the request callback to keep this single transaction
+      // active while letting the browser drain each fragment before the next.
+      watch(target.put(next.value.value,next.value.key)).onsuccess=writeNext;
+      return;
+     }
+     // Scan keys, not geometry values, including orphans left by earlier versions.
+     const keys=watch(target.openKeyCursor());keys.onsuccess=()=>{try{
+      const cursor=keys.result;if(!cursor)return;
+      const key=cursor.key;if(typeof key==='string'&&key.startsWith('["session",')&&!referenced.has(key))watch(target.delete(key));
+      cursor.continue();
+     }catch(error){syncFailure=error;tx.abort();}};
+    }catch(error){syncFailure=error;tx.abort();}
+   };
+   writeNext();
   };
   tx.oncomplete=()=>{db.close();committedRevision=expectedRevision+1;committed=nextCache;resolve(expectedRevision+1);};
   tx.onabort=()=>{

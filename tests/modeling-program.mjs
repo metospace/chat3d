@@ -34,10 +34,10 @@ try{
     assert.deepEqual(params.indices.slice(0,3),[child.geometry.index.getX(0),child.geometry.index.getX(2),child.geometry.index.getX(1)]);assert.deepEqual(validateDocument(result),[]);
   });
   test('material groups keep triangles and PBR physical factors',()=>{
-    const geometry=new THREE.BoxGeometry(1,1,1),physical=new THREE.MeshPhysicalMaterial({color:'#abcdef',clearcoat:.5,clearcoatRoughness:.2,transmission:.25,thickness:.2,ior:1.4,transparent:true,opacity:.7});
+    const geometry=new THREE.BoxGeometry(1,1,1),physical=new THREE.MeshPhysicalMaterial({color:'#abcdef',clearcoat:.5,clearcoatRoughness:.2,transmission:.25,thickness:.2,ior:1.4,specularIntensity:.2,specularColor:'#a0b6da',transparent:true,opacity:.7});
     const result=serializeModelingObject(THREE,new THREE.Mesh(geometry,Array.from({length:6},()=>physical)));
     assert.equal(result.nodes.length,6);assert.equal(result.nodes.reduce((sum,n)=>sum+n.geometry.params.indices.length,0),geometry.index.count);
-    for(const key of ['clearcoat','clearcoatRoughness','transmission','thickness','ior','transparent','opacity'])assert.equal(result.materials[0][key],physical[key]);assert.deepEqual(validateDocument(result),[]);
+    for(const key of ['clearcoat','clearcoatRoughness','transmission','thickness','ior','transparent','opacity','specularIntensity'])assert.equal(result.materials[0][key],physical[key]);assert.equal(result.materials[0].specularColor,'#a0b6da');assert.deepEqual(validateDocument(result),[]);
   });
   test('unsupported scene content is rejected, including hidden nodes',()=>{
     const unsupported=[new THREE.SkinnedMesh(new THREE.BoxGeometry(),material()),new THREE.InstancedMesh(new THREE.BoxGeometry(),material(),2),new THREE.Line(new THREE.BufferGeometry(),new THREE.LineBasicMaterial()),new THREE.Points(),new THREE.Sprite(),new THREE.DirectionalLight(),new THREE.PerspectiveCamera()];

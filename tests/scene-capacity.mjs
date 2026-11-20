@@ -76,8 +76,16 @@ try {
   for(const q of [{offset:-1},{offset:Infinity},{offset:Number.MAX_SAFE_INTEGER+1},{limit:49}])assert.throws(()=>findSceneParts(large,q),/查询/);
  });
  await test('preview application, undo and redo preserve all IDs above the old ceiling',()=>{
-  const store=createEditorStore({doc:seed,aiStatus:'previewing',pendingBatch:generated.batch,pendingResult:generated.result,previewDoc:large});store.getState().confirmPending();assert.equal(store.getState().doc,large);assert.equal(store.getState().past.length,1);
-  store.getState().undo();assert.equal(store.getState().doc.nodes.length,9856);store.getState().redo();assert.deepEqual(store.getState().doc.nodes.map(n=>n.id),large.nodes.map(n=>n.id));
+  const store=createEditorStore({doc:seed,aiStatus:'previewing',pendingBatch:generated.batch,pendingResult:generated.result,previewDoc:large});
+  const stringify=JSON.stringify;
+  JSON.stringify=function(value,...options){
+   assert.notEqual(value,generated.result.applied,'applying must not serialize the entire undo record');
+   return stringify.call(this,value,...options);
+  };
+  try{store.getState().confirmPending();}finally{JSON.stringify=stringify;}
+  assert.equal(store.getState().doc,large);assert.equal(store.getState().pendingResult,null);assert.equal(store.getState().past.length,1);
+  store.getState().undo();assert.equal(store.getState().doc.nodes.length,9856);
+  store.getState().redo();assert.equal(store.getState().doc.nodes,large.nodes);
  });
  await test('asset replacement and composition remain isolated atomic edits in a large scene',async()=>{
   const v2={...structuredClone(asset),version:2};v2.nodes[0].geometry.params.height=.03;await saveModelAsset(v2,1);

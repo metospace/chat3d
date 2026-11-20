@@ -1,6 +1,6 @@
 import type {CommandWithInverse} from './commands';
 import type {SceneDocument} from './types';
-export interface ReferenceDifference {id:string;featureKey:string;nodeIds:string[];observed:string;expected:string;action:string;view:'front'|'back'|'side'|'top'|'bottom'|'underside'|'perspective'}
+export interface ReferenceDifference {id:string;featureKey:string;nodeIds:string[];phase?:'silhouette'|'detail';observed:string;expected:string;action:string;view:'front'|'back'|'side'|'top'|'bottom'|'underside'|'perspective'}
 export interface ReferenceRepair extends ReferenceDifference {reportedRevision:number;shape:string;shapeNodeIds?:string[]}
 export interface ReferenceRepairItem extends ReferenceRepair {status:'unresolved';next:string}
 const shape=(doc:SceneDocument,ids:string[],shapeIds=ids)=>{const value=JSON.stringify(ids.map((id,i)=>{const node=doc.nodes.find(n=>n.id===id);return node?{id:shapeIds[i],geometry:node.geometry,transform:node.transform,visible:node.visible}:null;}));let a=2166136261,b=5381;for(let i=0;i<value.length;i++){a=Math.imul(a^value.charCodeAt(i),16777619);b=Math.imul(b,33)^value.charCodeAt(i);}return value.length+':'+(a>>>0).toString(16)+':'+(b>>>0).toString(16);};
@@ -49,7 +49,9 @@ export function updateReferenceRepairs(doc:SceneDocument,current:ReferenceRepair
   const key=targetKey(item),bound=byId.get(item.id);
   if(bound&&targetKey(bound)!==key)throw Error('参考差异ID已绑定原始目标，不可改绑以清除缺陷');
   const previous=byTarget.get(key);
-  const next={...item,id:previous?.id??item.id,nodeIds:[...(previous?.nodeIds??item.nodeIds)],reportedRevision:previous?.reportedRevision??doc.revision,shape:previous?.shape??shape(doc,item.nodeIds),...(previous?.shapeNodeIds?{shapeNodeIds:previous.shapeNodeIds}:{})};
+  const phase=previous?previous.phase:item.phase;
+  if(previous&&item.phase!==undefined&&item.phase!==(phase??'silhouette'))throw Error('已有参考差异的阶段不能通过改写描述变更。请保留该差异并处理实际问题。');
+  const next={...item,...(phase?{phase}:{}),id:previous?.id??item.id,nodeIds:[...(previous?.nodeIds??item.nodeIds)],reportedRevision:previous?.reportedRevision??doc.revision,shape:previous?.shape??shape(doc,item.nodeIds),...(previous?.shapeNodeIds?{shapeNodeIds:previous.shapeNodeIds}:{})};
   byId.set(next.id,next);byTarget.set(key,next);
  }
  return [...byId.values()];

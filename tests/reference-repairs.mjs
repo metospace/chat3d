@@ -38,6 +38,10 @@ try{
  const existingAliases=updateReferenceRepairs(renamed,repairs,[aliasFirst,aliasLast],[]);
  assert.deepEqual(existingAliases,[{...aliasLast,id:issue.id,shape:repairs[0].shape,reportedRevision:doc.revision}]);
  assert.throws(()=>updateReferenceRepairs(doc,repairs,[{...issue,nodeIds:[id,id]}],[]),/真实部件/);
+ assert.throws(()=>updateReferenceRepairs(doc,repairs,[{...issue,phase:'detail'}],[]),/阶段不能/);
+ const local=updateReferenceRepairs(doc,[],[{...issue,phase:'detail'}],[]);
+ assert.equal(updateReferenceRepairs(doc,local,[{...issue,observed:'局部轮廓仍需圆顺'}],[])[0].phase,'detail');
+ assert.throws(()=>updateReferenceRepairs(doc,local,[{...issue,phase:'silhouette'}],[]),/阶段不能/);
  const otherFeature={...issue,id:'body-height',featureKey:'height'};
  const separateFeatures=updateReferenceRepairs(doc,repairs,[otherFeature,{...issue,id:'new-body-alias'}],[]);
  assert.deepEqual(separateFeatures.map(item=>item.id),[issue.id,otherFeature.id]);

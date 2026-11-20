@@ -21,6 +21,8 @@ try{
  console.log('PASS desktop export uses native command and returns confirmed path');
  assert.match(await downloadDiagnosticBlob(diagnosticBlob),/已保存到/);assert.deepEqual(args,{contents:await diagnosticBlob.text(),kind:'diagnostics'});
  console.log('PASS diagnostic desktop save sends decoded JSON text, not a quoted JSON string');
+ await assert.rejects(downloadDiagnosticBlob({size:51*1024*1024,text:async()=>{throw Error('must not decode an oversized file');}}),/轻量诊断/);
+ console.log('PASS desktop diagnostics reject oversized files before decoding them');
  window.__TAURI_INTERNALS__.invoke=async()=>{throw Error('磁盘已满')};await assert.rejects(downloadJson('x','diagnostics'),/磁盘已满/);
  await assert.rejects(downloadDiagnosticBlob(diagnosticBlob),/磁盘已满/);
  console.log('PASS desktop save failures propagate instead of claiming a download');

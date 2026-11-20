@@ -1,3 +1,8 @@
+export function numberReferenceImages<T>(images:T[]):(T|{type:'text';text:string})[]{
+ if(images.length<2)return images;
+ return images.flatMap((image,index)=>[{type:'text' as const,text:'参考图 '+(index+1)},image]);
+}
+
 /** The same task/preview contract is used by both model execution paths. */
 export function instructionContract({single=false,selectionOnly=false,lockPlacement=false}:{single?:boolean;selectionOnly?:boolean;lockPlacement?:boolean}={}){
  return [
@@ -19,7 +24,9 @@ export function instructionContract({single=false,selectionOnly=false,lockPlacem
 export function referenceReconstructionContract(){return [
  '# 参考图重建与验收顺序',
  '先从参考图记录主轮廓、整体宽高深的相对比例、主要实体分区高度、负空间、伸出件方向与长度、关键部件的前后层次和连接关系。明确区分可见事实、尺寸假设和被遮挡的未知部分。',
- '先搭完整主结构，再以接近参考图的视角检查轮廓与分区比例；补充侧视检查突出件和结构深度。不同视角下看不到的部件不直接判为缺失，也不能用另一视角掩盖比例错误。',
+ '同一对象有多张照片时，按图号识别侧视、正面、后视或斜视，把各图能确认的比例与结构写进同一套方案。优先用接近正投影的图确定比例，用斜视图检查曲面与凹凸层次。图中明确标注且能确认属于该型号的尺寸应换算为米并保留来源。',
+ '车辆先用侧视锁定轮心、轮径与轴距、前后悬、车顶和腰线；再以前后视核对车身收放、轮拱、灯组、保险杠开口与深度。车身曲率或开口有偏差时先修主体及开口几何，再做灯带、字样和小件。',
+ '以接近参考图的视角检查完成的主结构。每项差异标注图号和最能看清的方向；遮挡或没有对应画面的内容保持待核对。',
  '识别性结构必须保留真实形状与连接层次：曲面、内凹盖板、导向结构、传动件、支撑及工作部件按图表达；不能仅增加盒子或零件数量就宣称相似。先修主轮廓和必需结构，再做材质、色带和小表面细节。',
  '提交前逐项对照观察记录，分别说明轮廓比例、必需结构、连接关系和材质的真实检查结果。未取得画面证据、任务中断或关键结构未完成时，提交未验收草稿并明确差异，不宣称按图还原完成。',
  ].join('\n');}

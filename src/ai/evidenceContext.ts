@@ -9,7 +9,7 @@ const IMAGE_LIMIT=6,RECALL_LIMIT=3,CATALOG_LIMIT=12;
 type ImageEvidence={index:number;revision:number|null;originalRevision?:number|null;scopes:string[];views:string[]};
 export type ActiveEvidence={captureId:string;toolCallId:string;revision:number|null;originalRevision?:number|null;images:ImageEvidence[]};
 export type EvidenceCatalogEntry={captureId:string;toolCallId:string;toolName:string;revision:number|null;scopes:string[];views:string[];imageCount:number;available:true};
-type Packet={id:string;message:ResultMessage;images:ImageContent[];manifest:ImageEvidence[];entry:EvidenceCatalogEntry};
+type Packet={id:string;message:ResultMessage;images:ImageContent[];manifest:ImageEvidence[];entry:EvidenceCatalogEntry;programReceipt?:Content[]};
 type Occurrence={position:number;packet:Packet;indices:number[];recall:boolean};
 type RecallReference={captureId:string;imageIndices:number[];revision:number;originalRevision?:number};
 
@@ -50,17 +50,20 @@ function frozenClone<T>(value:T):T{
 function captureSnapshot(part:TextContent,toolName:string):'readiness'|'plan'|undefined{
  const data=record(part.text);
  if(data.reviewReadiness!==undefined)return 'readiness';
- if(toolName==='capture_quality_review'&&data.coverage==='component-multiview'&&Array.isArray(data.targets))return 'plan';
+ if((toolName==='capture_quality_review'||toolName==='build_modeling_program'||toolName==='patch_modeling_program')&&data.coverage==='component-multiview'&&Array.isArray(data.targets))return 'plan';
 }
 
 function frameKey(packet:Packet,index:number):string|undefined{
  const {toolName}=packet.entry,{scopes,views}=packet.manifest[index];
  if(!scopes.length||!views.length||toolName==='preview_animation'||toolName==='capture_detail_diagnostic')return;
- return JSON.stringify([toolName,scopes,views]);
+ return JSON.stringify([packet.programReceipt?'capture_quality_review':toolName,scopes,views]);
 }
 
 function describe(message:ResultMessage,id:string):Packet{
  const details=record(message.details),images:ImageContent[]=[],manifest:ImageEvidence[]=[];
+ const reviewStart=details.programReviewStart;
+ const programReceipt=typeof reviewStart==='number'?message.content.slice(0,reviewStart):undefined;
+ if(programReceipt)message={...message,content:message.content.slice(programReceipt.length)};
  const fallbackRevision=revision(details.revision),fallbackScopes=stringValues(details.scope),fallbackViews=stringValues(details.view);
  let markerRevision=fallbackRevision,scopes=fallbackScopes,views=fallbackViews;
  for(const part of message.content){
@@ -78,7 +81,7 @@ function describe(message:ResultMessage,id:string):Packet{
  }
  const revisions=unique(manifest.map(image=>String(image.revision)));
  const packetRevision=revisions.length===1?manifest[0]?.revision??null:null;
- return {id,message,images,manifest,entry:{captureId:id,toolCallId:message.toolCallId,toolName:message.toolName,revision:packetRevision,scopes:unique(manifest.flatMap(image=>image.scopes)),views:unique(manifest.flatMap(image=>image.views)),imageCount:images.length,available:true}};
+ return {id,message,images,manifest,programReceipt,entry:{captureId:id,toolCallId:message.toolCallId,toolName:message.toolName,revision:packetRevision,scopes:unique(manifest.flatMap(image=>image.scopes)),views:unique(manifest.flatMap(image=>image.views)),imageCount:images.length,available:true}};
 }
 function pageNumber(value:number|undefined,fallback:number,name:string):number{
  const n=value??fallback;if(!Number.isSafeInteger(n)||n<0)throw new Error(`${name} must be a nonnegative integer`);return n;
@@ -93,6 +96,23 @@ export class EvidenceContext{
  private activeEvidence:ActiveEvidence[]=[];
  get activeImageCount():number{return this.activeEvidence.reduce((count,entry)=>count+entry.images.length,0);}
  active():ActiveEvidence[]{return structuredClone(this.activeEvidence);}
+
+ /** Current component images for a separate reference comparison, outside the modeling transcript. */
+ comparisonFrames(currentRevision:number,componentId:string,preferredViews:string[]){
+  const frames=new Map<string,ImageContent>();
+  for(let i=this.packets.length-1;i>=0;i--){
+   const packet=this.packets[i];
+   if(packet.entry.toolName==='preview_animation'||packet.entry.toolName==='capture_detail_diagnostic')continue;
+   for(const frame of packet.manifest){
+    if(!this.usableRevision(frame.revision,currentRevision)||!frame.scopes.some(scope=>scope==='whole'||scope===componentId))continue;
+    for(const view of frame.views)if(!frames.has(view))frames.set(view,packet.images[frame.index]);
+   }
+  }
+  return [...new Set([...preferredViews,...frames.keys()])].flatMap(view=>{
+   const frame=frames.get(view);
+   return frame?[{view,image:{...frame}}]:[];
+  }).slice(0,IMAGE_LIMIT);
+ }
 
  /** Call only after confirming that both revisions have identical visual fingerprints. */
  carryForward(fromRevision:number,toRevision:number):void{
@@ -113,7 +133,10 @@ export class EvidenceContext{
 
  private ingest(messages:AgentMessage[]):void{
   for(const message of messages){
-   if(message.role!=='toolResult'||message.isError||CAPTURE_TOOLS[message.toolName]!==true||this.byCall.has(message.toolCallId)||record(message.details).evidenceProjection||record(message.details).evidenceRecall||!message.content.some(part=>part.type==='image'))continue;
+   if(message.role!=='toolResult'||message.isError||this.byCall.has(message.toolCallId))continue;
+   const details=record(message.details);
+   const withProgramReview=(message.toolName==='build_modeling_program'||message.toolName==='patch_modeling_program')&&typeof details.programReviewStart==='number';
+   if((!CAPTURE_TOOLS[message.toolName]&&!withProgramReview)||details.evidenceProjection||details.evidenceRecall||!message.content.some(part=>part.type==='image'))continue;
    const packet=describe(frozenClone(message),`capture-${this.packets.length+1}`);
    this.packets.push(packet);this.byCall.set(message.toolCallId,packet);this.byId.set(packet.id,packet);
   }
@@ -253,6 +276,7 @@ export class EvidenceContext{
    // Archived packets need a compact pointer, not the original potentially large review plan.
    const content=selected.size?this.content(packet,selected,notice,true):[{type:'text' as const,text:notice}];
    for(const snapshot of snapshots.get(position)??[])content.push({...snapshot});
+   if(packet.programReceipt&&!occurrence.recall)content.unshift(...packet.programReceipt);
    const {reviewPlan,...details}=record(packet.message.details);
    return {...message,content,details:{...jsonDetails(details),...(effectiveRecall?{evidenceRecall:jsonDetails(effectiveRecall)}:{}),evidenceProjection:{captureId:packet.id,revision:currentRevision,originalRevision:packet.entry.revision,imageIndices:[...selected],archived:selected.size===0}}};
   });

@@ -18,7 +18,7 @@ function readResult(text:string):SceneDocument {
     if(!m||typeof m.id!=='string'||materialIds.has(m.id))throw Error('建模程序材质标识无效');
     const id=makeId();materialIds.set(m.id,id);
     const value:Material={id,baseColor:m.baseColor,roughness:m.roughness,metalness:m.metalness};
-    for(const key of ['opacity','transparent','doubleSided','alphaTest','emissive','emissiveIntensity','clearcoat','clearcoatRoughness','transmission','thickness','ior'] as const)if(m[key]!==undefined)Object.assign(value,{[key]:m[key]});
+    for(const key of ['opacity','transparent','doubleSided','alphaTest','emissive','emissiveIntensity','clearcoat','clearcoatRoughness','transmission','thickness','ior','specularIntensity','specularColor'] as const)if(m[key]!==undefined)Object.assign(value,{[key]:m[key]});
     return value;
   });
   const nodes:SceneNode[]=data.nodes.map((n:SceneNode)=>{

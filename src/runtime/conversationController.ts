@@ -252,22 +252,25 @@ function createConversationController(editor:EditorStore) {
       store().setAiStatus('generating');
       let batch: CommandBatch;
       let prepared: ExecutionResult | undefined;
+      let reviewedPendingDraft=false;
       if(usePi) {
         const {runModelingAgent} = await import('../ai/modelingAgent');
         if(!alive()) return;
-        const generated = await runModelingAgent({text:modelText,config:cfg,document:working,qualityBaseline:parent?original:working,referenceRepairs,selection:selectedIds,images,history,signal:controller.signal,editScope,captureAvailable:isIsolatedCaptureAvailable,captureEvidence:captureIsolatedSceneEvidence,
+        const generated = await runModelingAgent({text:modelText,config:cfg,document:working,qualityBaseline:parent?original:undefined,referenceRepairs,selection:selectedIds,images,history,signal:controller.signal,editScope,captureAvailable:isIsolatedCaptureAvailable,captureEvidence:captureIsolatedSceneEvidence,
           onDiagnostic:record,
           onControl:control=>{if(alive()){controlRef.current=control;setCanSteer(!!control);if(!control)clearControl();}},
           onSteeringApplied:id=>{if(alive()){markSteering(id,'received');setNotice('补充要求已收到，将在后续调整中参考');}},
           onCheckpoint:cp=>{if(alive()){const combined=continueDraft(original,parent,cp.batch,cp.result);checkpointRef.current={...cp,...combined};editor.setState({pendingBatch:combined.batch,pendingResult:combined.result});}},
           onActivity:event=>{if(alive()){armTimeout(event);queueAgentActivity(event);if(Date.now()-lastActivitySave>=1000||/暂停|中断|工具失败/.test(event.title)){store().setLastRun(event);if(runMessageId.current)store().updateMessageRun(runMessageId.current,{activity:event});lastActivitySave=Date.now();}if(checkpointRef.current)checkpointRef.current.activity=event;}},onPreview:document=>{if(alive())store().setPreviewDoc(document);}});
-        batch=generated.batch;prepared=generated.result;if(alive()){setAgentActivity(generated.activity);store().setLastRun(generated.activity);}
+        batch=generated.batch;prepared=generated.result;
+        reviewedPendingDraft=generated.activity.outcome==='preview-ready';
+        if(alive()){setAgentActivity(generated.activity);store().setLastRun(generated.activity);}
       } else {
         const generated = await generateBatch(modelText+`\n本次编辑范围约束：${JSON.stringify(editScope)}。${editScope.nodeIds?'只允许修改范围内对象；allowAssemblyAdditions=true时可给完整组件追加部件，不能新增其他组件或改范围外对象。':'允许编辑全场景。高亮对象只是指代参考，不是权限边界，不能因此拒绝其他对象的修改。'}${editScope.lockPlacement?'保留所有已有位置与朝向。':'遵守用户描述中的布局和局部修改要求。'}`, cfg, ctx, controller.signal, images, history, event => { if(alive()) setProgress(event); },record);
         batch = {requestId:makeId(),projectId,baseRevision,selectedIds,summary:generated.summary,operations:generated.operations};
       }
       batch.editScope=editScope;
-      if(alive()&&parent&&!batch.operations.length){store().setPendingBatch(parent.batch);store().setPendingResult(parent.result);store().setPreviewDoc(parent.result.doc);store().setAiStatus('previewing');finishRun('completed');store().addAssistantMessage(sanitizeGenerationText(batch.summary,{previewRetained:true}));parentDraft.current=null;return;}
+      if(alive()&&parent&&!batch.operations.length&&!reviewedPendingDraft){store().setPendingBatch(parent.batch);store().setPendingResult(parent.result);store().setPreviewDoc(parent.result.doc);store().setAiStatus('previewing');finishRun('completed');store().addAssistantMessage(sanitizeGenerationText(batch.summary,{previewRetained:true}));parentDraft.current=null;return;}
       if(alive()){const combined=continueDraft(original,parent,batch,prepared);finalize(combined.batch,combined.result);parentDraft.current=null;}
     } catch(e) {
       // An upstream error may echo its Authorization value. Keep the invocation's

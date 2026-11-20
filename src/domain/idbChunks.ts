@@ -13,15 +13,20 @@ export interface IdbGraphRoot {format:'idb-graph';version:1;value:Atom;recordCou
 const own=(value:object,key:PropertyKey)=>Object.prototype.hasOwnProperty.call(value,key);
 const invalid=()=>new Error('分块存储数据不完整或格式无效');
 
-/** Emits sequential records synchronously. Only bounded fragments, never the whole graph, are copied. */
-export function encodeIdbValue(value:unknown,onRecord:(id:number,record:IdbGraphRecord)=>void):IdbGraphRoot{
+/** Emit bounded fragments so a writer can wait for storage before encoding more. */
+export function* encodeIdbRecords(value:unknown):Generator<IdbGraphRecord,IdbGraphRoot>{
  const seen=new WeakMap<object,number>(),strings=new Map<string,number>();
  const pending:{id:number;value:object|string}[]=[];let nextId=0,recordCount=0,parts:Part[]=[],bytes=0,items=0;
- const flush=()=>{if(parts.length){onRecord(recordCount++,{parts});parts=[];bytes=0;items=0;}};
- const append=(part:Part,size:number,count:number)=>{
-  if(bytes+size>RECORD_BYTES||items+count>IDB_GRAPH_ARRAY_CHUNK||parts.length>=1024)flush();
+ function* flush(){
+  if(!parts.length)return;
+  const record={parts};
+  recordCount++;parts=[];bytes=0;items=0;
+  yield record;
+ }
+ function* append(part:Part,size:number,count:number){
+  if(bytes+size>RECORD_BYTES||items+count>IDB_GRAPH_ARRAY_CHUNK||parts.length>=1024)yield* flush();
   parts.push(part);bytes+=size;items+=count;
- };
+ }
  const atom=(input:unknown):Atom=>{
   if(typeof input==='string'){
    if(input.length<=INLINE_STRING)return input;
@@ -38,11 +43,11 @@ export function encodeIdbValue(value:unknown,onRecord:(id:number,record:IdbGraph
  for(let cursor=0;cursor<pending.length;cursor++){
   const {id,value:input}=pending[cursor];
   if(typeof input==='string'){
-   for(let start=0;start<input.length;start+=IDB_GRAPH_STRING_CHUNK){const text=input.slice(start,start+IDB_GRAPH_STRING_CHUNK);append({type:'string',id,start,length:input.length,text},text.length*2+64,1);}
+   for(let start=0;start<input.length;start+=IDB_GRAPH_STRING_CHUNK){const text=input.slice(start,start+IDB_GRAPH_STRING_CHUNK);yield* append({type:'string',id,start,length:input.length,text},text.length*2+64,1);}
    continue;
   }
   if(Array.isArray(input)){
-   if(!input.length)append({type:'array',id,length:0,start:0,values:[]},64,1);
+   if(!input.length)yield* append({type:'array',id,length:0,start:0,values:[]},64,1);
    for(let start=0;start<input.length;){
     const values:Atom[]=[];let estimate=64,length=0;
     while(start+length<input.length&&length<IDB_GRAPH_ARRAY_CHUNK){
@@ -50,22 +55,34 @@ export function encodeIdbValue(value:unknown,onRecord:(id:number,record:IdbGraph
      if(length&&estimate+itemBytes>RECORD_BYTES)break;
      if(present)values[length]=item;length++;values.length=length;estimate+=itemBytes;
     }
-    append({type:'array',id,length:input.length,start,values},estimate,length);start+=length;
+    yield* append({type:'array',id,length:input.length,start,values},estimate,length);start+=length;
    }
   }
   let entries:[Atom,Atom][]=[],estimate=64;
-  const emit=()=>{append({type:'object',id,entries},estimate,Math.max(1,entries.length));entries=[];estimate=64;};
   for(const key in input){
    if(!own(input,key))continue;
    // Array indices were emitted above; custom enumerable properties still round-trip.
    if(Array.isArray(input)&&String(Number(key))===key&&Number.isInteger(Number(key))&&Number(key)>=0&&Number(key)<input.length)continue;
    const name=atom(key),item=atom((input as Record<string,unknown>)[key]),entryBytes=size(name)+size(item);
-   if(entries.length&&(estimate+entryBytes>RECORD_BYTES/2||entries.length>=256))emit();
+   if(entries.length&&(estimate+entryBytes>RECORD_BYTES/2||entries.length>=256)){
+    yield* append({type:'object',id,entries},estimate,entries.length);
+    entries=[];estimate=64;
+   }
    entries.push([name,item]);estimate+=entryBytes;
   }
-  if(entries.length||!Array.isArray(input))emit();
+  if(entries.length||!Array.isArray(input))yield* append({type:'object',id,entries},estimate,Math.max(1,entries.length));
  }
- flush();return {format:'idb-graph',version:1,value:rootValue,recordCount};
+ yield* flush();
+ return {format:'idb-graph',version:1,value:rootValue,recordCount};
+}
+
+export function encodeIdbValue(value:unknown,onRecord:(id:number,record:IdbGraphRecord)=>void):IdbGraphRoot{
+ const records=encodeIdbRecords(value);
+ let index=0;
+ for(let next=records.next();;next=records.next()){
+  if(next.done)return next.value;
+  onRecord(index++,next.value);
+ }
 }
 
 /** Lookup must contain every emitted record. References, cycles, holes and undefined are preserved. */
