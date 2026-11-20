@@ -116,7 +116,7 @@ try{
    w.getSessionEditor(w.useWorkspaceStore.getState().activeId).getState().setComposerText('冲突草稿');
    await w.flushWorkspace();
   });
-  assert.match(w.useWorkspaceStore.getState().error,/另一个标签页/);
+  assert.match(w.useWorkspaceStore.getState().error,/会话版本冲突，本页自动保存已暂停。/);
   for(const kind of ['asset','scene']){
    const ui=render(React.createElement(ProjectLibrary,{kind,onOpen:()=>{throw Error('must not open');},onManage:()=>{}}));
    await waitFor(()=>assert.ok(ui.container.querySelector('.resource-tile')));
@@ -126,11 +126,11 @@ try{
    assert.equal(detail().querySelector('.resource-detail-body .resource-detail-actions'),null);
    for(const name of [kind==='asset'?'编辑资产':'打开场景','编辑信息','发布至团队']){
     if(kind==='asset'&&name!=='编辑资产'){fireEvent.click(within(detail()).getByRole('button',{name:'更多操作'}));await waitFor(()=>assert.ok(ui.getByRole('menuitem',{name,exact:true})));fireEvent.click(ui.getByRole('menuitem',{name,exact:true}));}else fireEvent.click(within(detail()).getByRole('button',{name,exact:true}));
-    await waitFor(()=>assert.match(within(detail()).queryByRole('alert')?.textContent??'',/关闭其他标签页.*刷新/));
+    await waitFor(()=>assert.match(within(detail()).queryByRole('alert')?.textContent??'',/会话版本冲突，本页自动保存已暂停。 请先下载本页备份，再刷新读取本机已保存的会话。如有其他工作台标签页，请先关闭其余标签页。/));
     assert.equal(ui.queryByRole('button',{name:'登录授权'}),null);
    }
    fireEvent.click(ui.getByRole('button',{name:`新建${kind==='asset'?'资产':'场景'}`,exact:true}));
-   await waitFor(()=>assert.match(ui.getAllByRole('alert')[0].textContent,/关闭其他标签页.*刷新/));
+   await waitFor(()=>assert.match(ui.getAllByRole('alert')[0].textContent,/会话版本冲突，本页自动保存已暂停。 请先下载本页备份，再刷新读取本机已保存的会话。如有其他工作台标签页，请先关闭其余标签页。/));
    cleanup();
   }
  });
