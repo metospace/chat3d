@@ -1,9 +1,12 @@
 import type { Geometry, SceneDocument, SceneNode } from '../domain/types';
 import type { ObjectBlueprint } from '../domain/objectBlueprint';
 
+/** Any closeup multi-feature reference plan needs the independent silhouette comparison.
+ * The declared geometryApproach is a binding detail, not an escape hatch: complex products
+ * (vehicles, appliances) are inherently multi-part, so requiring a mesh-declared form let
+ * the model skip the comparison by declaring 'assembly' or 'primitive' and build boxes. */
 export function needsReferenceSilhouette(plan: ObjectBlueprint, imageCount: number): boolean {
-  return imageCount >= 2 && plan.detailLevel === 'closeup' && plan.features.length >= 4 &&
-    plan.features.some(feature => feature.role === 'form' && feature.geometryApproach === 'mesh');
+  return imageCount >= 2 && plan.detailLevel === 'closeup' && plan.features.length >= 4;
 }
 
 /** Opposite orthographic directions still show the same projection axes. */
