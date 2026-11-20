@@ -23,7 +23,7 @@ try{
  assert.equal(opened,1);assert.equal(w.useWorkspaceStore.getState().activeId,history);assert.equal(w.getSessionEditor(current).getState().composerText,'不要丢失这条草稿');
  console.log('PASS explicit project entry switches only the selected task and preserves the previous draft');
  const {instructionContract,referenceReconstructionContract}=await server.ssrLoadModule('/src/ai/instructionContract.ts');
- assert.match(instructionContract({single:true,selectionOnly:true}),/JSON对象的summary字段/);assert.match(instructionContract({selectionOnly:true}),/仅选中对象/);assert.match(referenceReconstructionContract(),/不同视角/);assert.match(referenceReconstructionContract(),/任务中断/);
+ assert.match(instructionContract({single:true,selectionOnly:true}),/JSON对象的summary字段/);assert.match(instructionContract({selectionOnly:true}),/仅选中对象/);assert.match(referenceReconstructionContract(),/最能看清的方向/);assert.match(referenceReconstructionContract(),/任务中断/);
  console.log('PASS shared instruction contracts preserve scope, preview authorization and reference review distinctions');
  await w.flushWorkspace();
 }finally{cleanup();await server.close();dom.window.close();}

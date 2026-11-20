@@ -1,8 +1,8 @@
 import {isTauri} from '@tauri-apps/api/core';
 import {DESKTOP_DIAGNOSTIC_BYTES,downloadDiagnosticBlob,downloadJson} from '../util/downloadJson';
 import {RequirementList} from './RequirementList';
-import {DiagnosticExportLimitError,prepareDiagnosticExport} from '../util/diagnosticExport';
-import {runDiagnostics} from '../domain/runDiagnostics';
+import {DiagnosticExportLimitError,prepareDiagnosticExport,type DiagnosticExportResult} from '../util/diagnosticExport';
+import {runDiagnostics,runSummaries} from '../domain/runDiagnostics';
 import {sanitizeDiagnostic} from '../ai/runTraceLog';
 import {conversationController} from '../runtime/conversationController';
 import type {ActivityTiming} from '../ai/modelingAgent';
@@ -52,22 +52,27 @@ export function TaskPanel({onConversation,editor}:{onConversation:()=>void;edito
  else title='还没有建模任务';
  const next=busy?'正在继续处理，可返回对话暂存补充要求或停止。':retainedStop?STOP_PREVIEW_NEXT:pending?(pendingBatch?.taskStatus==='partial'?'当前任务尚未完成，可继续处理剩余问题；也可保留或放弃阶段结果。':'检查模型后选择应用或放弃。应用不等于质量验收通过。'):unchangedStop?'可回到对话恢复本轮输入；不会自动继续生成。':aiStatus==='error'?'回到对话查看提示，确认后再继续。不会自动重试。':'可以继续提出修改要求，或保存当前模型。';
  const cancelDiagnosticExport=()=>{exportController.current?.abort();exportController.current=null;setPreparing(false);setExporting(false);setExportNotice('已取消诊断准备；模型任务不受影响。');};
+ const buildLightDiagnostic=()=>{
+  const state=targetEditor.getState();
+  const activity=state.lastRun??latest?.activity??null;
+  const timings=activity?.timings??[];
+  const diagnostic=runDiagnostics(state.aiStatus,activity&&{
+   ...activity,timings:timings.slice(-200),parallelRuns:activity.parallelRuns?.slice(-16),
+  },state.aiError??failureTiming?.detail?.slice(0,512)??null);
+  // Per-run digests keep every task's duration, rounds and token totals visible even
+  // when the scene is too large for the full export.
+  return {...diagnostic,
+   scene:{revision:state.doc.revision,nodes:state.doc.nodes.length},
+   draft:state.pendingResult?{revision:state.pendingResult.doc.revision,nodes:state.pendingResult.doc.nodes.length}:null,
+   timingCount:timings.length,
+   runSummaries:runSummaries(state.messages),
+  };
+ };
  const exportLightDiagnostics=async()=>{
   setExporting(true);
   setDiagnosticSummary('');
   try{
-   const state=targetEditor.getState();
-   const activity=state.lastRun??latest?.activity??null;
-   const timings=activity?.timings??[];
-   const diagnostic=runDiagnostics(state.aiStatus,activity&&{
-    ...activity,timings:timings.slice(-200),parallelRuns:activity.parallelRuns?.slice(-16),
-   },state.aiError??failureTiming?.detail?.slice(0,512)??null);
-   const saved=await downloadJson(JSON.stringify({
-    ...diagnostic,
-    scene:{revision:state.doc.revision,nodes:state.doc.nodes.length},
-    draft:state.pendingResult?{revision:state.pendingResult.doc.revision,nodes:state.pendingResult.doc.nodes.length}:null,
-    timingCount:timings.length,
-   }),'diagnostics');
+   const saved=await downloadJson(JSON.stringify(buildLightDiagnostic()),'diagnostics');
    setExportNotice(saved);
   }catch(error){
    setExportNotice('轻量诊断下载失败：'+String(error));
@@ -82,10 +87,22 @@ export function TaskPanel({onConversation,editor}:{onConversation:()=>void;edito
    const state=targetEditor.getState();
    // Pick only task data: never clone Zustand actions, config, or unrelated UI state.
    const snapshot={aiStatus:state.aiStatus,lastRun:state.lastRun,aiError:state.aiError,messages:state.messages,doc:state.doc,pendingBatch:state.pendingBatch,pendingResult:state.pendingResult,past:state.past,future:state.future,diagnosticApiKey:state.aiConfig?.apiKey};
-   const result=await prepareDiagnosticExport(snapshot,conversationController(targetEditor).getDiagnosticEntries(),{
-    signal:controller.signal,maxFileBytes:isTauri()?DESKTOP_DIAGNOSTIC_BYTES:undefined,
-    onProgress:message=>{if(exportController.current===controller)setExportNotice(message);},
-   });
+   let result:DiagnosticExportResult;
+   try{
+    result=await prepareDiagnosticExport(snapshot,conversationController(targetEditor).getDiagnosticEntries(),{
+     signal:controller.signal,maxFileBytes:isTauri()?DESKTOP_DIAGNOSTIC_BYTES:undefined,
+     onProgress:message=>{if(exportController.current===controller)setExportNotice(message);},
+    });
+   }catch(error){
+    // The scene dominates export size. Fall back to the bounded digest instead of
+    // leaving the user without any diagnostic file.
+    if(error instanceof DiagnosticExportLimitError&&!controller.signal.aborted){
+     const saved=await downloadJson(JSON.stringify({...buildLightDiagnostic(),exportFallback:'完整记录超过大小限制；本文件包含每轮任务摘要与最近模型计时，不含场景与完整消息。'}),'diagnostics');
+     if(exportController.current===controller)setExportNotice(saved+'（完整记录过大，已自动改为轻量记录，含每轮任务摘要）');
+     return;
+    }
+    throw error;
+   }
    if(controller.signal.aborted)return;
    setPreparing(false);setDiagnosticSummary(result.summary);setExportNotice('正在发起保存…');
    const notice=await downloadDiagnosticBlob(result.blob);
@@ -115,7 +132,7 @@ export function TaskPanel({onConversation,editor}:{onConversation:()=>void;edito
  {!!runs.length&&<details className="customer-section"><summary>历史任务 · {runs.length} 次</summary>{runs.map(m=><details className="customer-history" key={m.id}><summary>{customerText(m.text,'建模请求').slice(0,90)}</summary><RunTrace run={m.run!} now={now}/></details>)}</details>}
  <details className="customer-section" onToggle={event=>{if(!event.currentTarget.open&&preparing&&exportController.current)cancelDiagnosticExport();}}>
   <summary>问题排查</summary>
-  <p className="task-footnote">轻量记录包含任务状态、工具耗时和错误类型。完整记录还包含对话、模型请求、参考图和场景，请确认内容后再分享。</p>
+  <p className="task-footnote">轻量记录包含任务状态、工具耗时、错误类型和每次任务的轮次/耗时/用量摘要。完整记录还包含对话、模型请求、参考图和场景，请确认内容后再分享；记录过大时会自动改为轻量记录并保留任务摘要。</p>
   <div className="customer-diagnostic-actions">
    <button className="customer-diagnostics" disabled={exporting} onClick={()=>void exportLightDiagnostics()}>下载轻量诊断记录</button>
    <button className="customer-diagnostics" disabled={exporting} onClick={()=>void exportDiagnostics()}>{preparing?'正在准备…':'下载完整诊断记录'}</button>

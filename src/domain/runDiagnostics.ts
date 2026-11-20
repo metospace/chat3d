@@ -46,6 +46,51 @@ export function runDiagnostics(status:string,activity:AgentActivity|null,error:s
   }:null,
  };
 }
+export interface RunSummary {
+ startedAt:number;endedAt?:number;status:string;mode?:string;outcome?:string;phase?:string;
+ turns?:number;toolCalls?:number;inputTokens?:number;outputTokens?:number;usageIncomplete?:boolean;
+ modelRounds:number;modelSeconds:number;toolSeconds:number;firstModelAt?:number;lastModelAt?:number;
+ title:string;error?:string;
+}
+const RUN_SUMMARY_LIMIT=50;
+const summaryText=(value:unknown,max=160)=>typeof value==='string'?value.slice(0,max):undefined;
+/** Per-run digests survive even when the full scene export is too large to build.
+ * Sourced from message run records, which persist with the session independent of lastRun. */
+export function runSummaries(messages:EditorState['messages']):RunSummary[]{
+ const output:RunSummary[]=[];
+ for(const message of messages){
+  const run=message.run;
+  if(!run)continue;
+  const activity=run.activity;
+  const timings=activity&&Array.isArray(activity.timings)?activity.timings:[];
+  let modelSeconds=0,toolSeconds=0,modelRounds=0,firstModelAt:number|undefined,lastModelAt:number|undefined;
+  for(const timing of timings){
+   if(timing.kind!=='model'||typeof timing.startedAt!=='number')continue;
+   modelRounds++;
+   if(firstModelAt===undefined||timing.startedAt<firstModelAt)firstModelAt=timing.startedAt;
+   const end=typeof timing.endedAt==='number'?timing.endedAt:undefined;
+   if(end!==undefined){modelSeconds+=Math.max(0,end-timing.startedAt)/1000;if(lastModelAt===undefined||end>lastModelAt)lastModelAt=end;}
+  }
+  for(const timing of timings){
+   if(timing.kind!=='tool'||typeof timing.startedAt!=='number'||typeof timing.endedAt!=='number')continue;
+   toolSeconds+=Math.max(0,timing.endedAt-timing.startedAt)/1000;
+  }
+  output.push({
+   startedAt:typeof run.startedAt==='number'?run.startedAt:message.createdAt,
+   endedAt:run.endedAt,status:run.status,mode:run.mode,
+   outcome:summaryText(activity?.outcome,30),phase:summaryText(activity?.phase,20),
+   turns:finite(activity?.turn),toolCalls:finite(activity?.toolCalls),
+   inputTokens:finite(activity?.inputTokens),outputTokens:finite(activity?.outputTokens),
+   usageIncomplete:activity?.usageIncomplete===true||undefined,
+   modelRounds,modelSeconds:Math.round(modelSeconds*10)/10,toolSeconds:Math.round(toolSeconds*10)/10,
+   firstModelAt,lastModelAt,
+   title:summaryText(activity?.title,120)??summaryText(message.text,120)??'建模请求',
+   error:summaryText(message.error,200),
+  });
+  if(output.length>=RUN_SUMMARY_LIMIT)break;
+ }
+ return output;
+}
 
 export type FullDiagnosticsSnapshot=Pick<EditorState,'aiStatus'|'lastRun'|'aiError'|'messages'|'doc'|'pendingBatch'|'pendingResult'|'past'|'future'|'aiConfig'>;
 

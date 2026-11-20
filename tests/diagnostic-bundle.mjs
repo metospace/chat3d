@@ -3,7 +3,7 @@ import {createServer} from 'vite';
 const server=await createServer({server:{middlewareMode:true},appType:'custom'});
 let passed=0;const check=(name,fn)=>{fn();passed++;console.log('PASS '+name);};
 try{
- const {fullRunDiagnostics,expandDiagnosticBundle}=await server.ssrLoadModule('/src/domain/runDiagnostics.ts');
+ const {fullRunDiagnostics,expandDiagnosticBundle,runSummaries}=await server.ssrLoadModule('/src/domain/runDiagnostics.ts');
  const roundtrip=snapshot=>{const bundle=JSON.parse(JSON.stringify(fullRunDiagnostics(snapshot)));return {bundle,data:expandDiagnosticBundle(bundle)};};
  check('geometry, images, prompts and request history are interned exactly once',()=>{
   const positions=Array.from({length:4096},(_,i)=>i/17),image='data:image/png;base64,'+'QUJD'.repeat(4096),system='shared system prompt '.repeat(500);
@@ -67,6 +67,31 @@ try{
  check('expansion rejects missing and cyclic external artifact references deterministically',()=>{
   const base={format:'chat3d-diagnostics-v2',data:{$diagnosticRef:'a'},artifacts:{},omissions:[],stats:{}};
   assert.throws(()=>expandDiagnosticBundle(base),/Missing diagnostic artifact/);assert.throws(()=>expandDiagnosticBundle({...base,artifacts:{a:{$diagnosticRef:'a'}}}),/Cyclic diagnostic artifact/);
+ });
+ check('run summaries expose per-task duration, rounds and tokens without run activity bloat',()=>{
+  const timing=(id,kind,startedAt,endedAt,extra={})=>({id,kind,label:id,startedAt,endedAt,...extra});
+  const activity={title:'参考图建模',turn:8,toolCalls:23,inputTokens:90000,outputTokens:4200,usageReported:true,lastEventAt:1000,plan:[],events:[],timings:[
+   timing('model-1','model',1000,11000),timing('tool-1','tool',11000,16000,{toolName:'capture_view'}),
+   timing('model-2','model',16000,26000),timing('tool-2','tool',26000,31000,{toolName:'edit_scene'}),
+  ],outcome:'partial',phase:'building'};
+  const messages=[
+   {id:'u1',role:'user',text:'按参考图建模',createdAt:900},
+   {id:'a1',role:'assistant',text:'阶段草稿已保留',createdAt:950,run:{startedAt:900,endedAt:31000,status:'preview',mode:'pi',activity}},
+   {id:'u2',role:'user',text:'继续',createdAt:50000},
+   {id:'a2',role:'assistant',text:'本轮未修改场景',createdAt:50000,run:{startedAt:50000,endedAt:62800,status:'completed',mode:'pi',activity:{...activity,timings:[timing('model-1','model',50000,62800)],outcome:'answered'}}},
+  ];
+  const summaries=runSummaries(messages);
+  assert.equal(summaries.length,2);
+  assert.equal(summaries[0].startedAt,900);assert.equal(summaries[0].endedAt,31000);
+  assert.equal(summaries[0].modelRounds,2);assert.equal(summaries[0].modelSeconds,20);
+  assert.equal(summaries[0].toolSeconds,10);assert.equal(summaries[0].outcome,'partial');
+  assert.equal(summaries[0].inputTokens,90000);assert.equal(summaries[0].outputTokens,4200);
+  assert.equal(summaries[0].firstModelAt,1000);assert.equal(summaries[0].lastModelAt,26000);
+  assert.equal(summaries[1].modelRounds,1);assert.equal(summaries[1].outcome,'answered');
+  // Messages without run records are skipped; malformed timings cannot crash the digest.
+  assert.equal(runSummaries([{id:'x',role:'user',text:'无运行记录',createdAt:1}]).length,0);
+  const broken=runSummaries([{id:'b',role:'assistant',text:'t',createdAt:1,run:{startedAt:'bad',status:'failed',activity:{timings:[{id:'m',kind:'model',startedAt:'x',endedAt:null},{id:'t',kind:'tool',startedAt:1}]}}}]);
+  assert.equal(broken.length,1);assert.equal(broken[0].modelRounds,0);assert.equal(broken[0].startedAt,1);
  });
  console.log(passed+' diagnostic bundle checks passed');
 }finally{await server.close();}
